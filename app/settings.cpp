@@ -106,11 +106,15 @@ double loadBest(const std::string& path) {
     json file = readJson(path);
     // Files from before splits were dropped hold the time per line, ending with the finish.
     std::vector<double> splits = get(file, "splits", std::vector<double>{});
-    return get(file, "seconds", splits.empty() ? 0.0 : splits.back());
+    return get(file, "score", get(file, "seconds", splits.empty() ? 0.0 : splits.back()));
 }
 
 void saveBest(double seconds, const std::string& path) {
     writeJson({{"seconds", seconds}}, path);
+}
+
+void saveBestScore(int score, const std::string& path) {
+    writeJson({{"score", score}}, path);
 }
 
 std::string rowLabel(int row) {

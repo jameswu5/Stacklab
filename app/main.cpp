@@ -57,6 +57,15 @@ void restart(App& app, uint64_t timeNs) {
     app.play.restart(app.settings.profile().handling, static_cast<uint32_t>(SDL_GetPerformanceCounter()), timeNs + kCountdownNs);
 }
 
+bool editing(const App& app) { return app.screen == Screen::Play && app.play.mode->editable; }
+
+// The left button paints garbage, and any other erases.
+void paintAt(App& app, const Ui& ui, float x, float y, SDL_MouseButtonFlags buttons) {
+    int cellX, cellY;
+    if (buttons == 0 || !ui.boardCellAt(x, y, cellX, cellY)) return;
+    app.play.paint(cellX, cellY, buttons & SDL_BUTTON_LMASK ? core::Piece::Garbage : core::Piece::None);
+}
+
 void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
     if (!key.down) return;
     int rows = kModeCount + 1;
@@ -70,7 +79,7 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
             } else {
                 const Mode& mode = kModes[app.menuRow];
                 app.play.mode = &mode;
-                app.play.bestPath = app.prefPath + mode.bestFile;
+                app.play.bestPath = mode.bestFile ? app.prefPath + mode.bestFile : "";
                 app.play.best = app.bests[app.menuRow];
                 app.screen = Screen::Play;
                 restart(app, key.timestamp);
@@ -197,7 +206,8 @@ int main(int, char**) {
     SDL_free(prefPath);
     app.settingsPath = app.prefPath + "settings.json";
     app.settings = loadSettings(app.settingsPath);
-    for (int i = 0; i < kModeCount; i++) app.bests[i] = loadBest(app.prefPath + kModes[i].bestFile);
+    for (int i = 0; i < kModeCount; i++)
+        if (kModes[i].bestFile) app.bests[i] = loadBest(app.prefPath + kModes[i].bestFile);
     applyBinds(app);
     applyPresentMode(app);
 
@@ -219,6 +229,16 @@ int main(int, char**) {
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                     SDL_ConvertEventToRenderCoordinates(app.renderer, &event);
                     if (ui.toggleHit(event.button.x, event.button.y)) app.settings.dark = !app.settings.dark;
+                    if (editing(app)) {
+                        int slot = ui.queueSlotAt(event.button.x, event.button.y);
+                        if (slot >= 0) app.play.cycleQueue(slot);
+                        if (ui.holdHit(event.button.x, event.button.y)) app.play.cycleHold();
+                        paintAt(app, ui, event.button.x, event.button.y, SDL_BUTTON_MASK(event.button.button));
+                    }
+                    break;
+                case SDL_EVENT_MOUSE_MOTION:
+                    SDL_ConvertEventToRenderCoordinates(app.renderer, &event);
+                    if (editing(app)) paintAt(app, ui, event.motion.x, event.motion.y, event.motion.state);
                     break;
                 default: break;
             }
