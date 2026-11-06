@@ -108,6 +108,15 @@ constexpr int kTCorners[4][4] = {{-1, -1, 3, 0}, {1, -1, 0, 1}, {1, 1, 1, 2}, {-
 
 int row(double y) { return static_cast<int>(std::floor(y)); }
 
+// Indexed by Spin, then lines. TETR.IO's solo table, from tetris.wiki/TETR.IO.
+// ponytail: no replay has a mini clearing lines or a spin quad, so those rows are unconfirmed; correct them from a replay that has one
+constexpr int kClearScores[3][5] = {
+    {0, 100, 300, 500, 800},
+    {100, 200, 400, 800, 1600},
+    {400, 800, 1200, 1600, 2600},
+};
+constexpr int kPcScore = 3500;
+
 }  // namespace
 
 std::array<Cell, 4> Falling::cells() const {
@@ -177,6 +186,24 @@ Game::Game(const Ruleset& rules, const Handling& handling, uint32_t seed)
     nextPiece(false);
 }
 
+// Single-player setup, not TETR.IO's incoming garbage (phase 6). Its RNG draws
+// leave the bag alone, so a seed gives the same pieces with or without this.
+void Game::fillGarbage(int rows, double messiness) {
+    int hole = static_cast<int>(std::floor(garbageRng_.nextFloat() * kBoardWidth));
+    for (int y = 0; y < rows; y++) {
+        if (y > 0 && garbageRng_.nextFloat() < messiness) {
+            const int column = static_cast<int>(std::floor(garbageRng_.nextFloat() * (kBoardWidth - 1)));
+            hole = column < hole ? column : column + 1;  // skips the current hole, so it always moves
+        }
+        for (int x = 0; x < kBoardWidth; x++) board.at(x, y) = x == hole ? Piece::None : Piece::Garbage;
+    }
+}
+
+void Game::respawn(Piece piece) {
+    toppedOut = false;
+    spawn(piece, true);
+}
+
 bool Game::fits(int rot, int x, int y) const {
     const auto& shape = kShapes[static_cast<int>(falling.piece)][rot];
     for (const auto& block : shape) {
@@ -235,10 +262,7 @@ void Game::spawn(Piece piece, bool isHold) {
         return;
     }
     if (irs != 0) rotate(irs);
-    if (is20G()) {
-        while (fallBy(1)) {
-        }
-    }
+    if (is20G()) sink(softDropHeld_ ? 1 : 0);
 }
 
 // True when the spawn is blocked. After a clear, clutch may lift the piece free.
@@ -362,6 +386,13 @@ bool Game::fallBy(double amount) {
     return true;
 }
 
+void Game::sink(int pointsPerRow) {
+    const int from = row(falling.y);
+    while (fallBy(1)) {
+    }
+    stats.score += pointsPerRow * (from - row(falling.y));
+}
+
 void Game::fall(double delta) {
     if (safeLock_ > 0) safeLock_--;
 
@@ -385,7 +416,11 @@ void Game::fall(double delta) {
     }
 
     for (double left = drop; left > 0; left -= std::min(1.0, left)) {
-        if (fallBy(std::min(1.0, left))) continue;
+        const int from = row(falling.y);
+        if (fallBy(std::min(1.0, left))) {
+            if (softDropHeld_) stats.score += from - row(falling.y);
+            continue;
+        }
         falling.locking += delta;
         if (falling.locking > rules.lockTime || forceLock_ || shouldLock()) {
             if (handling.safelock) safeLock_ = 7;
@@ -464,7 +499,13 @@ void Game::lock() {
     if (pc) result.sends[4] = roundAttack(rules.pcGarbage * garbageMultiplier_);
 
     for (int send : result.sends) stats.attack += send;
+    stats.garbageCleared += garbageCleared;
     lastWasClear_ = lines > 0;
+
+    int points = kClearScores[static_cast<int>(lastSpin_)][lines];
+    if (lines > 0 && (spun || lines >= 4) && stats.b2b > 0) points = points * 3 / 2;
+    if (stats.combo > 0) points += 50 * stats.combo;
+    if (pc) points += kPcScore;
 
     nextPiece(false);
     lastSpin_ = Spin::None;
@@ -472,6 +513,7 @@ void Game::lock() {
     stats.pieces++;
     stats.lines += lines;
     if (rules.levels) gainLevels(lines);
+    stats.score += points * stats.level;
     result.b2b = stats.b2b;
     result.combo = stats.combo;
     locks_.push_back(result);
@@ -506,10 +548,7 @@ void Game::shift() {
         falling.x += lastShift_;
         if (falling.lockResets < 31) falling.lockResets++;
         hitWall_ = false;
-        if (is20G()) {
-            while (fallBy(1)) {
-            }
-        }
+        if (is20G()) sink(softDropHeld_ ? 1 : 0);
         if (!shouldLock()) falling.locking = 0;
     } else {
         hitWall_ = true;
@@ -568,8 +607,7 @@ void Game::keyDown(const InputEvent& e) {
             break;
         case Action::HardDrop:
             if (safeLock_ != 0) break;
-            while (fallBy(1)) {
-            }
+            sink(2);
             lock();
             break;
         case Action::Hold:

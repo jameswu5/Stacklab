@@ -476,6 +476,104 @@ static void testLevels() {
     assert(near(off.falling.y, 22.02));
 }
 
+static void testScore() {
+    // Soft drop is 1 per row, including a sink at 20G: 21 down, then 5 off the ledge.
+    Game s(Ruleset{}, Handling{}, 1);
+    press(s, Action::SoftDrop);
+    assert(s.stats.score == 21);
+    for (int y = 0; y < 5; y++) s.board.at(3, y) = Piece::Garbage;
+    place(s, Piece::O, 0, 3, 6.5);
+    tap(s, Action::Right);
+    assert(s.falling.x == 4 && s.stats.score == 26);
+
+    // A quad drops 7 rows at 2 each. The second has B2B on the clear but not the combo.
+    Game g(Ruleset{}, Handling{}, 1);
+    quad(g, 1);
+    assert(g.stats.score == 800 + 14);
+    quad(g, 1);
+    assert(g.stats.score == 814 + 1200 + 50 + 14);
+
+    // A T-spin double with no drop.
+    Game t(Ruleset{}, Handling{}, 1);
+    fillExcept(t, 2, {{1, 0}, {0, 1}, {1, 1}, {2, 1}});
+    t.board.at(0, 2) = Piece::Garbage;
+    place(t, Piece::T, 1, 0, 2.5);
+    const InputEvent e[] = {{Action::RotateCW, true, 0}, {Action::HardDrop, true, 0}};
+    t.tick(e);
+    assert(t.stats.score == 1200);
+
+    // A perfect clear adds its bonus, and level is the one after this clear's lines.
+    Game pc(Ruleset{}, Handling{}, 1);
+    quad(pc);
+    assert(pc.stats.score == 800 + 3500 + 14);
+
+    Ruleset rules;
+    rules.levels = true;
+    rules.levelSpeed = 0.42;
+    Game level(rules, Handling{}, 1);
+    quad(level, 1);
+    assert(level.stats.level == 2 && level.stats.score == 800 * 2 + 14);
+}
+
+static void testFillGarbage() {
+    const auto holeIn = [](const Game& g, int y) {
+        int hole = -1;
+        for (int x = 0; x < kBoardWidth; x++) {
+            if (g.board.at(x, y) != Piece::None) continue;
+            assert(hole == -1);
+            hole = x;
+        }
+        assert(hole != -1);
+        return hole;
+    };
+
+    Game same(Ruleset{}, Handling{}, 5);
+    same.fillGarbage(kVisibleHeight, 0);
+    for (int y = 0; y < kVisibleHeight; y++) assert(holeIn(same, y) == holeIn(same, 0));
+    assert(same.board.at(0, kVisibleHeight) == Piece::None);
+    for (const Cell& c : same.falling.cells()) assert(same.board.at(c.x, c.y) == Piece::None);
+
+    Game moving(Ruleset{}, Handling{}, 5);
+    moving.fillGarbage(kVisibleHeight, 1);
+    for (int y = 1; y < kVisibleHeight; y++) assert(holeIn(moving, y) != holeIn(moving, y - 1));
+
+    // The seed decides the board, and the bag is what it would have been anyway.
+    Game copy(Ruleset{}, Handling{}, 5);
+    copy.fillGarbage(kVisibleHeight, 1);
+    assert(copy.board.cells == moving.board.cells);
+    Game other(Ruleset{}, Handling{}, 6);
+    other.fillGarbage(kVisibleHeight, 1);
+    assert(other.board.cells != moving.board.cells);
+    assert(moving.queue == Game(Ruleset{}, Handling{}, 5).queue);
+
+    // Only rows holding garbage count toward a dig goal.
+    Game dig(Ruleset{}, Handling{}, 5);
+    dig.fillGarbage(2, 0);
+    place(dig, Piece::I, 1, holeIn(dig, 0) - 2, 10.5);
+    tap(dig, Action::HardDrop);
+    assert(dig.stats.lines == 2 && dig.stats.garbageCleared == 2);
+    for (int x = 0; x < kBoardWidth; x++) dig.board.at(x, 8) = Piece::J;
+    place(dig, Piece::O, 0, 0, 12.5);
+    tap(dig, Action::HardDrop);
+    assert(dig.stats.lines == 3 && dig.stats.garbageCleared == 2);
+}
+
+static void testRespawn() {
+    Game g(Ruleset{}, Handling{}, 1);
+    g.queue[0] = Piece::T;
+    g.queue.resize(1);  // the bag tops the edited queue back up behind the T
+    g.board.at(4, 21) = Piece::Garbage;
+    g.respawn(Piece::I);
+    assert(g.toppedOut && g.falling.piece == Piece::I);
+
+    g.board = Board{};
+    g.respawn(Piece::I);
+    assert(!g.toppedOut && g.falling.x == 3 && near(g.falling.y, 22.04));
+    tap(g, Action::HardDrop);
+    assert(g.falling.piece == Piece::T);
+    assert(static_cast<int>(g.queue.size()) >= g.rules.previews);
+}
+
 static void testHold() {
     Game g(Ruleset{}, Handling{}, 1);
     tap(g, Action::Hold);
@@ -659,6 +757,9 @@ int main() {
     testAttackValue();
     testSends();
     testLevels();
+    testScore();
+    testFillGarbage();
+    testRespawn();
     testHold();
     testIrsIhs();
     testSafelock();
