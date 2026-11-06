@@ -6,12 +6,16 @@
 
 #include "core/game.h"
 
+// Which rows a mode's stats card shows, as flags.
+enum Stat { StatLines = 1, StatPieces = 2, StatPPS = 4, StatKPP = 8, StatAPM = 16, StatAPP = 32, StatFinesse = 64 };
+
 struct Mode {
     const char* name;   // on the menu and in the top bar
     const char* blurb;  // under the name on the menu
     core::Ruleset rules;
     int goalLines = 0;               // reaching this many lines ends the run; 0 is no goal
     const char* bestFile = nullptr;  // holds the personal best, under the pref path; null keeps none
+    int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
     int timeLimitSeconds = 0;        // reaching this ends the run, and the best is then the highest score
     // Rows of garbage on the starting board. With these, only lines that held
     // garbage count toward the goal. Messiness is the chance a row's hole moves

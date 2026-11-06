@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <new>
 #include <string>
+#include <vector>
 
 #include "app/ui.h"
 #include "core/game.h"
@@ -68,6 +69,7 @@ core::Game sampleGame() {
     game.stats.lines = 22;
     game.stats.pieces = 67;
     game.stats.keys = 195;
+    game.stats.attack = 40;
     game.frame = 1288;
     return game;
 }
@@ -90,7 +92,7 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, nullptr});
+        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}});
         SDL_FlushRenderer(renderer);
         SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
         std::string path = std::string(argv[1]) + (dark ? "/dark.png" : "/light.png");
@@ -111,7 +113,7 @@ int main(int argc, char** argv) {
 
     core::Game fresh(core::Ruleset{}, core::Handling{}, 1);
     ui.beginFrame();
-    ui.drawPlay({&kModes[0], &fresh, 0, false, "Ready", nullptr});
+    ui.drawPlay({&kModes[0], &fresh, 0, false, "Ready", "", 0, {}});
     SDL_FlushRenderer(renderer);
     SDL_Surface* countdownPixels = SDL_RenderReadPixels(renderer, nullptr);
     SDL_SavePNG(countdownPixels, (std::string(argv[1]) + "/countdown.png").c_str());
@@ -128,11 +130,40 @@ int main(int argc, char** argv) {
         SDL_DestroySurface(menuPixels);
     }
 
+    // A session in both themes: a topped out run, a new best, then the latest run.
+    core::Stats runStats = game.stats;
+    const std::vector<RunResult> history = {
+        {&kModes[0], 18.4, runStats, true, false},
+        {&kModes[0], 62.31, runStats, false, false},
+        {&kModes[0], 58.02, runStats, false, true},
+        {&kModes[0], 60.47, runStats, false, false},
+    };
+    for (bool dark : {false, true}) {
+        ui.dark = dark;
+        ui.beginFrame();
+        ui.drawPlay({&kModes[0], &game, 60.47, true, nullptr, "R to retry, Escape for the menu", 58.02, history});
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* resultsPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(resultsPixels, (std::string(argv[1]) + (dark ? "/results-dark.png" : "/results-light.png")).c_str());
+        SDL_DestroySurface(resultsPixels);
+    }
+
+    // A row that asks for every stat, so the card grows to fit them.
+    Mode allStats = kModes[0];
+    allStats.stats |= StatAPM | StatAPP;
+    ui.dark = false;
+    ui.beginFrame();
+    ui.drawPlay({&allStats, &game, game.seconds(), false, nullptr, "", 0, {}});
+    SDL_FlushRenderer(renderer);
+    SDL_Surface* statsPixels = SDL_RenderReadPixels(renderer, nullptr);
+    SDL_SavePNG(statsPixels, (std::string(argv[1]) + "/all-stats.png").c_str());
+    SDL_DestroySurface(statsPixels);
+
     auto draw = [&](bool dark) {
         ui.dark = dark;
         ui.beginFrame();
         game.frame++;
-        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, nullptr});
+        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}});
     };
     for (int i = 0; i < 10; i++) {
         draw(i % 2);

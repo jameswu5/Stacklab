@@ -85,6 +85,7 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 - **Ghost:** the piece colour at 42% opacity in light mode and 30% in dark mode.
 - **Toggle:** a pill with sun and moon icons, and a circular knob behind the active one.
 - **Menu:** the screen the app opens on. A centred card, 560 wide, with a row for each mode and one for Settings. Rows show the name (20, bold), a line of description and any personal best. Fixed keys: up, down and Enter.
+- **Results:** when a run ends, a card over the board (300 wide) shows the outcome, the time, PPS, KPP, APM, APP and the best. Retry works from it directly. The Next card becomes a Session card, listing this mode's ended runs this session, newest first. Retried or abandoned runs aren't listed, and history isn't saved.
 
 | Colour | Light | Dark |
 |---|---|---|
@@ -120,6 +121,7 @@ struct Mode {
     core::Ruleset rules;
     int goalLines;         // reaching this many lines ends the run
     const char* bestFile;  // holds the personal best, under the pref path
+    int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
 };
 ```
 

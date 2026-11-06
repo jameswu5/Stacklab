@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "app/play.h"
 #include "app/settings.h"
@@ -28,6 +29,7 @@ struct App {
     Screen screen = Screen::Menu;
     int menuRow = 0;  // a mode, or Settings after the last one
     std::array<double, kModeCount> bests{};
+    std::vector<RunResult> history;  // this session's ended runs; a retried run didn't end
     int selected = 0;
     bool capturing = false;
 
@@ -96,7 +98,6 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
     } else if (bind == BindMenu) {
         if (key.down) {
             app.screen = Screen::Menu;
-            app.bests[app.menuRow] = app.play.best;
             app.play.held.fill(0);
         }
     } else {
@@ -154,6 +155,13 @@ void handleSettingsKey(App& app, const SDL_KeyboardEvent& key) {
     }
 }
 
+void recordRun(App& app) {
+    const Play& play = app.play;
+    double& best = app.bests[app.menuRow];
+    app.history.push_back({play.mode, play.endSeconds, play.game.stats, play.game.toppedOut, play.best != best});
+    best = play.best;
+}
+
 void drawFrame(App& app, Ui& ui) {
     const Play& play = app.play;
     ui.dark = app.settings.dark;
@@ -163,10 +171,12 @@ void drawFrame(App& app, Ui& ui) {
     } else if (app.screen == Screen::Settings) {
         ui.drawSettings(app.settings, app.selected, app.capturing);
     } else {
-        const char* title = nullptr;
-        if (play.over) title = play.game.toppedOut ? "Topped out" : "Finished";
-        else if (!play.started) title = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
-        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, title, play.over ? "Press retry to go again" : nullptr});
+        const char* banner = nullptr;
+        std::string hint;
+        auto keyName = [&](Bind bind) { return rowValue(app.settings, static_cast<int>(RowBindFirst) + bind); };
+        if (play.over) hint = keyName(BindRetry) + " to retry, " + keyName(BindMenu) + " for the menu";
+        else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
+        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];
@@ -236,8 +246,11 @@ int main(int, char**) {
 
         if (app.screen == Screen::Play) {
             uint64_t now = SDL_GetTicksNS();
+            bool wasOver = app.play.over;
             app.play.stepTo(now);
             app.play.stepShown(now);
+            // The run has ended, so allocating here can't disturb play.
+            if (app.play.over && !wasOver) recordRun(app);
         }
         drawFrame(app, ui);
         SDL_RenderPresent(app.renderer);
