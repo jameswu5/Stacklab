@@ -98,6 +98,29 @@ static void testPieceOrder() {
     }
 }
 
+static void testNoSzo() {
+    Ruleset rules;
+    rules.noSzo = true;
+    const struct {
+        uint32_t seed;
+        const char* order;
+    } cases[] = {
+        {1, "JILSTZOTOLJSIZLISOTZJ"},           // O rotates to the back of its bag
+        {12345, "LOSTIJZLOZTISJOSTZJIL"},       // already legal, so unchanged
+        {2147483646, "IOLJTZSOSIZJLTOSZTIJL"},  // Z and S rotate back, later bags untouched
+    };
+    for (const auto& c : cases) {
+        Game g(rules, Handling{}, c.seed);
+        std::string seen(1, letter(g.falling.piece));
+        for (int i = 0; i < 20; i++) {
+            press(g, Action::HardDrop);
+            g.board = Board{};
+            seen += letter(g.falling.piece);
+        }
+        assert(seen == c.order);
+    }
+}
+
 static void testSpawnAndGhost() {
     Game g(Ruleset{}, Handling{}, 1);
     assert(g.falling.piece == Piece::O);
@@ -419,6 +442,40 @@ static void testSends() {
     assert(quad(b, 1).sends[3] == 5);
 }
 
+static void testLevels() {
+    Ruleset rules;
+    rules.levels = true;
+    rules.levelSpeed = 0.42;
+    rules.levelGBase = 0.65;
+
+    // Levels 1, 2 and 3 need ceil(2.1) = 3, ceil(4.2) = 5 and ceil(6.3) = 7 lines.
+    Game g(rules, Handling{}, 1);
+    assert(g.stats.level == 1);
+    run(g, 1);
+    assert(near(g.falling.y, 22.02));  // level 1 keeps rules.gravity
+
+    quad(g, 1);
+    assert(g.stats.level == 2 && g.stats.levelLines == 1);
+    const double y = g.falling.y;  // that tick already fell once, at the new gravity
+    assert(std::abs(y - (22.04 - 1 / (60 * (0.65 - 0.007)))) < 1e-6);
+
+    quad(g, 1);
+    assert(g.stats.level == 3 && g.stats.levelLines == 0);
+    assert(std::abs(g.falling.y - (22.04 - 1 / (60 * std::pow(0.65 - 2 * 0.007, 2)))) < 1e-6);
+
+    // One big clear can cross several levels.
+    Game big(rules, Handling{}, 1);
+    big.stats.levelLines = 8;
+    quad(big, 1);
+    assert(big.stats.level == 3 && big.stats.levelLines == 4);
+
+    // Off by default: gravity and the counters stay put.
+    Game off(Ruleset{}, Handling{}, 1);
+    quad(off, 1);
+    assert(off.stats.level == 1 && off.stats.levelLines == 0);
+    assert(near(off.falling.y, 22.02));
+}
+
 static void testHold() {
     Game g(Ruleset{}, Handling{}, 1);
     tap(g, Action::Hold);
@@ -591,6 +648,7 @@ static void testRandomPlay() {
 int main() {
     testRng();
     testPieceOrder();
+    testNoSzo();
     testSpawnAndGhost();
     testDasArr();
     testDcd();
@@ -600,6 +658,7 @@ int main() {
     testSpins();
     testAttackValue();
     testSends();
+    testLevels();
     testHold();
     testIrsIhs();
     testSafelock();

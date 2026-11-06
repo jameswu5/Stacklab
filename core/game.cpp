@@ -167,6 +167,13 @@ Game::Game(const Ruleset& rules, const Handling& handling, uint32_t seed)
       garbageMultiplier_(rules.garbageMultiplier) {
     queue.reserve(rules.previews + 8);
     locks_.reserve(8);
+    if (rules.noSzo) {
+        pushBag();
+        const auto first = std::find_if(queue.begin(), queue.end(), [](Piece p) {
+            return p != Piece::S && p != Piece::Z && p != Piece::O;
+        });
+        std::rotate(queue.begin(), first, queue.end());
+    }
     nextPiece(false);
 }
 
@@ -464,9 +471,26 @@ void Game::lock() {
 
     stats.pieces++;
     stats.lines += lines;
+    if (rules.levels) gainLevels(lines);
     result.b2b = stats.b2b;
     result.combo = stats.combo;
     locks_.push_back(result);
+}
+
+// Level 1 keeps rules.gravity: the replays pass with it and can't tell it from 1/60.
+void Game::gainLevels(int lines) {
+    stats.levelLines += lines;
+    const int startLevel = stats.level;
+    while (true) {
+        const int needed = std::max(1, static_cast<int>(std::ceil(5 * stats.level * rules.levelSpeed)));
+        if (stats.levelLines < needed) break;
+        stats.levelLines -= needed;
+        stats.level++;
+    }
+    if (stats.level == startLevel) return;
+    // ponytail: formula inferred from replays, not from any source; only its level curve is confirmed
+    const int n = stats.level - 1;
+    gravity_ = 1 / (60 * std::pow(rules.levelGBase - n * rules.levelGSpeed, n));
 }
 
 void Game::dcd() {

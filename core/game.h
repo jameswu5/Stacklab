@@ -53,6 +53,15 @@ struct Ruleset {
     bool allowHold = true;
     bool clutch = true;
     int previews = 5;
+    bool noSzo = false;  // the first bag can't start with S, Z or O
+
+    // Gravity that rises with level instead of with time. Off by default.
+    bool levels = false;
+    double levelSpeed = 1;
+    double levelGBase = 0.8;
+    // ponytail: inferred from 3 Blitz replays, which pass from 0.0069 to 0.0075 and fail at 0.0065 and 0.01; correct from a replay that pins it
+    double levelGSpeed = 0.007;
+
     SpinBonuses spinBonuses = SpinBonuses::AllMiniPlus;
 
     bool b2bChaining = true;
@@ -112,6 +121,8 @@ struct Stats {
     int attack = 0;
     int b2b = -1;
     int combo = -1;
+    int level = 1;
+    int levelLines = 0;  // lines toward the next level
 };
 
 // Park-Miller LCG, matching TETR.IO's piece order for a given seed.
@@ -173,6 +184,7 @@ private:
     bool fallBy(double amount);
     void fall(double delta);
     void lock();
+    void gainLevels(int lines);
     int roundAttack(double amount);
     void dcd();
     void shift();
