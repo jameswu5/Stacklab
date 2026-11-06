@@ -474,6 +474,7 @@ void Game::lock() {
     const double garbage = attackValue(lines, lastSpin_, std::max(stats.b2b, 0), std::max(stats.combo, 0), rules);
 
     LockResult result;
+    result.cells = falling.cells();
     result.piece = falling.piece;
     result.lines = lines;
     result.spin = lastSpin_;
