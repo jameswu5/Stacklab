@@ -106,6 +106,7 @@ struct Falling {
 
 struct LockResult {
     Piece piece = Piece::None;
+    std::array<Cell, 4> cells{};  // where it locked, before any lines cleared
     int lines = 0;
     Spin spin = Spin::None;
     bool perfectClear = false;
