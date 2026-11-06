@@ -62,7 +62,7 @@ void Play::stepTo(uint64_t nowNs) {
 
         int lines = std::min(game.stats.lines, kGoalLines);
         if (lines > splitLines) {
-            double now = game.seconds();
+            double now = lines == kGoalLines ? finishSeconds(game, due, locks, linesBefore) : game.seconds();
             for (int line = splitLines + 1; line <= lines; line++) splits[line] = now;
             splitLines = lines;
             if (best[kGoalLines] > 0) {
@@ -78,8 +78,7 @@ void Play::stepTo(uint64_t nowNs) {
         }
         if (lines == kGoalLines) {
             over = true;
-            endSeconds = finishSeconds(game, due, locks, linesBefore);
-            splits[kGoalLines] = endSeconds;
+            endSeconds = splits[kGoalLines];
             // The run has ended, so file work can't disturb play.
             if (best[kGoalLines] == 0 || splits[kGoalLines] < best[kGoalLines]) {
                 best = splits;

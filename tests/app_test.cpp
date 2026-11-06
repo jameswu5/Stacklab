@@ -242,6 +242,7 @@ void testPlayRun() {
         assert(finish.game.frame == 6);
         assert(std::abs(finish.seconds() - 5.25 / 60) < 1e-6);
         assert(finish.best[40] == finish.seconds());
+        assert(finish.splits[40] == finish.seconds());
     }
     std::filesystem::remove(path);
 }
