@@ -16,14 +16,18 @@ namespace {
 
 constexpr uint64_t kUncappedFrameNs = 1'000'000'000 / 480;  // with VSync off, how often to poll and draw
 
+enum class Screen { Menu, Play, Settings };
+
 struct App {
     Settings settings;
-    std::string settingsPath;
+    std::string prefPath, settingsPath;
     std::array<int, SDL_SCANCODE_COUNT> binds{};  // scancode to Bind, or -1
     SDL_Renderer* renderer = nullptr;
     Play play;
 
-    bool inSettings = false;
+    Screen screen = Screen::Menu;
+    int menuRow = 0;  // a mode, or Settings after the last one
+    std::array<double, kModeCount> bests{};
     int selected = 0;
     bool capturing = false;
 
@@ -51,6 +55,29 @@ void restart(App& app, uint64_t timeNs) {
     app.play.restart(app.settings.profile().handling, static_cast<uint32_t>(SDL_GetPerformanceCounter()), timeNs + kCountdownNs);
 }
 
+void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
+    if (!key.down) return;
+    int rows = kModeCount + 1;
+    switch (key.scancode) {
+        case SDL_SCANCODE_UP: app.menuRow = (app.menuRow + rows - 1) % rows; break;
+        case SDL_SCANCODE_DOWN: app.menuRow = (app.menuRow + 1) % rows; break;
+        case SDL_SCANCODE_RETURN:
+            if (key.repeat) break;
+            if (app.menuRow == kModeCount) {
+                app.screen = Screen::Settings;
+            } else {
+                const Mode& mode = kModes[app.menuRow];
+                app.play.mode = &mode;
+                app.play.bestPath = app.prefPath + mode.bestFile;
+                app.play.best = app.bests[app.menuRow];
+                app.screen = Screen::Play;
+                restart(app, key.timestamp);
+            }
+            break;
+        default: break;
+    }
+}
+
 void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
     if (key.repeat) return;
     int bind = app.binds[key.scancode];
@@ -59,7 +86,8 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
         if (key.down) restart(app, key.timestamp);
     } else if (bind == BindMenu) {
         if (key.down) {
-            app.inSettings = true;
+            app.screen = Screen::Menu;
+            app.bests[app.menuRow] = app.play.best;
             app.play.held.fill(0);
         }
     } else {
@@ -84,9 +112,8 @@ void handleSettingsKey(App& app, const SDL_KeyboardEvent& key) {
     switch (key.scancode) {
         case SDL_SCANCODE_ESCAPE:
             if (key.repeat) break;
-            app.inSettings = false;
+            app.screen = Screen::Menu;
             saveSettings(settings, app.settingsPath);
-            restart(app, key.timestamp);
             break;
         case SDL_SCANCODE_UP: app.selected = (app.selected + kRowCount - 1) % kRowCount; break;
         case SDL_SCANCODE_DOWN: app.selected = (app.selected + 1) % kRowCount; break;
@@ -122,13 +149,15 @@ void drawFrame(App& app, Ui& ui) {
     const Play& play = app.play;
     ui.dark = app.settings.dark;
     ui.beginFrame();
-    if (app.inSettings) {
+    if (app.screen == Screen::Menu) {
+        ui.drawMenu(app.menuRow, app.bests);
+    } else if (app.screen == Screen::Settings) {
         ui.drawSettings(app.settings, app.selected, app.capturing);
     } else {
         const char* title = nullptr;
         if (play.over) title = play.game.toppedOut ? "Topped out" : "Finished";
         else if (!play.started) title = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
-        ui.drawPlay({&play.shown, play.seconds(), play.over, title, play.over ? "Press retry to go again" : nullptr});
+        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, title, play.over ? "Press retry to go again" : nullptr});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];
@@ -154,17 +183,15 @@ int main(int, char**) {
     limitDrawableQueue(app.renderer);
 
     char* prefPath = SDL_GetPrefPath("Stacklab", "Stacklab");
-    std::string pref = prefPath ? prefPath : "";
+    app.prefPath = prefPath ? prefPath : "";
     SDL_free(prefPath);
-    app.settingsPath = pref + "settings.json";
-    app.play.bestPath = pref + "best-40l.json";
+    app.settingsPath = app.prefPath + "settings.json";
     app.settings = loadSettings(app.settingsPath);
-    app.play.best = loadBest(app.play.bestPath);
+    for (int i = 0; i < kModeCount; i++) app.bests[i] = loadBest(app.prefPath + kModes[i].bestFile);
     applyBinds(app);
     applyPresentMode(app);
 
     Ui ui(app.renderer, std::string(SDL_GetBasePath()) + "assets/fonts/");
-    restart(app, SDL_GetTicksNS());
     uint64_t frameStart = SDL_GetTicksNS(), worstWindowStart = frameStart;
 
     bool running = true;
@@ -175,7 +202,8 @@ int main(int, char**) {
                 case SDL_EVENT_QUIT: running = false; break;
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP:
-                    if (app.inSettings) handleSettingsKey(app, event.key);
+                    if (app.screen == Screen::Menu) handleMenuKey(app, event.key);
+                    else if (app.screen == Screen::Settings) handleSettingsKey(app, event.key);
                     else handlePlayKey(app, event.key);
                     break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -186,7 +214,7 @@ int main(int, char**) {
             }
         }
 
-        if (!app.inSettings) {
+        if (app.screen == Screen::Play) {
             uint64_t now = SDL_GetTicksNS();
             app.play.stepTo(now);
             app.play.stepShown(now);

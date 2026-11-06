@@ -40,6 +40,11 @@ struct FontSpec {
 // Same order as Ui::FontId.
 constexpr FontSpec kFontSpecs[] = {{2, 20}, {1, 14}, {1, 12}, {2, 44}, {0, 16}, {1, 15}, {0, 12}};
 
+void formatTime(char (&buffer)[32], double seconds) {
+    int hundredths = static_cast<int>(std::lround(seconds * 100));
+    std::snprintf(buffer, sizeof buffer, "%d:%02d.%02d", hundredths / 6000, hundredths / 100 % 60, hundredths % 100);
+}
+
 float clamp01(float value) { return std::clamp(value, 0.0f, 1.0f); }
 
 SDL_Texture* maskTexture(SDL_Renderer* renderer, SDL_Surface* surface) {
@@ -306,20 +311,42 @@ void Ui::statRow(int index, const char* name, const char* value) {
     text(FontValue, value, kLeftX + kColumnW - 20, top + 26, colors.text, Align::Right);
 }
 
+void Ui::drawMenu(int selected, std::span<const double> bests) {
+    const Palette& colors = palette();
+    topBar("Menu");
+    constexpr float width = 560, rowH = 76, x = (1440 - width) / 2;
+    float height = 12 + (kModeCount + 1) * rowH + 44;
+    float top = kRowY + (788 - height) / 2;
+    fill(x, top, width, height, colors.card, 24);
+    for (int row = 0; row <= kModeCount; row++) {
+        float y = top + 12 + row * rowH;
+        if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
+        bool isMode = row < kModeCount;
+        text(FontWord, isMode ? kModes[row].name : "Settings", x + 32, y + 34, colors.text);
+        text(FontRow, isMode ? kModes[row].blurb : "Handling, keys and display", x + 32, y + 58, colors.muted);
+        if (isMode && bests[row] > 0) {
+            char buffer[32];
+            formatTime(buffer, bests[row]);
+            text(FontLabel, "BEST", x + width - 32, y + 31, colors.muted, Align::Right, kLabelTracking);
+            text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
+        }
+    }
+    text(FontSmall, "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
+}
+
 void Ui::drawPlay(const PlayView& view) {
     const Palette& colors = palette();
     const core::Game& game = *view.game;
-    topBar("40 Lines");
+    topBar(view.mode->name);
 
     card(kLeftX, kRowY, kColumnW, 127, "HOLD");
     preview(game.hold, kLeftX + kColumnW / 2, kRowY + 77, kHoldCell);
 
     card(kLeftX, 215, kColumnW, 321, "TIME");
     char buffer[32];
-    int hundredths = static_cast<int>(std::lround(view.seconds * 100));
-    std::snprintf(buffer, sizeof buffer, "%d:%02d.%02d", hundredths / 6000, hundredths / 100 % 60, hundredths % 100);
+    formatTime(buffer, view.seconds);
     text(FontTime, buffer, kLeftX + 20, 303, colors.text, Align::Left, kTimeTracking);
-    std::snprintf(buffer, sizeof buffer, "%d / 40", game.stats.lines);
+    std::snprintf(buffer, sizeof buffer, "%d / %d", game.stats.lines, view.mode->goalLines);
     statRow(0, "Lines", buffer);
     std::snprintf(buffer, sizeof buffer, "%d", game.stats.pieces);
     statRow(1, "Pieces", buffer);
