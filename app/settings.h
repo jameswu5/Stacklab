@@ -53,7 +53,7 @@ Splits loadBest(const std::string& path);
 void saveBest(const Splits& splits, const std::string& path);
 
 // The settings screen is a flat list of rows.
-enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, kRowCount };
+enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowSafelock, RowIrs, RowIhs, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, kRowCount };
 
 std::string rowLabel(int row);
 std::string rowValue(const Settings& settings, int row);

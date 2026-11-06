@@ -8,6 +8,14 @@
 
 namespace {
 
+// The owner's 40L replays only differ from core's defaults here. They pass
+// tests/replay_parity with these rules, so re-check there if they change.
+core::Ruleset sprintRules() {
+    core::Ruleset rules;
+    rules.noSzo = true;
+    return rules;
+}
+
 // When the goal was reached: at the hard drop that caused the lock, so the
 // time isn't rounded to a whole tick, or at the end of the tick for a lock
 // that no input caused. Each hard drop in a tick causes one of its locks, in order.
@@ -28,7 +36,7 @@ double finishSeconds(const core::Game& game, std::span<const core::InputEvent> i
 }  // namespace
 
 void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t timeNs) {
-    game = core::Game(core::Ruleset{}, handling, seed);
+    game = core::Game(sprintRules(), handling, seed);
     shown = game;
     inputs.clear();
     startNs = timeNs;
@@ -37,13 +45,13 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t timeN
     splitLines = 0;
     std::snprintf(pace, sizeof pace, "-");
     paceAhead = false;
-    // Keys held through a retry carry over. Left and right start charged, with
-    // the most recently pressed one last. This is inferred from Triangle.js, not
-    // documented, so check it here if real replays disagree.
-    Bind firstMove = lastMove == BindLeft ? BindRight : BindLeft;
-    for (Bind bind : {firstMove, lastMove})
-        if (held[bind] > 0) inputs.push(static_cast<core::Action>(bind), true, timeNs, startNs, 0, true);
+    // Keys held through a retry carry over, with the most recently pressed move
+    // last so it sets direction. Replays show hoisted hold, 180 and moves, in that
+    // order. CW and CCW are assumed to match 180, and soft drop to carry unhoisted.
     if (held[BindSoftDrop] > 0) inputs.push(core::Action::SoftDrop, true, timeNs, startNs, 0);
+    Bind firstMove = lastMove == BindLeft ? BindRight : BindLeft;
+    for (Bind bind : {BindHold, BindCW, BindCCW, Bind180, firstMove, lastMove})
+        if (held[bind] > 0) inputs.push(static_cast<core::Action>(bind), true, timeNs, startNs, 0, true);
 }
 
 void Play::key(Bind action, bool down, uint64_t timeNs) {

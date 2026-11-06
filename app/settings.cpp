@@ -48,6 +48,9 @@ Profile profileFromJson(const json& value) {
     profile.handling.arr = get(handling, "arr", profile.handling.arr);
     profile.handling.sdf = get(handling, "sdf", profile.handling.sdf);
     profile.handling.dcd = get(handling, "dcd", profile.handling.dcd);
+    profile.handling.safelock = get(handling, "safelock", profile.handling.safelock);
+    profile.handling.irsHold = get(handling, "irs", std::string(profile.handling.irsHold ? "hold" : "tap")) == "hold";
+    profile.handling.ihsHold = get(handling, "ihs", std::string(profile.handling.ihsHold ? "hold" : "tap")) == "hold";
     json keys = get(value, "keys", json::object());
     for (int bind = 0; bind < kBindCount; bind++) {
         if (!keys.contains(kBindKeys[bind])) continue;
@@ -87,7 +90,7 @@ void saveSettings(const Settings& settings, const std::string& path) {
         const core::Handling& handling = profile.handling;
         profiles.push_back({
             {"name", profile.name},
-            {"handling", {{"das", handling.das}, {"arr", handling.arr}, {"sdf", handling.sdf}, {"dcd", handling.dcd}}},
+            {"handling", {{"das", handling.das}, {"arr", handling.arr}, {"sdf", handling.sdf}, {"dcd", handling.dcd}, {"safelock", handling.safelock}, {"irs", handling.irsHold ? "hold" : "tap"}, {"ihs", handling.ihsHold ? "hold" : "tap"}}},
             {"keys", keys},
         });
     }
@@ -119,6 +122,9 @@ std::string rowLabel(int row) {
         case RowArr: return "ARR (frames)";
         case RowSdf: return "SDF";
         case RowDcd: return "DCD (frames)";
+        case RowSafelock: return "Safelock";
+        case RowIrs: return "IRS";
+        case RowIhs: return "IHS";
         case RowVsync: return "VSync";
         case RowOverlay: return "Debug overlay";
         case RowTheme: return "Theme";
@@ -143,6 +149,9 @@ std::string rowValue(const Settings& settings, int row) {
             std::snprintf(buffer, sizeof buffer, "%.0f", handling.sdf);
             return buffer;
         case RowDcd: std::snprintf(buffer, sizeof buffer, "%.1f", handling.dcd); return buffer;
+        case RowSafelock: return handling.safelock ? "On" : "Off";
+        case RowIrs: return handling.irsHold ? "Hold" : "Tap";
+        case RowIhs: return handling.ihsHold ? "Hold" : "Tap";
         case RowVsync: return settings.vsync ? "On" : "Off";
         case RowOverlay: return settings.overlay ? "On" : "Off";
         case RowTheme: return settings.dark ? "Dark" : "Light";
@@ -163,6 +172,9 @@ void adjustRow(Settings& settings, int row, int dir) {
         case RowArr: step(handling.arr, 0.1, 0, 5); break;
         case RowSdf: step(handling.sdf, 1, 5, 41); break;
         case RowDcd: step(handling.dcd, 0.1, 0, 20); break;
+        case RowSafelock: handling.safelock = !handling.safelock; break;
+        case RowIrs: handling.irsHold = !handling.irsHold; break;
+        case RowIhs: handling.ihsHold = !handling.ihsHold; break;
         case RowVsync: settings.vsync = !settings.vsync; break;
         case RowOverlay: settings.overlay = !settings.overlay; break;
         case RowTheme: settings.dark = !settings.dark; break;
