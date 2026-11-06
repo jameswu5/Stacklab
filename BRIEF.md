@@ -119,9 +119,13 @@ struct Mode {
     const char* name;      // on the menu and in the top bar
     const char* blurb;     // under the name on the menu
     core::Ruleset rules;
-    int goalLines;         // reaching this many lines ends the run
-    const char* bestFile;  // holds the personal best, under the pref path
+    int goalLines = 0;               // reaching this many lines ends the run; 0 is no goal
+    const char* bestFile = nullptr;  // holds the personal best, under the pref path; null keeps none
     int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
+    int timeLimitSeconds = 0;        // reaching this ends the run, and the best is then the highest score
+    int garbageRows = 0;             // on the starting board; only lines that held garbage then count toward the goal
+    double messiness = 0;            // the chance a row's hole moves from the row below's
+    bool editable = false;           // the mouse edits the board, hold and queue, and topping out clears the board
 };
 ```
 
@@ -252,7 +256,7 @@ A skipped round is not a pass. Results, using Triangle `@haelp/teto@4.2.8`:
 | Set | Checked | Passed | Failed | Skipped |
 |---|---|---|---|---|
 | The owner's replays against TETR.IO | 7 | 7 | 0 | 77 for garbage |
-| Archive against TETR.IO, 5,220 files | 1,053 | 987 | 66, all score: a no-spin perfect clear of 1 to 3 lines misses the B2B bonus | 109,648 for garbage, 61 never started |
+| Archive against TETR.IO, 5,220 files | 1,053 | 1,053 | 0 | 109,648 for garbage, 61 never started |
 | The same 1,053 rounds per lock against Triangle, 36,390 locks | 1,053 | 1,053 | 0 | None |
 | Generated fixtures against Triangle | 787 | 787 | 0 | None |
 
