@@ -256,7 +256,7 @@ A skipped round is not a pass. Results, using Triangle `@haelp/teto@4.2.8`:
 | Set | Checked | Passed | Failed | Skipped |
 |---|---|---|---|---|
 | The owner's replays against TETR.IO | 7 | 7 | 0 | 77 for garbage |
-| Archive against TETR.IO, 5,220 files | 1,053 | 987 | 66, all score: a no-spin perfect clear of 1 to 3 lines misses the B2B bonus | 109,648 for garbage, 61 never started |
+| Archive against TETR.IO, 5,220 files | 1,053 | 1,053 | 0 | 109,648 for garbage, 61 never started |
 | The same 1,053 rounds per lock against Triangle, 36,390 locks | 1,053 | 1,053 | 0 | None |
 | Generated fixtures against Triangle | 787 | 787 | 0 | None |
 
