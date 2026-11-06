@@ -24,6 +24,7 @@ struct Mode {
     double messiness = 0;
     bool editable = false;  // the mouse edits the board, hold and queue, and topping out clears the board
     bool undo = false;      // the undo key takes back the last piece, clock included
+    bool drills = false;    // the menu opens the list of drills, and a run plays the chosen one
 
     int goalProgress(const core::Stats& stats) const { return garbageRows > 0 ? stats.garbageCleared : stats.lines; }
     bool bestIsScore() const { return timeLimitSeconds > 0; }
@@ -62,5 +63,10 @@ inline const Mode kModes[] = {
      .rules = {.noSzo = true},
      .editable = true,
      .undo = true},
+    {.name = "Drills",
+     .blurb = "Build set stacks, piece by piece",
+     .rules = {},
+     .undo = true,
+     .drills = true},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));

@@ -9,6 +9,7 @@
 #include "app/settings.h"
 #include "app/timing.h"
 #include "core/game.h"
+#include "modes/drill.h"
 #include "modes/modes.h"
 
 // ponytail: the owner's replays use stride's shorter Ready-Set-Go, whose length
@@ -17,6 +18,8 @@ constexpr uint64_t kCountdownNs = 1'000'000'000;
 
 // ponytail: older placements are forgotten past this; a slot costs about 1 KB.
 constexpr int kUndoDepth = 256;
+
+constexpr uint64_t kMissBannerNs = 600'000'000;
 
 struct Play {
     const Mode* mode = &kModes[0];
@@ -35,11 +38,19 @@ struct Play {
     std::string bestPath;
     double best = 0;  // the mode's personal best in seconds, or its score if it's timed; 0 if there is none
 
+    const Drill* drill = nullptr;  // the one being played, if the mode has drills
+    uint64_t filled = 0;           // a bit per drill target that's been placed
+    uint64_t missedUntilNs = 0;    // says so until then, since a miss resets the board at once
+
     uint64_t lastInputNs = 0, worstInputNs = 0;
 
     // A ring of the state each placement started from, for modes with undo.
     // Constructed up front for the same reason as `shown`, so play doesn't allocate.
-    std::vector<core::Game> undoSlots;
+    struct UndoSlot {
+        core::Game game;
+        uint64_t filled;
+    };
+    std::vector<UndoSlot> undoSlots;
     int undoCount = 0, undoNewest = 0;
 
     void restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs);
@@ -49,6 +60,7 @@ struct Play {
     void stepShown(uint64_t nowNs);                     // call after stepTo, before drawing `shown`
     double seconds() const { return over ? endSeconds : shown.seconds(); }
 
+    bool judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs);  // true if the attempt ended
     void saveUndo();
     // Back to where the last placement started, with the clock too. A key held
     // through this has to be pressed again.

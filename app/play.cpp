@@ -28,6 +28,9 @@ double finishSeconds(const core::Game& game, std::span<const core::InputEvent> i
 void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs) {
     game = core::Game(mode->rules, handling, seed);
     if (mode->garbageRows > 0) game.fillGarbage(mode->garbageRows, mode->messiness);
+    if (drill) setUpDrill(game, *drill);
+    filled = 0;
+    missedUntilNs = 0;
     shown = game;
     inputs.clear();
     startNs = runStartNs;
@@ -36,8 +39,9 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     if (mode->undo) {
         if (undoSlots.empty()) {
             undoSlots.reserve(kUndoDepth);
-            for (int i = 0; i < kUndoDepth; i++) undoSlots.emplace_back(core::Ruleset{}, core::Handling{}, 1);
+            for (int i = 0; i < kUndoDepth; i++) undoSlots.push_back({core::Game(core::Ruleset{}, core::Handling{}, 1), 0});
         }
+        for (UndoSlot& slot : undoSlots) slot.game.queue.reserve(game.queue.capacity());  // a drill's queue can be long
         undoCount = 0;
         saveUndo();
     }
@@ -45,7 +49,8 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
 
 void Play::saveUndo() {
     undoNewest = (undoNewest + 1) % kUndoDepth;
-    undoSlots[undoNewest] = game;
+    undoSlots[undoNewest].game = game;
+    undoSlots[undoNewest].filled = filled;
     undoCount = std::min(undoCount + 1, kUndoDepth);
 }
 
@@ -55,7 +60,8 @@ void Play::undo(uint64_t timeNs) {
         undoNewest = (undoNewest + kUndoDepth - 1) % kUndoDepth;
         undoCount--;
     }
-    game = undoSlots[undoNewest];
+    game = undoSlots[undoNewest].game;
+    filled = undoSlots[undoNewest].filled;
     // Later inputs in the tick that saved the slot may have moved the piece.
     game.respawn(game.falling.piece);
     startNs = timeNs - (game.frame * 1'000'000'000 + core::kTicksPerSecond - 1) / core::kTicksPerSecond;
@@ -96,7 +102,7 @@ void Play::stepTo(uint64_t nowNs) {
         if (game.toppedOut && mode->editable) {
             game.board = core::Board{};
             game.respawn(game.falling.piece);
-        } else if (game.toppedOut) {
+        } else if (game.toppedOut && !drill) {
             over = true;
             endSeconds = game.seconds();
         }
@@ -118,8 +124,52 @@ void Play::stepTo(uint64_t nowNs) {
             }
         }
         inputs.consume(due.size());
+        // A new attempt has its own clock, so the next call picks it up.
+        if (drill && judgeDrill(locks, nowNs)) return;
         if (mode->undo && !locks.empty()) saveUndo();
     }
+}
+
+// A piece can fill any target still open, so hold can change the order. Cells are
+// compared, not rotations, since I, S, Z and O fill the same cells in two of theirs.
+// ponytail: a target's y assumes the listed order when an earlier piece clears lines; other orders miss there.
+bool Play::judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs) {
+    const uint64_t all = (uint64_t{1} << drill->targets.size()) - 1;
+    bool missed = false;
+    for (const core::LockResult& lock : locks) {
+        if (filled == all) break;
+        bool hit = false;
+        for (size_t i = 0; i < drill->targets.size() && !hit; i++) {
+            const DrillTarget& target = drill->targets[i];
+            hit = !(filled >> i & 1) && target.piece == lock.piece && std::is_permutation(target.cells.begin(), target.cells.end(), lock.cells.begin(), [](const core::Cell& a, const core::Cell& b) { return a.x == b.x && a.y == b.y; });
+            if (hit) filled |= uint64_t{1} << i;
+        }
+        missed = missed || !hit;
+    }
+    if (!missed && filled == all) {
+        if (drill->next) {
+            drill = drill->next;
+            restart(game.handling, 1, nowNs + kCountdownNs);
+        } else {
+            over = true;
+            endSeconds = game.seconds();
+        }
+        return true;
+    }
+    // Out of queue: a held piece still gets its turn.
+    if (!missed && !game.toppedOut && game.falling.piece == core::Piece::None) {
+        if (game.hold == core::Piece::None) {
+            missed = true;
+        } else {
+            const core::Piece last = game.hold;
+            game.hold = core::Piece::None;
+            game.respawn(last);
+        }
+    }
+    if (!missed && !game.toppedOut) return false;
+    restart(game.handling, 1, nowNs);
+    missedUntilNs = nowNs + kMissBannerNs;
+    return true;
 }
 
 void Play::paint(int x, int y, core::Piece piece) {

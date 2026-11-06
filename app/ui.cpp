@@ -428,10 +428,30 @@ void Ui::drawMenu(int selected, std::span<const double> bests) {
     text(FontSmall, "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
 }
 
+void Ui::drawDrills(int selected, std::span<const Drill> drills, const char* error) {
+    const Palette& colors = palette();
+    topBar("Drills");
+    constexpr float width = 560, rowH = 76, x = (1440 - width) / 2;
+    constexpr int maxRows = 9;
+    const int count = static_cast<int>(drills.size()), rows = std::clamp(count, 1, maxRows);
+    float height = 12 + rows * rowH + 44;
+    float top = kRowY + (788 - height) / 2;
+    fill(x, top, width, height, colors.card, 24);
+    if (drills.empty()) text(FontRow, "No drills found", 720, top + 12 + 44, colors.muted, Align::Center);
+    const int first = std::clamp(selected - maxRows + 1, 0, std::max(count - maxRows, 0));
+    for (int row = first; row < count && row < first + maxRows; row++) {
+        float y = top + 12 + (row - first) * rowH;
+        if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
+        text(FontWord, drills[row].name.c_str(), x + 32, y + 34, colors.text);
+        text(FontRow, drills[row].blurb.c_str(), x + 32, y + 58, colors.muted);
+    }
+    text(FontSmall, error ? error : "Up and down choose, Enter starts, Esc goes back", 720, top + height - 17, colors.muted, Align::Center);
+}
+
 void Ui::drawPlay(const PlayView& view) {
     const Palette& colors = palette();
     const core::Game& game = *view.game;
-    topBar(view.mode->name);
+    topBar(view.drill ? view.drill->name.c_str() : view.mode->name);
 
     card(kLeftX, kRowY, kColumnW, 127, "HOLD");
     preview(game.hold, kLeftX + kColumnW / 2, kRowY + 77, kHoldCell);
@@ -472,6 +492,14 @@ void Ui::drawPlay(const PlayView& view) {
     for (int y = 0; y < core::kBoardHeight; y++)
         for (int x = 0; x < core::kBoardWidth; x++)
             if (game.board.at(x, y) != core::Piece::None) block(x, y, colors.pieces[static_cast<int>(game.board.at(x, y))], 1);
+    if (view.drill && !view.over) {
+        for (size_t i = 0; i < view.drill->targets.size(); i++) {
+            if (view.filled >> i & 1) continue;
+            const DrillTarget& target = view.drill->targets[i];
+            // Fainter than the ghost, so the two can't be confused.
+            for (const core::Cell& c : target.cells) block(c.x, c.y, colors.pieces[static_cast<int>(target.piece)], colors.ghostAlpha * 0.5f);
+        }
+    }
     if (!view.over && game.falling.piece != core::Piece::None) {
         Color color = colors.pieces[static_cast<int>(game.falling.piece)];
         for (const core::Cell& c : game.ghost().cells()) block(c.x, c.y, color, colors.ghostAlpha);

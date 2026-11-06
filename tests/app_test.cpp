@@ -452,7 +452,7 @@ void testUndo() {
     drop(BindLeft);
     const core::Board afterOne = play.game.board;
     core::Piece second = play.game.falling.piece;
-    uint64_t frameAfterOne = play.undoSlots[play.undoNewest].frame;  // the lock's tick, a little before now
+    uint64_t frameAfterOne = play.undoSlots[play.undoNewest].game.frame;  // the lock's tick, a little before now
     drop(BindRight);
     assert(play.game.stats.pieces == 2);
 
@@ -513,6 +513,231 @@ void testUndo() {
     assert(plain.game.frame == 1 && plain.undoSlots.empty());
 }
 
+Drill drillFrom(const std::string& text) { return parseDrill(text, "test"); }
+
+bool rejected(const std::string& text) {
+    try {
+        drillFrom(text);
+    } catch (const std::exception&) {
+        return true;
+    }
+    return false;
+}
+
+void testDrillFiles() {
+    const std::string queue = R"("queue": {"type": "fixed", "pieces": "I"}, "targets": [{"piece": "I", "x": 0, "y": 1, "rot": 0}])";
+    assert(!rejected(R"({"name": "ok", )" + queue + "}"));
+    assert(rejected("{ not json"));
+    assert(rejected(R"({"name": "no queue", "targets": [{"piece": "I", "x": 0, "y": 1, "rot": 0}]})"));
+    assert(rejected(R"({"name": "no targets", "queue": {"type": "fixed", "pieces": "I"}})"));
+    assert(rejected(R"({"name": "bag", "queue": {"type": "bag", "pieces": "I"}, "targets": [{"piece": "I", "x": 0, "y": 1, "rot": 0}]})"));
+    assert(rejected(R"({"name": "bad piece", "queue": {"type": "fixed", "pieces": "Q"}, "targets": [{"piece": "I", "x": 0, "y": 1, "rot": 0}]})"));
+    assert(rejected(R"({"name": "bad rot", "queue": {"type": "fixed", "pieces": "I"}, "targets": [{"piece": "I", "x": 0, "y": 1, "rot": 4}]})"));
+    assert(rejected(R"({"name": "off board", "queue": {"type": "fixed", "pieces": "I"}, "targets": [{"piece": "I", "x": 8, "y": 1, "rot": 0}]})"));
+    assert(rejected(R"({"name": "wide", "board": ["XXXXXXXXXXX"], )" + queue + "}"));
+    assert(rejected(R"({"name": "miss", "onMiss": "shrug", )" + queue + "}"));
+    assert(rejected(R"({"name": "rules", "ruleset": "versus-standard", )" + queue + "}"));
+    assert(rejected(R"({"name": "bad fumen", "board": "v115@!!", )" + queue + "}"));
+    // Twenty rows leave the spawn clear, and rows can't reach it.
+    std::string tall = R"({"name": "tall", "board": [)";
+    for (int i = 0; i < 20; i++) tall += std::string(i ? "," : "") + R"("XXXXXXXXX.")";
+    assert(!rejected(tall + "], " + queue + "}"));
+    assert(rejected(tall + R"(,"XXXXXXXXX."], )" + queue + "}"));
+    // A fumen can reach it, which would otherwise retry forever.
+    assert(rejected(R"({"name": "blocked", "board": "v115@flAgH", )" + queue + "}"));
+
+    // The rows' last entry is the floor, and letters are pieces.
+    const Drill rows = drillFrom(R"({"name": "rows", "board": ["T.........", "XX........"], )" + queue + "}");
+    assert(rows.board.at(0, 0) == core::Piece::Garbage && rows.board.at(1, 0) == core::Piece::Garbage && rows.board.at(2, 0) == core::Piece::None);
+    assert(rows.board.at(0, 1) == core::Piece::T);
+
+    // A fumen's piece is the queue and target when the file gives none. This one is an I on the floor.
+    const Drill imported = drillFrom(R"({"name": "fumen", "board": "v115@vhARQJ"})");
+    assert(imported.pieces == std::vector{core::Piece::I});
+    assert(imported.targets.size() == 1 && imported.targets[0].piece == core::Piece::I);
+    assert(imported.targets[0].cells[0].y == 0 && imported.targets[0].cells[0].x == 3);
+    // A fumen with no pieces gives only the board, so the file's queue and targets are used.
+    const Drill mixed = drillFrom(R"({"name": "mix", "board": "v115@9gI8AeI8AeI8AeI8KeAgH", )" + queue + "}");
+    assert(mixed.board.at(0, 0) != core::Piece::None);
+    assert(mixed.targets.size() == 1 && mixed.pieces.size() == 1);
+    assert(rejected(R"({"name": "no pieces", "board": "v115@9gI8AeI8AeI8AeI8KeAgH"})"));
+
+    // The bundled files, and a bad next is reported without losing the drill.
+    const std::filesystem::path bundled[] = {"data/drills"};
+    const DrillSet set = loadDrills(bundled);
+    assert(set.errors.empty());
+    assert(set.drills.size() == 2);
+    assert(set.drills[0].id == "first-steps-1" && set.drills[0].next == &set.drills[1]);
+
+    auto dir = std::filesystem::temp_directory_path() / "stacklab_drills_test";
+    std::filesystem::create_directories(dir);
+    { std::ofstream(dir / "broken.json") << "{"; }
+    { std::ofstream(dir / "lost.json") << R"({"name": "lost", "next": "nowhere", )" + queue + "}"; }
+    { std::ofstream(dir / "notes.txt") << "ignored"; }
+    const std::filesystem::path both[] = {dir, dir / "missing"};
+    const DrillSet bad = loadDrills(both);
+    assert(bad.drills.size() == 1 && bad.drills[0].next == nullptr);
+    assert(bad.errors.size() == 2);
+    std::filesystem::remove_all(dir);
+}
+
+struct DrillPlayer {
+    Play play;
+    uint64_t now = 1'000'000'000;
+
+    void tap(Bind bind) {
+        play.key(bind, true, now);
+        play.key(bind, false, now + 1);
+        now += kTickNs;
+        play.stepTo(now);
+    }
+    // Runs the countdown out.
+    void start() {
+        now = play.startNs;
+        play.stepTo(now);
+    }
+    void place(int rot, int x) {
+        if (rot) tap(rot == 1 ? BindCW : rot == 2 ? Bind180 : BindCCW);
+        while (play.game.falling.x != x) tap(play.game.falling.x > x ? BindLeft : BindRight);
+        tap(BindHardDrop);
+    }
+};
+
+void testDrillRun() {
+    const Mode row = {.name = "Drills", .blurb = "", .rules = {}, .undo = true, .drills = true};
+    const std::filesystem::path bundled[] = {"data/drills"};
+    const DrillSet set = loadDrills(bundled);
+
+    // The bundled chain, by real inputs: the first in another order, then on to the next.
+    {
+        DrillPlayer p;
+        p.play.mode = &row;
+        p.play.drill = &set.drills[0];
+        p.play.restart({}, 1, p.now);
+        assert(p.play.game.falling.piece == core::Piece::I);
+        assert(p.play.game.queue[0] == core::Piece::O && p.play.game.queue[1] == core::Piece::J && p.play.game.queue[2] == core::Piece::None);
+        p.start();
+        p.tap(BindHold);  // I waits, so O goes first
+        assert(p.play.game.falling.piece == core::Piece::O);
+        p.place(0, 4);
+        assert(p.play.filled == 2);
+        p.place(0, 6);
+        assert(p.play.filled == 6);
+        assert(p.play.game.falling.piece == core::Piece::I);  // out of queue, so the held piece comes back
+        assert(p.play.game.hold == core::Piece::None);
+        p.place(2, 0);  // the same cells as the target's rot 0, from the other rotation
+        assert(p.play.drill == &set.drills[1]);
+        assert(!p.play.started && !p.play.over && p.play.filled == 0);
+        assert(p.play.game.board.at(0, 0) == core::Piece::Garbage);
+
+        // The second clears lines first, so its next target is on the moved board. Then it ends.
+        p.start();
+        p.place(0, 8);
+        assert(p.play.game.stats.lines == 2 && p.play.filled == 1);
+        p.place(0, 3);
+        assert(p.play.over && p.play.seconds() > 0);
+    }
+
+    // A wrong placement resets the attempt at once, and the clock starts over without a countdown.
+    {
+        DrillPlayer p;
+        p.play.mode = &row;
+        p.play.drill = &set.drills[0];
+        p.play.restart({}, 1, p.now);
+        p.start();
+        p.place(0, 0);
+        assert(p.play.filled == 1 && p.play.game.stats.pieces == 1);
+        p.place(0, 0);  // O on the I
+        assert(p.play.filled == 0 && p.play.game.stats.pieces == 0 && !p.play.over);
+        assert(p.play.drill == &set.drills[0]);
+        assert(p.play.game.board.cells == core::Board{}.cells);
+        assert(p.play.missedUntilNs > p.now - kTickNs);
+        assert(p.play.game.frame == 0);
+        p.now += kTickNs;
+        p.play.stepTo(p.now);
+        assert(p.play.started && p.play.game.frame == 1);
+    }
+
+    // Undo gives back a target, and a filled one can't be filled twice.
+    {
+        DrillPlayer p;
+        p.play.mode = &row;
+        p.play.drill = &set.drills[0];
+        p.play.restart({}, 1, p.now);
+        p.start();
+        p.place(0, 0);
+        p.play.undo(p.now);
+        assert(p.play.filled == 0 && p.play.game.falling.piece == core::Piece::I);
+        p.play.stepTo(p.now);
+        p.place(0, 0);
+        assert(p.play.filled == 1);
+    }
+
+    // Two locks in one tick are both judged. Two right ones fill two targets, and a
+    // wrong second one is a miss, though the first was right.
+    for (bool wrongSecond : {false, true}) {
+        DrillPlayer p;
+        p.play.mode = &row;
+        p.play.drill = &set.drills[0];
+        p.play.restart({}, 1, p.now);
+        p.start();
+        for (int i = 0; i < 3; i++) p.tap(BindLeft);
+        p.play.key(BindHardDrop, true, p.now);
+        p.play.key(BindHardDrop, false, p.now + 1);
+        if (wrongSecond) {
+            p.play.key(BindRight, true, p.now + 2);
+            p.play.key(BindRight, false, p.now + 3);
+        }
+        p.play.key(BindHardDrop, true, p.now + 4);
+        p.play.key(BindHardDrop, false, p.now + 5);
+        p.now += kTickNs;
+        p.play.stepTo(p.now);
+        assert(p.play.game.stats.pieces == (wrongSecond ? 0 : 2));
+        assert(p.play.filled == (wrongSecond ? 0u : 3u));
+        assert((p.play.missedUntilNs > 0) == wrongSecond);
+    }
+
+    // Running out of queue with targets left is a miss, as is topping out.
+    {
+        const Drill shortQueue = drillFrom(R"({"name": "short", "queue": {"type": "fixed", "pieces": "I"}, "targets": [
+            {"piece": "I", "x": 0, "y": 1, "rot": 0}, {"piece": "I", "x": 4, "y": 1, "rot": 0}]})");
+        DrillPlayer p;
+        p.play.mode = &row;
+        p.play.drill = &shortQueue;
+        p.play.restart({}, 1, p.now);
+        p.start();
+        p.place(0, 0);
+        assert(p.play.filled == 0 && p.play.missedUntilNs > 0 && p.play.game.falling.piece == core::Piece::I);
+
+        p = {};
+        p.play.mode = &row;
+        p.play.drill = &set.drills[0];
+        p.play.restart({}, 1, p.now);
+        p.start();
+        p.play.game.toppedOut = true;
+        p.now += kTickNs;
+        p.play.stepTo(p.now);
+        assert(!p.play.over && p.play.missedUntilNs > 0 && !p.play.game.toppedOut);
+    }
+
+    // A placed piece and a saved state don't allocate, even with a long queue.
+    {
+        std::string pieces(40, 'I');
+        const Drill longQueue = drillFrom(R"({"name": "long", "queue": {"type": "fixed", "pieces": ")" + pieces + R"("}, "targets": [
+            {"piece": "I", "x": 0, "y": 1, "rot": 0}, {"piece": "I", "x": 4, "y": 1, "rot": 0}]})");
+        DrillPlayer p;
+        p.play.mode = &row;
+        p.play.drill = &longQueue;
+        p.play.restart({}, 1, p.now);
+        p.start();
+        size_t before = allocations;
+        p.place(0, 0);
+        p.play.stepShown(p.now);
+        assert(p.play.filled == 1);
+        assert(allocations == before);
+    }
+}
+
 // A mode without garbage leaves the garbage RNG alone, seen here through random rounding.
 void testNoGarbageRowsKeepsRng() {
     auto sends = [](core::Game& game) {
@@ -541,8 +766,9 @@ void testNoGarbageRowsKeepsRng() {
 }
 
 // A few minutes of fast play, after a warm-up: nothing may reach the allocator.
-void testPlayDoesNotAllocate() {
+void testPlayDoesNotAllocate(const Mode& mode) {
     Play play;
+    play.mode = &mode;
     play.restart({}, 1, 0);
     uint64_t now = 0;
     auto playFor = [&](int ticks) {
@@ -587,6 +813,10 @@ int main() {
     testSandbox();
     testUndo();
     testNoGarbageRowsKeepsRng();
-    testPlayDoesNotAllocate();
+    testDrillFiles();
+    testDrillRun();
+    testPlayDoesNotAllocate(kModes[0]);
+    const Mode withUndo = {.name = "Undo", .blurb = "", .rules = {}, .undo = true};
+    testPlayDoesNotAllocate(withUndo);
     return 0;
 }

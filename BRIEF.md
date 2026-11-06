@@ -126,6 +126,8 @@ struct Mode {
     int garbageRows = 0;             // on the starting board; only lines that held garbage then count toward the goal
     double messiness = 0;            // the chance a row's hole moves from the row below's
     bool editable = false;           // the mouse edits the board, hold and queue, and topping out clears the board
+    bool undo = false;               // the undo key takes back the last piece, clock included
+    bool drills = false;             // the menu opens the list of drills, and a run plays the chosen one
 };
 ```
 
@@ -162,21 +164,41 @@ struct Mode {
 
 ### Drill format
 
-A drill is a JSON file:
+A drill is a JSON file in `data/drills/`, or under the pref path in `drills/` for the owner's own. Its name, without `.json`, is its id. The menu's Drills row lists them in id order.
 
 ```json
 {
-  "name": "PC opener: example",
-  "ruleset": "versus-standard",
-  "board": "fumen-or-rows",
+  "name": "First steps 1",
+  "blurb": "A line under the name in the list",
+  "board": ["XXXXXXXX..", "XXXXXXXX.."],
   "queue": { "type": "fixed", "pieces": "IOTSZJL" },
-  "targets": [{ "piece": "I", "x": 0, "y": 0, "rot": 0 }],
+  "targets": [{ "piece": "I", "x": 0, "y": 1, "rot": 0 }],
   "onMiss": "retry",
   "next": "another-drill-id"
 }
 ```
 
-The exact fields get settled when the runner is built. Fumen import is required, since it's how the community shares setups.
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | Yes | In the list and the top bar |
+| `blurb` | No | Under the name in the list |
+| `board` | No, empty by default | Rows, top first and the last on the floor, 10 wide and at most 20 of them: `.` empty, `X` garbage, or a piece letter. Or a fumen string or URL, using its first page |
+| `queue` | With rows, yes | `type` must be `fixed`. Previews past the end are empty |
+| `targets` | With rows, yes | At most 63. `x`, `y` and `rot` are `core::Falling`'s: `x` is the left of the piece's box, `y` is the row of the box's top, counted up from the floor, and `rot` is 0 spawn, 1 CW, 2 180, 3 CCW |
+| `onMiss` | No | Only `retry`, the default |
+| `next` | No | The id of the drill to go to on success |
+
+**From a fumen,** a page's piece that locks becomes a target and joins the queue, in page order, unless the file gives its own `queue` or `targets`. Quiz comments aren't read. So a whole drill can be `{"name": "...", "board": "v115@..."}`.
+
+**How a run is judged:**
+
+- Every locked piece must fill a target still open, compared by cells, so a rotation that fills the same cells counts. Hold can change the order. Anything else is a miss, as are topping out and running out of pieces with targets left.
+- A target's coordinates are on the board as it stands when that piece locks, after earlier clears. If an earlier piece clears lines, placing out of the listed order misses.
+- A miss says so and resets the drill at once, with no countdown. Retry starts it again with one. Undo gives back the last piece and its target.
+- When the queue runs out, a held piece comes back to be placed.
+- Success goes to `next`, with a countdown, or shows the results. Only the last drill of a chain is listed in the session.
+
+`ruleset` isn't supported yet and is rejected, so it can't silently do nothing: every drill uses the Drills row's rules until `versus-standard` exists (section 5.2). A file that can't be used is left out and named at the bottom of the list.
 
 ## 5. TETR.IO parity
 

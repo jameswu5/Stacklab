@@ -159,6 +159,34 @@ int main(int argc, char** argv) {
     SDL_SavePNG(statsPixels, (std::string(argv[1]) + "/all-stats.png").c_str());
     SDL_DestroySurface(statsPixels);
 
+    // A drill with one target placed, with the list of drills, in both themes.
+    std::vector<Drill> drills(2);
+    drills[0].name = "First steps 1";
+    drills[0].blurb = "A sample: lay a flat base, in any order";
+    drills[1].name = "First steps 2";
+    drills[1].blurb = "A sample: close the gap, then build on the clean board";
+    drills[0].targets = {{core::Piece::I, {{{0, 0}, {1, 0}, {2, 0}, {3, 0}}}}, {core::Piece::O, {{{4, 0}, {5, 0}, {4, 1}, {5, 1}}}}, {core::Piece::J, {{{6, 1}, {6, 0}, {7, 0}, {8, 0}}}}};
+    core::Game drillGame(core::Ruleset{}, core::Handling{}, 1);
+    drillGame.board.at(0, 0) = drillGame.board.at(1, 0) = drillGame.board.at(2, 0) = drillGame.board.at(3, 0) = core::Piece::I;
+    drillGame.queue = {core::Piece::J, core::Piece::None, core::Piece::None, core::Piece::None, core::Piece::None};
+    drillGame.falling.piece = core::Piece::O;
+    drillGame.falling.x = 4;
+    for (bool dark : {false, true}) {
+        ui.dark = dark;
+        ui.beginFrame();
+        ui.drawPlay({&kModes[5], &drillGame, 2.5, false, dark ? "Missed" : nullptr, "", 0, {}, &drills[0], 1});
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* drillPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(drillPixels, (std::string(argv[1]) + (dark ? "/drill-dark.png" : "/drill-light.png")).c_str());
+        SDL_DestroySurface(drillPixels);
+        ui.beginFrame();
+        ui.drawDrills(1, drills, dark ? "broken.json: the board blocks the spawn" : nullptr);
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* listPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(listPixels, (std::string(argv[1]) + (dark ? "/drills-dark.png" : "/drills-light.png")).c_str());
+        SDL_DestroySurface(listPixels);
+    }
+
     auto draw = [&](bool dark) {
         ui.dark = dark;
         ui.beginFrame();
