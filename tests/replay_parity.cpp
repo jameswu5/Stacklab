@@ -71,6 +71,11 @@ core::Ruleset rulesFrom(const json& o) {
     r.allowHold = o.value("display_hold", r.allowHold);
     r.clutch = o.value("clutch", r.clutch);
     r.previews = o.value("nextcount", r.previews);
+    r.noSzo = o.value("no_szo", r.noSzo);
+    r.levels = o.value("levels", r.levels);
+    r.levelSpeed = o.value("levelspeed", r.levelSpeed);
+    r.levelGBase = o.value("levelgbase", r.levelGBase);
+    r.levelGSpeed = o.value("levelgspeed", r.levelGSpeed);
     // Not Triangle.js's all-mini+ fallback: Blitz omits this and only counts T-spins.
     const std::string spins = o.value("spinbonuses", std::string("T-spins"));
     r.spinBonuses = spins == "none"      ? core::SpinBonuses::None
@@ -122,6 +127,7 @@ std::string unsupported(const json& o) {
     require("allow_harddrop", true);
     require("are", 0);
     require("lineclear_are", 0);
+    require("nolockout", true);
     const std::string spins = o.value("spinbonuses", std::string("T-spins"));
     if (spins != "all-mini+" && spins != "T-spins" && spins != "none") out += "spinbonuses=" + spins + " ";
     return out;
@@ -441,6 +447,8 @@ std::optional<std::string> playReplay(const json& replay, bool& skipped) {
     stat("combo", s["combo"], game.stats.combo + 1);
     stat("topbtb", s["topbtb"], topB2b + 1);
     stat("topcombo", s["topcombo"], topCombo + 1);
+    stat("level", s["level"], game.stats.level);
+    stat("level_lines", s["level_lines"], game.stats.levelLines);
     for (const auto& [name, want] : s["clears"].items()) stat("clears." + name, want, clears[name]);
     if (options.value("hasgarbage", false)) stat("attack", s["garbage"]["attack"], game.stats.attack);
     if (objectiveLines > 0) stat("finish frame", endFrame, finishFrame);
@@ -546,7 +554,10 @@ int runReplays(const fs::path& folder) {
             const auto m = playReplay(*round, skip);
             if (skip) skipped++;
             else if (m) fail(label, *m);
-            else passed++;
+            else {
+                passed++;
+                std::cout << "PASS " << label << "\n";
+            }
         }
     }
     std::cout << folder.filename().string() << " (TETR.IO recorded results): " << passed << " passed, " << failed << " failed, "
