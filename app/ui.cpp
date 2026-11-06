@@ -45,10 +45,18 @@ void formatTime(char (&buffer)[32], double seconds) {
     std::snprintf(buffer, sizeof buffer, "%d:%02d.%02d", hundredths / 6000, hundredths / 100 % 60, hundredths % 100);
 }
 
+// What a mode ranks runs by, in `value`: a score if it's timed, otherwise a time.
+void formatRank(char (&buffer)[32], const Mode& mode, double value) {
+    if (mode.bestIsScore()) std::snprintf(buffer, sizeof buffer, "%d", static_cast<int>(value));
+    else formatTime(buffer, value);
+}
+
+double rankOf(const RunResult& run) { return run.mode->bestIsScore() ? run.stats.score : run.seconds; }
+
 constexpr struct {
     Stat stat;
     const char* name;
-} kStatRows[] = {{StatLines, "Lines"}, {StatPieces, "Pieces"}, {StatPPS, "PPS"}, {StatKPP, "KPP"}, {StatAPM, "APM"}, {StatAPP, "APP"}, {StatFinesse, "Finesse"}};
+} kStatRows[] = {{StatScore, "Score"}, {StatLevel, "Level"}, {StatGarbage, "Garbage"}, {StatLines, "Lines"}, {StatPieces, "Pieces"}, {StatPPS, "PPS"}, {StatKPP, "KPP"}, {StatAPM, "APM"}, {StatAPP, "APP"}, {StatFinesse, "Finesse"}};
 
 void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double seconds, int goalLines) {
     double perPiece = stats.pieces > 0 ? 1.0 / stats.pieces : 0;
@@ -58,6 +66,9 @@ void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double 
             if (goalLines > 0) std::snprintf(buffer, sizeof buffer, "%d / %d", std::min(stats.lines, goalLines), goalLines);
             else std::snprintf(buffer, sizeof buffer, "%d", stats.lines);
             break;
+        case StatScore: std::snprintf(buffer, sizeof buffer, "%d", stats.score); break;
+        case StatLevel: std::snprintf(buffer, sizeof buffer, "%d", stats.level); break;
+        case StatGarbage: std::snprintf(buffer, sizeof buffer, "%d / %d", std::min(stats.garbageCleared, goalLines), goalLines); break;
         case StatPieces: std::snprintf(buffer, sizeof buffer, "%d", stats.pieces); break;
         case StatPPS: std::snprintf(buffer, sizeof buffer, "%.2f", stats.pieces * perSecond); break;
         case StatKPP: std::snprintf(buffer, sizeof buffer, "%.2f", stats.keys * perPiece); break;
@@ -306,6 +317,25 @@ bool Ui::toggleHit(float x, float y) const {
     return x >= width_ - (kBarSide + kToggleW) * scale_ && x <= width_ - kBarSide * scale_ && y >= 15 * scale_ && y <= (15 + kToggleH) * scale_;
 }
 
+bool Ui::boardCellAt(float x, float y, int& cellX, int& cellY) const {
+    float pointX = (x - originX_) / scale_ - kBoardX, pointY = (y - originY_) / scale_ - kBoardY;
+    if (pointX < 0 || pointY < 0 || pointX >= core::kBoardWidth * kCell || pointY >= core::kVisibleHeight * kCell) return false;
+    cellX = static_cast<int>(pointX / kCell);
+    cellY = core::kVisibleHeight - 1 - static_cast<int>(pointY / kCell);
+    return true;
+}
+
+int Ui::queueSlotAt(float x, float y) const {
+    float pointX = (x - originX_) / scale_ - kRightX, pointY = (y - originY_) / scale_ - (kRowY + 120 - kNextSlot / 2);
+    if (pointX < 0 || pointX >= kColumnW || pointY < 0 || pointY >= 5 * kNextSlot) return -1;
+    return static_cast<int>(pointY / kNextSlot);
+}
+
+bool Ui::holdHit(float x, float y) const {
+    float pointX = (x - originX_) / scale_ - kLeftX, pointY = (y - originY_) / scale_ - kRowY;
+    return pointX >= 0 && pointX < kColumnW && pointY >= 0 && pointY < 127;
+}
+
 void Ui::block(int x, int y, Color color, float alpha) {
     fill(kBoardX + x * kCell + 1, kBoardY + (core::kVisibleHeight - 1 - y) * kCell + 1, kCell - 2, kCell - 2, color, 7, alpha);
 }
@@ -341,7 +371,7 @@ void Ui::results(const PlayView& view) {
     const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : "Finished";
     text(FontWord, title, x + width / 2, top + 42, colors.text, Align::Center);
     char buffer[32];
-    formatTime(buffer, run.seconds);
+    formatRank(buffer, *run.mode, rankOf(run));
     text(FontTime, buffer, x + width / 2, top + 94, colors.text, Align::Center, kTimeTracking);
 
     float y = top + 114;
@@ -351,7 +381,7 @@ void Ui::results(const PlayView& view) {
         statRow(x + 24, y, width - 48, row.name, buffer);
         y += 38;
     }
-    formatTime(buffer, view.best);
+    formatRank(buffer, *view.mode, view.best);
     statRow(x + 24, y, width - 48, "Best", view.best > 0 ? buffer : "-");
     text(FontSmall, view.hint, x + width / 2, top + height - 16, colors.muted, Align::Center);
 }
@@ -367,7 +397,7 @@ void Ui::sessionCard(const PlayView& view) {
         float y = kRowY + 52 + row++ * 38.0f;
         char time[32], value[32], pps[40];
         if (run->newBest) fill(kRightX + 8, y, kColumnW - 16, 38, colors.line, 12);
-        formatTime(time, run->seconds);
+        formatRank(time, *run->mode, rankOf(*run));
         formatStat(value, StatPPS, run->stats, run->seconds, 0);
         std::snprintf(pps, sizeof pps, "%s PPS", value);
         text(FontValue, run->toppedOut ? "Topped out" : time, kRightX + 20, y + 25, run->toppedOut ? colors.muted : colors.text);
@@ -390,7 +420,7 @@ void Ui::drawMenu(int selected, std::span<const double> bests) {
         text(FontRow, isMode ? kModes[row].blurb : "Handling, keys and display", x + 32, y + 58, colors.muted);
         if (isMode && bests[row] > 0) {
             char buffer[32];
-            formatTime(buffer, bests[row]);
+            formatRank(buffer, kModes[row], bests[row]);
             text(FontLabel, "BEST", x + width - 32, y + 31, colors.muted, Align::Right, kLabelTracking);
             text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
         }

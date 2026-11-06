@@ -29,7 +29,7 @@ struct Play {
     double endSeconds = 0;  // the clock once the run is over
 
     std::string bestPath;
-    double best = 0;  // the mode's personal best in seconds, 0 if there is none
+    double best = 0;  // the mode's personal best in seconds, or its score if it's timed; 0 if there is none
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 
@@ -39,4 +39,9 @@ struct Play {
     void stepTo(uint64_t nowNs);                        // runs every tick completed by this time
     void stepShown(uint64_t nowNs);                     // call after stepTo, before drawing `shown`
     double seconds() const { return over ? endSeconds : shown.seconds(); }
+
+    // Sandbox edits, on the real game. Painting skips the falling piece's cells, so it can't end up inside one.
+    void paint(int x, int y, core::Piece piece);
+    void cycleQueue(int slot);
+    void cycleHold();
 };

@@ -507,6 +507,22 @@ static void testScore() {
     quad(pc);
     assert(pc.stats.score == 800 + 3500 + 14);
 
+    // A plain single that perfect clears takes the B2B bonus when pcB2b keeps the chain
+    // going above 0, and not otherwise. A flat I drops 9 rows.
+    const auto pcSingle = [](int pcB2b, int b2b) {
+        Ruleset allClear;
+        allClear.pcB2b = pcB2b;
+        Game g(allClear, Handling{}, 1);
+        g.stats.b2b = b2b;
+        fillExcept(g, 1, {{0, 0}, {1, 0}, {2, 0}, {3, 0}});
+        place(g, Piece::I, 0, 0, 10.5);
+        assert(tap(g, Action::HardDrop)[0].perfectClear);
+        return g.stats.score;
+    };
+    assert(pcSingle(1, 0) == 150 + 3500 + 18);
+    assert(pcSingle(1, -1) == 100 + 3500 + 18);
+    assert(pcSingle(0, 2) == 100 + 3500 + 18);
+
     Ruleset rules;
     rules.levels = true;
     rules.levelSpeed = 0.42;
@@ -550,8 +566,9 @@ static void testFillGarbage() {
     Game dig(Ruleset{}, Handling{}, 5);
     dig.fillGarbage(2, 0);
     place(dig, Piece::I, 1, holeIn(dig, 0) - 2, 10.5);
-    tap(dig, Action::HardDrop);
+    const int digLocks = tap(dig, Action::HardDrop)[0].garbageCleared;
     assert(dig.stats.lines == 2 && dig.stats.garbageCleared == 2);
+    assert(digLocks == 2);
     for (int x = 0; x < kBoardWidth; x++) dig.board.at(x, 8) = Piece::J;
     place(dig, Piece::O, 0, 0, 12.5);
     tap(dig, Action::HardDrop);

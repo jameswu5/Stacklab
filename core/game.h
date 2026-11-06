@@ -109,6 +109,7 @@ struct LockResult {
     int lines = 0;
     Spin spin = Spin::None;
     bool perfectClear = false;
+    int garbageCleared = 0;
     std::array<int, 5> sends{};  // surge (3), normal attack, PC; unused entries are 0
     int b2b = -1;
     int combo = -1;
