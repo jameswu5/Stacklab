@@ -123,6 +123,8 @@ struct Stats {
     int combo = -1;
     int level = 1;
     int levelLines = 0;  // lines toward the next level
+    int score = 0;
+    int garbageCleared = 0;  // cleared lines that held garbage
 };
 
 // Park-Miller LCG, matching TETR.IO's piece order for a given seed.
@@ -158,6 +160,15 @@ struct Game {
     // tick and stays valid until the next call.
     const std::vector<LockResult>& tick(std::span<const InputEvent> inputs);
 
+    // Fills the bottom rows of an empty board. A row's hole moves from the row
+    // below's with probability `messiness`. `rows` must be at most kVisibleHeight,
+    // so the rows stay clear of the spawn.
+    void fillGarbage(int rows, double messiness);
+
+    // Puts `piece` at the spawn after outside edits to the board, queue or hold,
+    // leaving holdUsed alone. Tops out again if the spawn is still blocked.
+    void respawn(Piece piece);
+
     // Where the falling piece would land.
     Falling ghost() const;
 
@@ -182,6 +193,7 @@ private:
     bool shouldLock() const;
     bool is20G() const;
     bool fallBy(double amount);
+    void sink(int pointsPerRow);
     void fall(double delta);
     void lock();
     void gainLevels(int lines);
