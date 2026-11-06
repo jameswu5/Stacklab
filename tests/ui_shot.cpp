@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&game, game.seconds(), false, "-0.38s", true, nullptr, nullptr});
+        ui.drawPlay({&game, game.seconds(), false, nullptr, nullptr});
         SDL_FlushRenderer(renderer);
         SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
         std::string path = std::string(argv[1]) + (dark ? "/dark.png" : "/light.png");
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
 
     core::Game fresh(core::Ruleset{}, core::Handling{}, 1);
     ui.beginFrame();
-    ui.drawPlay({&fresh, 0, false, "-", false, "Ready", nullptr});
+    ui.drawPlay({&fresh, 0, false, "Ready", nullptr});
     SDL_FlushRenderer(renderer);
     SDL_Surface* countdownPixels = SDL_RenderReadPixels(renderer, nullptr);
     SDL_SavePNG(countdownPixels, (std::string(argv[1]) + "/countdown.png").c_str());
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         ui.beginFrame();
         game.frame++;
-        ui.drawPlay({&game, game.seconds(), false, "-0.38s", true, nullptr, nullptr});
+        ui.drawPlay({&game, game.seconds(), false, nullptr, nullptr});
     };
     for (int i = 0; i < 10; i++) {
         draw(i % 2);

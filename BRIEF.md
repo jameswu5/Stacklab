@@ -78,10 +78,10 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 - **Top bar (68 high, 32 side padding):** "Stacklab" wordmark on the left (20, bold), mode name in a pill beside it (14, semibold), light/dark toggle on the right. The centre stays clear because pieces spawn there.
 - **Main row, centred, 20 gap:** left column, board card, right column. Both columns are 230 wide with cards stacked 20 apart.
 - **Left column:** Hold card, then a stats card with the time (44, bold) above rows for Lines, Pieces, PPS, KPP and Finesse, separated by 1pt lines.
-- **Right column:** Next card with 5 previews, then a "Pace vs best" card (32, bold, in the good colour).
+- **Right column:** a full-height Next card with 5 previews, large because the owner reads the queue in peripheral vision.
 - **Cards:** radius 24, padding 20, flat with no shadows. Labels are 12, semibold, uppercase, in the muted colour.
 - **Board card:** radius 28, padding 14, holding a 10×20 board at 38 per cell, with a radius 8 board background in a faint checkerboard.
-- **Blocks:** radius 7 with a 2 gap between cells. Previews use 24 per cell, with corner radius scaled to match.
+- **Blocks:** radius 7 with a 2 gap between cells. Next previews use 44 per cell and hold uses 24, with corner radius scaled to match.
 - **Ghost:** the piece colour at 42% opacity in light mode and 30% in dark mode.
 - **Toggle:** a pill with sun and moon icons, and a circular knob behind the active one.
 
@@ -95,7 +95,6 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 | Toggle knob | `#FFFFFF` | `#4B4A5A` |
 | Board background | `#F9F5EE` | `#25242E` |
 | Board checker | `#F4EFE7` | `#2A2933` |
-| Good | `#4FA88F` | `#93DED3` |
 
 Piece colours are saturated rather than pastel, because the owner tracks pieces in peripheral vision.
 
@@ -130,7 +129,7 @@ struct Mode {
 
 | Mode | Notes |
 |---|---|
-| 40L | Sprint with personal bests and split comparison |
+| 40L | Sprint with personal bests |
 | Blitz | 2-minute score attack |
 | Dig | Clear N garbage lines, with configurable messiness |
 | Sandbox | Editable board and queue, no end condition |

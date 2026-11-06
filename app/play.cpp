@@ -1,8 +1,6 @@
 #include "app/play.h"
 
 #include <algorithm>
-#include <cmath>
-#include <cstdio>
 #include <span>
 #include <vector>
 
@@ -44,8 +42,6 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     over = false;
     splits = {};
     splitLines = 0;
-    std::snprintf(pace, sizeof pace, "-");
-    paceAhead = false;
 }
 
 void Play::begin() {
@@ -80,11 +76,6 @@ void Play::stepTo(uint64_t nowNs) {
             double now = lines == kGoalLines ? finishSeconds(game, due, locks, linesBefore) : game.seconds();
             for (int line = splitLines + 1; line <= lines; line++) splits[line] = now;
             splitLines = lines;
-            if (best[kGoalLines] > 0) {
-                double delta = now - best[lines];
-                std::snprintf(pace, sizeof pace, "%s%.2fs", delta < 0 ? "-" : "+", std::abs(delta));
-                paceAhead = delta < 0;
-            }
         }
 
         if (game.toppedOut) {

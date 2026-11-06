@@ -128,7 +128,7 @@ void drawFrame(App& app, Ui& ui) {
         const char* title = nullptr;
         if (play.over) title = play.game.toppedOut ? "Topped out" : "Finished";
         else if (!play.started) title = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
-        ui.drawPlay({&play.shown, play.seconds(), play.over, play.pace, play.paceAhead, title, play.over ? "Press retry to go again" : nullptr});
+        ui.drawPlay({&play.shown, play.seconds(), play.over, title, play.over ? "Press retry to go again" : nullptr});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];

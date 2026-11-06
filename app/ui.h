@@ -17,7 +17,7 @@ struct Color {
 };
 
 struct Palette {
-    Color background, card, text, muted, line, knob, boardBackground, checker, good;
+    Color background, card, text, muted, line, knob, boardBackground, checker;
     std::array<Color, 9> pieces;  // indexed by core::Piece
     float ghostAlpha;
 };
@@ -26,8 +26,6 @@ struct PlayView {
     const core::Game* game;
     double seconds;         // the clock
     bool over;              // the piece is hidden and the banner shows
-    const char* pace;       // text for the pace card
-    bool paceAhead;         // whether the pace shows in the good colour
     const char* bannerTitle;
     const char* bannerHint;  // null shows the title alone, with no card
 };
@@ -48,7 +46,7 @@ public:
     bool toggleHit(float x, float y) const;
 
 private:
-    enum FontId { FontWord, FontPill, FontLabel, FontTime, FontRow, FontValue, FontPace, FontSmall, kFontCount };
+    enum FontId { FontWord, FontPill, FontLabel, FontTime, FontRow, FontValue, FontSmall, kFontCount };
     enum class Align { Left, Center, Right };
 
     struct Glyph {
@@ -77,7 +75,7 @@ private:
     void card(float x, float y, float w, float h, const char* title);
     void topBar(const char* mode);
     void block(int x, int y, Color color, float alpha);
-    void preview(core::Piece piece, float centerX, float centerY);
+    void preview(core::Piece piece, float centerX, float centerY, float cell);
     void statRow(int index, const char* name, const char* value);
 
     SDL_Renderer* renderer_;

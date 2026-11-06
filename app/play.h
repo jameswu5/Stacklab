@@ -31,8 +31,6 @@ struct Play {
     Splits best{};
     Splits splits{};
     int splitLines = 0;
-    char pace[16] = "-";
-    bool paceAhead = false;
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 

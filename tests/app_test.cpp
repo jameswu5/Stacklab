@@ -262,15 +262,13 @@ void testPlayRun() {
     // Time only advances over completed ticks.
     play.stepTo(kTickNs * 10);
     assert(play.game.frame == 10);
-    assert(std::string(play.pace) == "-");
 
-    // Each line of a multi-line clear gets a split, and no best means no pace.
+    // Each line of a multi-line clear gets a split.
     play.game.stats.lines = 4;
     play.stepTo(kTickNs * 11);
     assert(play.splitLines == 4);
     assert(play.splits[1] == play.game.seconds());
     assert(play.splits[4] == play.game.seconds());
-    assert(std::string(play.pace) == "-");
 
     // Finishing ends the run, freezes the clock and saves the first best.
     play.game.stats.lines = 41;
@@ -282,24 +280,11 @@ void testPlayRun() {
     assert(play.best[40] == play.splits[40]);
     assert(loadBest(path)[40] == play.splits[40]);
 
-    // Pace compares against the best at the same line count.
+    // A slower run doesn't replace the best.
     double best = play.best[40];
     play.restart({}, 1, 0);
     assert(!play.over);
-    play.best[4] = 10;
-    play.stepTo(kTickNs * 60);
-    play.game.stats.lines = 4;
-    play.stepTo(kTickNs * 61);  // about 1.02 s, 8.98 ahead
-    assert(std::string(play.pace) == "-8.98s");
-    assert(play.paceAhead);
-    play.best[5] = 0.5;
-    play.game.stats.lines = 5;
-    play.stepTo(kTickNs * 62);  // about 1.03 s, 0.53 behind
-    assert(std::string(play.pace) == "+0.53s");
-    assert(!play.paceAhead);
-
-    // A slower run doesn't replace the best.
-    play.best[40] = best;
+    play.stepTo(0);
     play.game.frame = static_cast<uint64_t>(best * core::kTicksPerSecond) + 600;
     play.game.stats.lines = 40;
     play.stepTo(kTickNs * (play.game.frame + 1));

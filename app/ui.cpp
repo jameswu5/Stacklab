@@ -14,12 +14,12 @@ constexpr Color hex(uint32_t rgb) {
 
 // Piece order: None, I, J, L, O, S, T, Z, Garbage.
 constexpr Palette kLight = {
-    hex(0xFBF6EF), hex(0xFFFFFF), hex(0x3A3440), hex(0x8F8791), hex(0xF1EBE3), hex(0xFFFFFF), hex(0xF9F5EE), hex(0xF4EFE7), hex(0x4FA88F),
+    hex(0xFBF6EF), hex(0xFFFFFF), hex(0x3A3440), hex(0x8F8791), hex(0xF1EBE3), hex(0xFFFFFF), hex(0xF9F5EE), hex(0xF4EFE7),
     {hex(0), hex(0x00AFB3), hex(0x2B6BE8), hex(0xF27A17), hex(0xF0B400), hex(0x2FB344), hex(0x8F45DE), hex(0xE5344B), hex(0x8F8791)},
     0.42f,
 };
 constexpr Palette kDark = {
-    hex(0x22212B), hex(0x2C2B37), hex(0xF2EEF2), hex(0x9C98A6), hex(0x383744), hex(0x4B4A5A), hex(0x25242E), hex(0x2A2933), hex(0x93DED3),
+    hex(0x22212B), hex(0x2C2B37), hex(0xF2EEF2), hex(0x9C98A6), hex(0x383744), hex(0x4B4A5A), hex(0x25242E), hex(0x2A2933),
     {hex(0), hex(0x2BD9D9), hex(0x5A9BFF), hex(0xFF8C2B), hex(0xFFD52E), hex(0x4EDB4A), hex(0xC07EFF), hex(0xFF5F70), hex(0x9C98A6)},
     0.30f,
 };
@@ -29,7 +29,8 @@ constexpr float kLeftX = 266, kBoardCardX = 516, kRightX = 944, kColumnW = 230, 
 constexpr float kBoardX = kBoardCardX + 14, kBoardY = kRowY + 14, kCell = 38;
 constexpr float kToggleW = 76, kToggleH = 38, kBarSide = 32;
 constexpr float kLabelTracking = 1.1f;
-constexpr float kTimeTracking = -1.32f, kPaceTracking = -0.8f;
+constexpr float kTimeTracking = -1.32f;
+constexpr float kHoldCell = 24, kNextCell = 44, kNextSlot = 144;
 
 constexpr const char* kFontFiles[] = {"PlusJakartaSans-Regular.ttf", "PlusJakartaSans-SemiBold.ttf", "PlusJakartaSans-Bold.ttf"};
 struct FontSpec {
@@ -37,7 +38,7 @@ struct FontSpec {
     float size;
 };
 // Same order as Ui::FontId.
-constexpr FontSpec kFontSpecs[] = {{2, 20}, {1, 14}, {1, 12}, {2, 44}, {0, 16}, {1, 15}, {2, 32}, {0, 12}};
+constexpr FontSpec kFontSpecs[] = {{2, 20}, {1, 14}, {1, 12}, {2, 44}, {0, 16}, {1, 15}, {0, 12}};
 
 float clamp01(float value) { return std::clamp(value, 0.0f, 1.0f); }
 
@@ -282,9 +283,8 @@ void Ui::block(int x, int y, Color color, float alpha) {
     fill(kBoardX + x * kCell + 1, kBoardY + (core::kVisibleHeight - 1 - y) * kCell + 1, kCell - 2, kCell - 2, color, 7, alpha);
 }
 
-void Ui::preview(core::Piece piece, float centerX, float centerY) {
+void Ui::preview(core::Piece piece, float centerX, float centerY, float cell) {
     if (piece == core::Piece::None) return;
-    constexpr float cell = 24;
     core::Falling shape;
     shape.piece = piece;
     auto cells = shape.cells();
@@ -312,7 +312,7 @@ void Ui::drawPlay(const PlayView& view) {
     topBar("40 Lines");
 
     card(kLeftX, kRowY, kColumnW, 127, "HOLD");
-    preview(game.hold, kLeftX + kColumnW / 2, kRowY + 77);
+    preview(game.hold, kLeftX + kColumnW / 2, kRowY + 77, kHoldCell);
 
     card(kLeftX, 215, kColumnW, 321, "TIME");
     char buffer[32];
@@ -357,12 +357,10 @@ void Ui::drawPlay(const PlayView& view) {
         for (const core::Cell& c : game.falling.cells()) block(c.x, c.y, color, 1);
     }
 
-    card(kRightX, kRowY, kColumnW, 383, "NEXT");
+    // Large, because the owner reads the queue in peripheral vision.
+    card(kRightX, kRowY, kColumnW, 788, "NEXT");
     // Fixed slots, so the queue doesn't jump as flat I pieces pass through it.
-    for (int i = 0; i < 5 && i < static_cast<int>(game.queue.size()); i++) preview(game.queue[i], kRightX + kColumnW / 2, kRowY + 77 + 64.0f * i);
-
-    card(kRightX, 471, kColumnW, 101, "PACE VS BEST");
-    text(FontPace, view.pace, kRightX + 20, 545, view.paceAhead ? colors.good : colors.text, Align::Left, kPaceTracking);
+    for (int i = 0; i < 5 && i < static_cast<int>(game.queue.size()); i++) preview(game.queue[i], kRightX + kColumnW / 2, kRowY + 120 + kNextSlot * i, kNextCell);
 
     if (view.bannerTitle) {
         float centerX = kBoardX + 190, centerY = kBoardY + 380;
