@@ -125,12 +125,13 @@ void testSettings() {
     assert(loaded.profile().handling.das == core::Handling{}.das);
     std::filesystem::remove(path);
 
-    Splits splits{};
-    splits[40] = 31.5;
-    saveBest(splits, path);
-    assert(loadBest(path)[40] == 31.5);
+    saveBest(31.5, path);
+    assert(loadBest(path) == 31.5);
+    // A best saved before splits were dropped still counts.
+    { std::ofstream(path) << R"({"splits": [0, 1.5, 60.5]})"; }
+    assert(loadBest(path) == 60.5);
     std::filesystem::remove(path);
-    assert(loadBest(path)[40] == 0);
+    assert(loadBest(path) == 0);
 }
 
 constexpr uint64_t kTickNs = 16'666'667;  // rounded up, so n * kTickNs has reached tick n
@@ -263,13 +264,6 @@ void testPlayRun() {
     play.stepTo(kTickNs * 10);
     assert(play.game.frame == 10);
 
-    // Each line of a multi-line clear gets a split.
-    play.game.stats.lines = 4;
-    play.stepTo(kTickNs * 11);
-    assert(play.splitLines == 4);
-    assert(play.splits[1] == play.game.seconds());
-    assert(play.splits[4] == play.game.seconds());
-
     // Finishing ends the run, freezes the clock and saves the first best.
     play.game.stats.lines = 41;
     play.stepTo(kTickNs * 600);
@@ -277,11 +271,11 @@ void testPlayRun() {
     uint64_t finalFrame = play.game.frame;
     play.stepTo(kTickNs * 1000);
     assert(play.game.frame == finalFrame);
-    assert(play.best[40] == play.splits[40]);
-    assert(loadBest(path)[40] == play.splits[40]);
+    assert(play.best == play.seconds());
+    assert(loadBest(path) == play.seconds());
 
     // A slower run doesn't replace the best.
-    double best = play.best[40];
+    double best = play.best;
     play.restart({}, 1, 0);
     assert(!play.over);
     play.stepTo(0);
@@ -289,8 +283,8 @@ void testPlayRun() {
     play.game.stats.lines = 40;
     play.stepTo(kTickNs * (play.game.frame + 1));
     assert(play.over);
-    assert(play.best[40] == best);
-    assert(loadBest(path)[40] == best);
+    assert(play.best == best);
+    assert(loadBest(path) == best);
 
     // The finish time includes the subframe of the hard drop that finished.
     {
@@ -309,8 +303,24 @@ void testPlayRun() {
         assert(finish.over);
         assert(finish.game.frame == 6);
         assert(std::abs(finish.seconds() - 5.25 / 60) < 1e-6);
-        assert(finish.best[40] == finish.seconds());
-        assert(finish.splits[40] == finish.seconds());
+        assert(finish.best == finish.seconds());
+    }
+
+    // A new goal is one row: the run follows it, and keeps its own rules.
+    {
+        const Mode row = {"Ten", "", {.previews = 3}, 10, ""};
+        Play ten;
+        ten.mode = &row;
+        ten.bestPath = path;
+        ten.restart({}, 1, 0);
+        assert(ten.game.rules.previews == 3);
+        ten.game.stats.lines = 9;
+        ten.stepTo(kTickNs);
+        assert(!ten.over);
+        ten.game.stats.lines = 10;
+        ten.stepTo(kTickNs * 2);
+        assert(ten.over);
+        assert(ten.best == ten.seconds());
     }
     std::filesystem::remove(path);
 }
@@ -341,7 +351,6 @@ void testPlayDoesNotAllocate() {
         // Keep the run alive; this test is only about what the loop allocates.
         play.game.board = {};
         play.game.stats.lines = 0;
-        play.splitLines = 0;
     }
     assert(allocations == before);
     assert(!play.over);

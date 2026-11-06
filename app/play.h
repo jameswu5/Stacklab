@@ -1,4 +1,4 @@
-// A 40L run: feeds timestamped inputs to the simulation and tracks splits.
+// A run of one mode: feeds timestamped inputs to the simulation and ends the run.
 #pragma once
 
 #include <array>
@@ -8,13 +8,14 @@
 #include "app/settings.h"
 #include "app/timing.h"
 #include "core/game.h"
+#include "modes/modes.h"
 
-constexpr int kGoalLines = 40;
 // ponytail: the owner's replays use stride's shorter Ready-Set-Go, whose length
 // isn't recorded or published. Tune this against TETR.IO by feel.
 constexpr uint64_t kCountdownNs = 1'000'000'000;
 
 struct Play {
+    const Mode* mode = &kModes[0];
     core::Game game{core::Ruleset{}, core::Handling{}, 1};
     // game stepped through the tick in progress, so inputs appear at once.
     // Constructed, not copied, so it has the capacity that copying into it relies on.
@@ -28,9 +29,7 @@ struct Play {
     double endSeconds = 0;  // the clock once the run is over
 
     std::string bestPath;
-    Splits best{};
-    Splits splits{};
-    int splitLines = 0;
+    double best = 0;  // the mode's personal best in seconds, 0 if there is none
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 

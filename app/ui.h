@@ -6,11 +6,13 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include <array>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "app/settings.h"
 #include "core/game.h"
+#include "modes/modes.h"
 
 struct Color {
     float r, g, b;
@@ -23,6 +25,7 @@ struct Palette {
 };
 
 struct PlayView {
+    const Mode* mode;
     const core::Game* game;
     double seconds;         // the clock
     bool over;              // the piece is hidden and the banner shows
@@ -38,6 +41,7 @@ public:
 
     // Every draw starts with beginFrame, which follows the output size.
     void beginFrame();
+    void drawMenu(int selected, std::span<const double> bests);  // one row per mode, then Settings
     void drawPlay(const PlayView& view);
     void drawSettings(const Settings& settings, int selected, bool capturing);
     void drawOverlay(const char* frameLine, const char* inputLine, const char* presentLine);
