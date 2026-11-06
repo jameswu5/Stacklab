@@ -7,7 +7,7 @@
 #include "core/game.h"
 
 // Which rows a mode's stats card shows, as flags.
-enum Stat { StatLines = 1, StatPieces = 2, StatPPS = 4, StatKPP = 8, StatAPM = 16, StatAPP = 32, StatFinesse = 64 };
+enum Stat { StatLines = 1, StatPieces = 2, StatPPS = 4, StatKPP = 8, StatAPM = 16, StatAPP = 32, StatFinesse = 64, StatScore = 128, StatLevel = 256, StatGarbage = 512 };
 
 struct Mode {
     const char* name;   // on the menu and in the top bar
@@ -37,6 +37,7 @@ inline const Mode kModes[] = {
      .blurb = "Score as much as you can in 2 minutes",
      .rules = {.may20g = false, .noSzo = true, .levels = true, .levelSpeed = 0.42, .levelGBase = 0.65, .spinBonuses = core::SpinBonuses::TSpins},
      .bestFile = "best-blitz.json",
+     .stats = StatScore | StatLevel | StatLines | StatPieces | StatPPS | StatKPP | StatAPM | StatAPP,
      .timeLimitSeconds = 120},
     // ponytail: messiness 0.5 is a guess; tune it once the owner has dug on it
     {.name = "Dig 10",
@@ -44,6 +45,7 @@ inline const Mode kModes[] = {
      .rules = {.noSzo = true},
      .goalLines = 10,
      .bestFile = "best-dig-10.json",
+     .stats = StatGarbage | StatPieces | StatPPS | StatKPP | StatFinesse,
      .garbageRows = 10,
      .messiness = 0.5},
     {.name = "Dig 18",
@@ -51,6 +53,7 @@ inline const Mode kModes[] = {
      .rules = {.noSzo = true},
      .goalLines = 18,
      .bestFile = "best-dig-18.json",
+     .stats = StatGarbage | StatPieces | StatPPS | StatKPP | StatFinesse,
      .garbageRows = 18,
      .messiness = 0.5},
     {.name = "Sandbox",

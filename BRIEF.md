@@ -119,9 +119,13 @@ struct Mode {
     const char* name;      // on the menu and in the top bar
     const char* blurb;     // under the name on the menu
     core::Ruleset rules;
-    int goalLines;         // reaching this many lines ends the run
-    const char* bestFile;  // holds the personal best, under the pref path
+    int goalLines = 0;               // reaching this many lines ends the run; 0 is no goal
+    const char* bestFile = nullptr;  // holds the personal best, under the pref path; null keeps none
     int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
+    int timeLimitSeconds = 0;        // reaching this ends the run, and the best is then the highest score
+    int garbageRows = 0;             // on the starting board; only lines that held garbage then count toward the goal
+    double messiness = 0;            // the chance a row's hole moves from the row below's
+    bool editable = false;           // the mouse edits the board, hold and queue, and topping out clears the board
 };
 ```
 

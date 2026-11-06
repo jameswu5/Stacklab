@@ -422,6 +422,33 @@ void testSandbox() {
     assert(play.game.board.at(3, 21) == core::Piece::None);
 }
 
+// A mode without garbage leaves the garbage RNG alone, seen here through random rounding.
+void testNoGarbageRowsKeepsRng() {
+    auto sends = [](core::Game& game) {
+        std::vector<int> out;
+        for (int i = 0; i < 40; i++) {
+            for (int y = 0; y < 4; y++)
+                for (int x = 1; x < core::kBoardWidth; x++) game.board.at(x, y) = core::Piece::Garbage;
+            game.board.at(1, 4) = core::Piece::Garbage;
+            game.falling.piece = core::Piece::I;
+            game.falling.rot = 1;
+            game.falling.x = -2;
+            game.falling.y = 10.5;
+            game.stats.b2b = 1;  // a quad then sends 5.65 before rounding
+            game.stats.combo = -1;
+            const core::InputEvent drop[] = {{Action::HardDrop, true, 0}, {Action::HardDrop, false, 0}};
+            out.push_back(game.tick(drop)[0].sends[3]);
+        }
+        return out;
+    };
+    const Mode row = {.name = "None", .blurb = "", .rules = {.roundDown = false}, .messiness = 1};
+    Play play;
+    play.mode = &row;
+    play.restart({}, 1, 0);
+    core::Game untouched(row.rules, {}, 1);
+    assert(sends(play.game) == sends(untouched));
+}
+
 // A few minutes of fast play, after a warm-up: nothing may reach the allocator.
 void testPlayDoesNotAllocate() {
     Play play;
@@ -467,6 +494,7 @@ int main() {
     testBlitzEnd();
     testDigGoal();
     testSandbox();
+    testNoGarbageRowsKeepsRng();
     testPlayDoesNotAllocate();
     return 0;
 }
