@@ -1,0 +1,13 @@
+{
+  "name": "First steps 2",
+  "blurb": "A sample: close the gap, then build on the clean board",
+  "board": [
+    "XXXXXXXX..",
+    "XXXXXXXX.."
+  ],
+  "queue": { "type": "fixed", "pieces": "OT" },
+  "targets": [
+    { "piece": "O", "x": 8, "y": 1, "rot": 0 },
+    { "piece": "T", "x": 3, "y": 1, "rot": 0 }
+  ]
+}

@@ -17,10 +17,11 @@ target_link_libraries(ai PUBLIC core)
 
 find_package(SDL3 REQUIRED)
 find_package(SDL3_ttf REQUIRED)
-add_executable(stacklab app/main.cpp app/play.cpp app/ui.cpp app/settings.cpp)
+add_executable(stacklab app/main.cpp app/play.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(stacklab PRIVATE core SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json objc)
 add_custom_command(TARGET stacklab POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:stacklab>/assets)
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:stacklab>/assets
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:stacklab>/data)
 
 include(FetchContent)
 FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
@@ -39,9 +40,9 @@ add_executable(ai_test tests/ai_test.cpp)
 target_link_libraries(ai_test PRIVATE ai)
 add_test(NAME ai_test COMMAND ai_test)
 
-add_executable(app_test tests/app_test.cpp app/play.cpp app/settings.cpp)
+add_executable(app_test tests/app_test.cpp app/play.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(app_test PRIVATE core SDL3::SDL3 nlohmann_json::nlohmann_json)
-add_test(NAME app_test COMMAND app_test)
+add_test(NAME app_test COMMAND app_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads data/drills
 
 add_executable(ui_shot tests/ui_shot.cpp app/ui.cpp app/settings.cpp)
 target_link_libraries(ui_shot PRIVATE core SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)

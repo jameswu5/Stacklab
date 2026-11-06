@@ -12,6 +12,7 @@
 
 #include "app/settings.h"
 #include "core/game.h"
+#include "modes/drill.h"
 #include "modes/modes.h"
 
 struct Color {
@@ -42,6 +43,8 @@ struct PlayView {
     const char* hint;    // under the results
     double best;
     std::span<const RunResult> history;  // this session's ended runs, oldest first; when over, the last is this run
+    const Drill* drill = nullptr;  // names the run, and its targets are drawn
+    uint64_t filled = 0;           // a bit per target already placed
 };
 
 class Ui {
@@ -53,6 +56,7 @@ public:
     // Every draw starts with beginFrame, which follows the output size.
     void beginFrame();
     void drawMenu(int selected, std::span<const double> bests);  // one row per mode, then Settings
+    void drawDrills(int selected, std::span<const Drill> drills, const char* error);  // error is null or a file that couldn't be used
     void drawPlay(const PlayView& view);
     void drawSettings(const Settings& settings, int selected, bool capturing);
     void drawOverlay(const char* frameLine, const char* inputLine, const char* presentLine);

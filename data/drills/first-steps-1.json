@@ -1,0 +1,12 @@
+{
+  "name": "First steps 1",
+  "blurb": "A sample: lay a flat base, in any order",
+  "queue": { "type": "fixed", "pieces": "IOJ" },
+  "targets": [
+    { "piece": "I", "x": 0, "y": 1, "rot": 0 },
+    { "piece": "O", "x": 4, "y": 1, "rot": 0 },
+    { "piece": "J", "x": 6, "y": 1, "rot": 0 }
+  ],
+  "onMiss": "retry",
+  "next": "first-steps-2"
+}
