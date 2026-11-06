@@ -422,18 +422,28 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
     int topB2b = -1, topCombo = -1, finishFrame = -1;
     const int objectiveLines = options.value("objective_type", std::string()) == "lines" ? options.value("objective_count", 0) : 0;
     size_t next = 0;
-    for (int frame = 0; frame < ticks; frame++) {
+    const auto playTick = [&](int frame) {
         for (const core::LockResult& lock : step(game, inputs, next, frame)) {
             topB2b = std::max(topB2b, lock.b2b);
             topCombo = std::max(topCombo, lock.combo);
             countClear(clears, lock);
         }
         if (finishFrame < 0 && objectiveLines > 0 && game.stats.lines >= objectiveLines) finishFrame = frame;
+    };
+    for (int frame = 0; frame < ticks; frame++) {
+        playTick(frame);
         if (game.toppedOut && frame + 1 < ticks) {
             return "frame " + std::to_string(frame) + " of " + std::to_string(ticks) + ": topped out early after " +
                    std::to_string(game.stats.pieces) + " pieces, " + std::to_string(game.stats.lines) + " lines\n" +
                    boardText(rowsOf(game.board)) + recentInputs(inputs, frame);
         }
+    }
+    // A natural lock on the end frame that tops the player out is what ended the
+    // round, so TETR.IO's recorded end state includes that tick.
+    if (ticks == endFrame && !game.toppedOut) {
+        core::Game peek = game;
+        peek.tick({});
+        if (peek.toppedOut) playTick(endFrame);
     }
 
     std::string diffs;
@@ -450,6 +460,7 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
     stat("topbtb", s["topbtb"], topB2b + 1);
     stat("topcombo", s["topcombo"], topCombo + 1);
     stat("level", s["level"], game.stats.level);
+    stat("score", s["score"], game.stats.score);
     stat("level_lines", s["level_lines"], game.stats.levelLines);
     for (const auto& [name, want] : s["clears"].items()) stat("clears." + name, want, clears[name]);
     if (options.value("hasgarbage", false)) stat("attack", s["garbage"]["attack"], game.stats.attack);
