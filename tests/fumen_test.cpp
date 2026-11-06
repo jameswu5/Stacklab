@@ -188,6 +188,11 @@ void workedRepeats() {
     // A locked one does, even across a repeat.
     const auto locked = parseFumen("v115@vhBRQJAgH");
     assert(rows(locked[1].board) == (Rows{"...IIII..."}));
+    // A lock clears full rows even with no piece, so the second fill starts from empty.
+    const Rows allI(23, "IIIIIIIIII");
+    const auto refilled = parseFumen("v115@flAgHflAgH");
+    assert(rows(refilled[0].board) == allI);
+    assert(rows(refilled[1].board) == allI);
 }
 
 // Every piece and rotation, placed well above the floor: fumen's cells must be the
@@ -247,7 +252,7 @@ void workedErrors() {
     expectError("v115@\xE3\x81\x82", "invalid character");
     expectError("v115@lhTeAgH", "runs past the board on page 0");
     expectError("v115@/dAgH", "invalid field cell on page 0");
-    expectError("v115@vhAAgHflAgHflAgH", "invalid field cell on page 2");
+    expectError("v115@vhAAgHA8uhAgHwhuhAgH", "invalid field cell on page 2");  // grey, then one past it
     expectError("v115@vhAxSJ", "piece off the board on page 0");
     expectError("v115@vhAAA8", "invalid flags on page 0");
     expectError("v115@vhAAAPBAfBAAA", "invalid comment character");
