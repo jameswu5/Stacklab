@@ -1,4 +1,4 @@
-// Saved settings and the 40L personal best, as JSON under SDL_GetPrefPath.
+// Saved settings and personal bests, as JSON under SDL_GetPrefPath.
 #pragma once
 
 #include <SDL3/SDL_scancode.h>
@@ -46,11 +46,9 @@ void saveSettings(const Settings& settings, const std::string& path);
 // Binds the key to this action only, and clears it from any other.
 void bindKey(Profile& profile, Bind bind, SDL_Scancode key);
 
-// Time each line was reached in the personal best run. Index 0 is unused, and
-// splits[40] == 0 means there is no personal best yet.
-using Splits = std::array<double, 41>;
-Splits loadBest(const std::string& path);
-void saveBest(const Splits& splits, const std::string& path);
+// A mode's personal best in seconds, 0 if there is none.
+double loadBest(const std::string& path);
+void saveBest(double seconds, const std::string& path);
 
 // The settings screen is a flat list of rows.
 enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowSafelock, RowIrs, RowIhs, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, kRowCount };

@@ -84,6 +84,7 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 - **Blocks:** radius 7 with a 2 gap between cells. Next previews use 44 per cell and hold uses 24, with corner radius scaled to match.
 - **Ghost:** the piece colour at 42% opacity in light mode and 30% in dark mode.
 - **Toggle:** a pill with sun and moon icons, and a circular knob behind the active one.
+- **Menu:** the screen the app opens on. A centred card, 560 wide, with a row for each mode and one for Settings. Rows show the name (20, bold), a line of description and any personal best. Fixed keys: up, down and Enter.
 
 | Colour | Light | Dark |
 |---|---|---|
@@ -114,16 +115,15 @@ Piece colours are saturated rather than pastel, because the owner tracks pieces 
 
 ```cpp
 struct Mode {
-    virtual ~Mode() = default;
-    virtual void start(Match&) = 0;
-    virtual void onEvent(Match&, const GameEvent&) = 0;  // lock, clear, garbage, topout
-    virtual Outcome check(const Match&) = 0;
-    virtual void drawOverlay(const Match&, Canvas&) {}
-    virtual StatsLayout stats() const = 0;
+    const char* name;      // on the menu and in the top bar
+    const char* blurb;     // under the name on the menu
+    core::Ruleset rules;
+    int goalLines;         // reaching this many lines ends the run
+    const char* bestFile;  // holds the personal best, under the pref path
 };
 ```
 
-`Match` owns one or more players. A single table lists each menu entry as a name, a mode factory and parameters. A **submode** is an existing mode with different parameters, so adding one means adding a row. A **new drill** is a data file and needs no code.
+`kModes` in `modes/modes.h` is the single table of menu entries, and `app/play.cpp` acts on a row's values. A **submode** is an existing mode with different values, so adding one means adding a row. A new kind of mode adds the fields it needs here, and `Play` acts on them. This replaces the earlier sketch of a virtual `Mode` class: nothing needs one until a mode can't be described as data. A **new drill** is a data file and needs no code.
 
 ### Standard modes
 
