@@ -373,18 +373,20 @@ void countClear(std::map<std::string, int>& clears, const core::LockResult& lock
     if (lock.perfectClear) clears["allclear"]++;
 }
 
+enum class Skip { No, Garbage, NeverStarted };
+
 // Plays one player's round against what TETR.IO recorded. Every replay has final
 // stats. League rounds also store the final game in their `end` event; solo .ttr
 // files don't, so for those the board can't be checked directly. Solo stats also
 // report 0 attack, so sends only get checked on replays with garbage on.
-std::optional<std::string> playReplay(const json& replay, bool& skipped) {
+std::optional<std::string> playReplay(const json& replay, Skip& skip) {
     const json* endEvent = nullptr;
     std::vector<Input> inputs;
     for (const json& e : replay["events"]) {
         const std::string type = e["type"];
         // Incoming garbage is phase 6.
         if (type == "ige" && e["data"]["type"] == "interaction") {
-            skipped = true;
+            skip = Skip::Garbage;
             return std::nullopt;
         }
         if (type == "end") endEvent = &e;
@@ -401,7 +403,7 @@ std::optional<std::string> playReplay(const json& replay, bool& skipped) {
     const json& data = (*endEvent)["data"];
     const int endFrame = (*endEvent)["frame"];
     if (endFrame == 0) {  // disconnected before the game started
-        skipped = true;
+        skip = Skip::NeverStarted;
         return std::nullopt;
     }
 
@@ -514,7 +516,7 @@ int runReplays(const fs::path& folder) {
     }
     std::sort(files.begin(), files.end());
 
-    int passed = 0, failed = 0, skipped = 0;
+    int passed = 0, failed = 0, skippedGarbage = 0, neverStarted = 0;
     for (const fs::path& path : files) {
         const std::string name = fs::relative(path, folder).string();
         const auto fail = [&](const std::string& label, const std::string& why) {
@@ -550,9 +552,10 @@ int runReplays(const fs::path& folder) {
         }
 
         for (const auto& [label, round] : rounds) {
-            bool skip = false;
+            Skip skip = Skip::No;
             const auto m = playReplay(*round, skip);
-            if (skip) skipped++;
+            if (skip == Skip::Garbage) skippedGarbage++;
+            else if (skip == Skip::NeverStarted) neverStarted++;
             else if (m) fail(label, *m);
             else {
                 passed++;
@@ -561,7 +564,7 @@ int runReplays(const fs::path& folder) {
         }
     }
     std::cout << folder.filename().string() << " (TETR.IO recorded results): " << passed << " passed, " << failed << " failed, "
-              << skipped << " skipped (incoming garbage or never started)\n";
+              << skippedGarbage << " skipped for incoming garbage, " << neverStarted << " skipped as never started\n";
     return failed ? 1 : 0;
 }
 
