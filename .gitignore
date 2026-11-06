@@ -72,3 +72,6 @@ CLAUDE.md
 
 # Worker checkouts
 .worktrees/
+
+# TETR.IO replays include usernames, so they stay local
+replays/
