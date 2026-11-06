@@ -24,13 +24,24 @@ struct Palette {
     float ghostAlpha;
 };
 
+// One ended run, for the session history.
+struct RunResult {
+    const Mode* mode;
+    double seconds;
+    core::Stats stats;
+    bool toppedOut;
+    bool newBest;
+};
+
 struct PlayView {
     const Mode* mode;
     const core::Game* game;
-    double seconds;         // the clock
-    bool over;              // the piece is hidden and the banner shows
-    const char* bannerTitle;
-    const char* bannerHint;  // null shows the title alone, with no card
+    double seconds;  // the clock
+    bool over;       // the piece is hidden, and results replace the banner and queue
+    const char* banner;  // the countdown's word, or null
+    const char* hint;    // under the results
+    double best;
+    std::span<const RunResult> history;  // this session's ended runs, oldest first; when over, the last is this run
 };
 
 class Ui {
@@ -80,7 +91,9 @@ private:
     void topBar(const char* mode);
     void block(int x, int y, Color color, float alpha);
     void preview(core::Piece piece, float centerX, float centerY, float cell);
-    void statRow(int index, const char* name, const char* value);
+    void statRow(float x, float y, float w, const char* name, const char* value);
+    void results(const PlayView& view);
+    void sessionCard(const PlayView& view);
 
     SDL_Renderer* renderer_;
     std::array<Font, kFontCount> fonts_;

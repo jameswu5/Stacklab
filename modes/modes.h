@@ -6,12 +6,16 @@
 
 #include "core/game.h"
 
+// Which rows a mode's stats card shows, as flags.
+enum Stat { StatLines = 1, StatPieces = 2, StatPPS = 4, StatKPP = 8, StatAPM = 16, StatAPP = 32, StatFinesse = 64 };
+
 struct Mode {
     const char* name;   // on the menu and in the top bar
     const char* blurb;  // under the name on the menu
     core::Ruleset rules;
     int goalLines;         // reaching this many lines ends the run
     const char* bestFile;  // holds the personal best, under the pref path
+    int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;
 };
 
 inline const Mode kModes[] = {

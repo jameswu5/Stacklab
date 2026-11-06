@@ -45,6 +45,28 @@ void formatTime(char (&buffer)[32], double seconds) {
     std::snprintf(buffer, sizeof buffer, "%d:%02d.%02d", hundredths / 6000, hundredths / 100 % 60, hundredths % 100);
 }
 
+constexpr struct {
+    Stat stat;
+    const char* name;
+} kStatRows[] = {{StatLines, "Lines"}, {StatPieces, "Pieces"}, {StatPPS, "PPS"}, {StatKPP, "KPP"}, {StatAPM, "APM"}, {StatAPP, "APP"}, {StatFinesse, "Finesse"}};
+
+void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double seconds, int goalLines) {
+    double perPiece = stats.pieces > 0 ? 1.0 / stats.pieces : 0;
+    double perSecond = seconds > 0 ? 1 / seconds : 0;
+    switch (stat) {
+        case StatLines:
+            if (goalLines > 0) std::snprintf(buffer, sizeof buffer, "%d / %d", std::min(stats.lines, goalLines), goalLines);
+            else std::snprintf(buffer, sizeof buffer, "%d", stats.lines);
+            break;
+        case StatPieces: std::snprintf(buffer, sizeof buffer, "%d", stats.pieces); break;
+        case StatPPS: std::snprintf(buffer, sizeof buffer, "%.2f", stats.pieces * perSecond); break;
+        case StatKPP: std::snprintf(buffer, sizeof buffer, "%.2f", stats.keys * perPiece); break;
+        case StatAPM: std::snprintf(buffer, sizeof buffer, "%.1f", stats.attack * perSecond * 60); break;
+        case StatAPP: std::snprintf(buffer, sizeof buffer, "%.2f", stats.attack * perPiece); break;
+        case StatFinesse: std::snprintf(buffer, sizeof buffer, "-"); break;
+    }
+}
+
 float clamp01(float value) { return std::clamp(value, 0.0f, 1.0f); }
 
 SDL_Texture* maskTexture(SDL_Renderer* renderer, SDL_Surface* surface) {
@@ -303,12 +325,54 @@ void Ui::preview(core::Piece piece, float centerX, float centerY, float cell) {
         fill(left + (c.x - minX) * cell + 1, top + (maxY - c.y) * cell + 1, cell - 2, cell - 2, palette().pieces[static_cast<int>(piece)], 7 * cell / kCell);
 }
 
-void Ui::statRow(int index, const char* name, const char* value) {
+void Ui::statRow(float x, float y, float w, const char* name, const char* value) {
     const Palette& colors = palette();
-    float top = 326 + index * 38.0f;
-    fill(kLeftX + 20, top, kColumnW - 40, 1, colors.line);
-    text(FontRow, name, kLeftX + 20, top + 26, colors.muted);
-    text(FontValue, value, kLeftX + kColumnW - 20, top + 26, colors.text, Align::Right);
+    fill(x, y, w, 1, colors.line);
+    text(FontRow, name, x, y + 26, colors.muted);
+    text(FontValue, value, x + w, y + 26, colors.text, Align::Right);
+}
+
+// Over the board, so retrying from here is the same key on the same screen.
+void Ui::results(const PlayView& view) {
+    const Palette& colors = palette();
+    const RunResult& run = view.history.back();
+    constexpr float width = 300, height = 346, x = kBoardX + 190 - width / 2, top = kBoardY + 380 - height / 2;
+    fill(x, top, width, height, colors.card, 24);
+    const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : "Finished";
+    text(FontWord, title, x + width / 2, top + 42, colors.text, Align::Center);
+    char buffer[32];
+    formatTime(buffer, run.seconds);
+    text(FontTime, buffer, x + width / 2, top + 94, colors.text, Align::Center, kTimeTracking);
+
+    float y = top + 114;
+    for (const auto& row : kStatRows) {
+        if (!(row.stat & (StatPPS | StatKPP | StatAPM | StatAPP))) continue;
+        formatStat(buffer, row.stat, run.stats, run.seconds, view.mode->goalLines);
+        statRow(x + 24, y, width - 48, row.name, buffer);
+        y += 38;
+    }
+    formatTime(buffer, view.best);
+    statRow(x + 24, y, width - 48, "Best", view.best > 0 ? buffer : "-");
+    text(FontSmall, view.hint, x + width / 2, top + height - 16, colors.muted, Align::Center);
+}
+
+// Newest first, for this mode. Takes the queue's place once a run has ended.
+void Ui::sessionCard(const PlayView& view) {
+    const Palette& colors = palette();
+    card(kRightX, kRowY, kColumnW, 788, "SESSION");
+    constexpr int maxRows = 18;
+    int row = 0;
+    for (auto run = view.history.rbegin(); run != view.history.rend() && row < maxRows; ++run) {
+        if (run->mode != view.mode) continue;
+        float y = kRowY + 52 + row++ * 38.0f;
+        char time[32], value[32], pps[40];
+        if (run->newBest) fill(kRightX + 8, y, kColumnW - 16, 38, colors.line, 12);
+        formatTime(time, run->seconds);
+        formatStat(value, StatPPS, run->stats, run->seconds, 0);
+        std::snprintf(pps, sizeof pps, "%s PPS", value);
+        text(FontValue, run->toppedOut ? "Topped out" : time, kRightX + 20, y + 25, run->toppedOut ? colors.muted : colors.text);
+        text(FontSmall, run->newBest ? "New best" : pps, kRightX + kColumnW - 20, y + 25, colors.muted, Align::Right);
+    }
 }
 
 void Ui::drawMenu(int selected, std::span<const double> bests) {
@@ -342,19 +406,19 @@ void Ui::drawPlay(const PlayView& view) {
     card(kLeftX, kRowY, kColumnW, 127, "HOLD");
     preview(game.hold, kLeftX + kColumnW / 2, kRowY + 77, kHoldCell);
 
-    card(kLeftX, 215, kColumnW, 321, "TIME");
+    int statCount = 0;
+    for (const auto& row : kStatRows) statCount += (view.mode->stats & row.stat) != 0;
+    card(kLeftX, 215, kColumnW, 131 + statCount * 38.0f, "TIME");
     char buffer[32];
     formatTime(buffer, view.seconds);
     text(FontTime, buffer, kLeftX + 20, 303, colors.text, Align::Left, kTimeTracking);
-    std::snprintf(buffer, sizeof buffer, "%d / %d", game.stats.lines, view.mode->goalLines);
-    statRow(0, "Lines", buffer);
-    std::snprintf(buffer, sizeof buffer, "%d", game.stats.pieces);
-    statRow(1, "Pieces", buffer);
-    std::snprintf(buffer, sizeof buffer, "%.2f", view.seconds > 0 ? game.stats.pieces / view.seconds : 0.0);
-    statRow(2, "PPS", buffer);
-    std::snprintf(buffer, sizeof buffer, "%.2f", game.stats.pieces > 0 ? static_cast<double>(game.stats.keys) / game.stats.pieces : 0.0);
-    statRow(3, "KPP", buffer);
-    statRow(4, "Finesse", "-");
+    float rowY = 326;
+    for (const auto& row : kStatRows) {
+        if (!(view.mode->stats & row.stat)) continue;
+        formatStat(buffer, row.stat, game.stats, view.seconds, view.mode->goalLines);
+        statRow(kLeftX + 20, rowY, kColumnW - 40, row.name, buffer);
+        rowY += 38;
+    }
 
     fill(kBoardCardX, kRowY, 408, 788, colors.card, 28);
     fill(kBoardX, kBoardY, 380, 760, colors.boardBackground, 8);
@@ -384,19 +448,18 @@ void Ui::drawPlay(const PlayView& view) {
         for (const core::Cell& c : game.falling.cells()) block(c.x, c.y, color, 1);
     }
 
+    if (view.over) {
+        sessionCard(view);
+        results(view);
+        return;
+    }
+
     // Large, because the owner reads the queue in peripheral vision.
     card(kRightX, kRowY, kColumnW, 788, "NEXT");
     // Fixed slots, so the queue doesn't jump as flat I pieces pass through it.
     for (int i = 0; i < 5 && i < static_cast<int>(game.queue.size()); i++) preview(game.queue[i], kRightX + kColumnW / 2, kRowY + 120 + kNextSlot * i, kNextCell);
 
-    if (view.bannerTitle) {
-        float centerX = kBoardX + 190, centerY = kBoardY + 380;
-        if (view.bannerHint) {
-            fill(centerX - 130, centerY - 56, 260, 112, colors.card, 24);
-            text(FontRow, view.bannerHint, centerX, centerY + 34, colors.muted, Align::Center);
-        }
-        text(FontTime, view.bannerTitle, centerX, centerY + (view.bannerHint ? 6 : 16), colors.text, Align::Center);
-    }
+    if (view.banner) text(FontTime, view.banner, kBoardX + 190, kBoardY + 396, colors.text, Align::Center);
 }
 
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {
