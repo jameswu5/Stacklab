@@ -13,8 +13,8 @@ using nlohmann::json;
 
 namespace {
 
-constexpr const char* kBindKeys[kBindCount] = {"left", "right", "softDrop", "hardDrop", "cw", "ccw", "180", "hold", "retry", "menu"};
-constexpr const char* kBindNames[kBindCount] = {"Move left", "Move right", "Soft drop", "Hard drop", "Rotate CW", "Rotate CCW", "Rotate 180", "Hold", "Retry", "Menu"};
+constexpr const char* kBindKeys[kBindCount] = {"left", "right", "softDrop", "hardDrop", "cw", "ccw", "180", "hold", "retry", "menu", "undo"};
+constexpr const char* kBindNames[kBindCount] = {"Move left", "Move right", "Soft drop", "Hard drop", "Rotate CW", "Rotate CCW", "Rotate 180", "Hold", "Retry", "Menu", "Undo"};
 
 // A missing or damaged file reads as null, which leaves the defaults in place.
 json readJson(const std::string& path) {
@@ -58,6 +58,10 @@ Profile profileFromJson(const json& value) {
         for (int code : get(keys, kBindKeys[bind], std::vector<int>{}))
             if (code > 0 && code < SDL_SCANCODE_COUNT) profile.keys[bind].push_back(static_cast<SDL_Scancode>(code));
     }
+    // A file from before undo existed keeps its keys: undo's default can't take one.
+    if (!keys.contains("undo"))
+        for (int bind = 0; bind < BindUndo; bind++)
+            for (SDL_Scancode key : profile.keys[bind]) std::erase(profile.keys[BindUndo], key);
     return profile;
 }
 

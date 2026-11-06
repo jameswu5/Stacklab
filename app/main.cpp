@@ -100,6 +100,8 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
             app.screen = Screen::Menu;
             app.play.held.fill(0);
         }
+    } else if (bind == BindUndo) {
+        if (key.down) app.play.undo(key.timestamp);
     } else {
         app.play.key(static_cast<Bind>(bind), key.down, key.timestamp);
     }

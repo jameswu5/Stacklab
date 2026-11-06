@@ -23,6 +23,7 @@ struct Mode {
     int garbageRows = 0;
     double messiness = 0;
     bool editable = false;  // the mouse edits the board, hold and queue, and topping out clears the board
+    bool undo = false;      // the undo key takes back the last piece, clock included
 
     int goalProgress(const core::Stats& stats) const { return garbageRows > 0 ? stats.garbageCleared : stats.lines; }
     bool bestIsScore() const { return timeLimitSeconds > 0; }
@@ -59,6 +60,7 @@ inline const Mode kModes[] = {
     {.name = "Sandbox",
      .blurb = "Mouse paints the board; click hold or the queue to change them",
      .rules = {.noSzo = true},
-     .editable = true},
+     .editable = true,
+     .undo = true},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));

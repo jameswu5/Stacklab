@@ -33,6 +33,37 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     startNs = runStartNs;
     started = false;
     over = false;
+    if (mode->undo) {
+        if (undoSlots.empty()) {
+            undoSlots.reserve(kUndoDepth);
+            for (int i = 0; i < kUndoDepth; i++) undoSlots.emplace_back(core::Ruleset{}, core::Handling{}, 1);
+        }
+        undoCount = 0;
+        saveUndo();
+    }
+}
+
+void Play::saveUndo() {
+    undoNewest = (undoNewest + 1) % kUndoDepth;
+    undoSlots[undoNewest] = game;
+    undoCount = std::min(undoCount + 1, kUndoDepth);
+}
+
+void Play::undo(uint64_t timeNs) {
+    if (!mode->undo || !started || over) return;
+    if (undoCount > 1) {
+        undoNewest = (undoNewest + kUndoDepth - 1) % kUndoDepth;
+        undoCount--;
+    }
+    game = undoSlots[undoNewest];
+    // Later inputs in the tick that saved the slot may have moved the piece.
+    game.respawn(game.falling.piece);
+    startNs = timeNs - (game.frame * 1'000'000'000 + core::kTicksPerSecond - 1) / core::kTicksPerSecond;
+    // The slot remembers the keys held back then. At subframe 0 these release
+    // them before a charged move can act.
+    inputs.clear();
+    for (int action = 0; action < BindRetry; action++) inputs.push(static_cast<core::Action>(action), false, startNs, startNs, game.frame);
+    inputs.measured = inputs.events.size();  // not real key presses, so not for the latency readout
 }
 
 void Play::begin() {
@@ -87,6 +118,7 @@ void Play::stepTo(uint64_t nowNs) {
             }
         }
         inputs.consume(due.size());
+        if (mode->undo && !locks.empty()) saveUndo();
     }
 }
 

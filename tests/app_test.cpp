@@ -114,6 +114,12 @@ void testSettings() {
     assert(!loaded.profile().handling.ihsHold);
     assert(loaded.profile().keys[BindRight].size() == 2);
 
+    // A file from before undo existed gets its default key, unless that key is taken.
+    { std::ofstream(path) << R"({"profiles": [{"keys": {"left": [4]}}]})"; }
+    assert(loadSettings(path).profile().keys[BindUndo] == std::vector{SDL_SCANCODE_Q});
+    { std::ofstream(path) << R"({"profiles": [{"keys": {"left": [20]}}]})"; }  // Q
+    assert(loadSettings(path).profile().keys[BindUndo].empty());
+
     // A damaged file reads as defaults.
     { std::ofstream(path) << "{ not json"; }
     assert(loadSettings(path).profiles.size() == 1);
@@ -422,6 +428,91 @@ void testSandbox() {
     assert(play.game.board.at(3, 21) == core::Piece::None);
 }
 
+void testUndo() {
+    const Mode row = {.name = "Undo", .blurb = "", .rules = {}, .undo = true};
+    Play play;
+    play.mode = &row;
+    const uint64_t start = 1'000'000'000;
+    play.restart({}, 1, start);
+    uint64_t now = start;
+    play.undo(now);  // during the countdown: nothing
+    assert(!play.started);
+    auto drop = [&](Bind move) {
+        now += kTickNs * 30;
+        play.stepTo(now);
+        play.key(move, true, now);
+        play.key(move, false, now + 1);
+        play.key(BindHardDrop, true, now + 2);
+        play.key(BindHardDrop, false, now + 3);
+        now += kTickNs * 2;
+        play.stepTo(now);
+    };
+
+    core::Piece first = play.game.falling.piece;
+    drop(BindLeft);
+    const core::Board afterOne = play.game.board;
+    core::Piece second = play.game.falling.piece;
+    uint64_t frameAfterOne = play.undoSlots[play.undoNewest].frame;  // the lock's tick, a little before now
+    drop(BindRight);
+    assert(play.game.stats.pieces == 2);
+
+    // The state comes back, the piece is at the spawn, and the clock doesn't jump.
+    now += kTickNs * 30;
+    play.stepTo(now);
+    size_t before = allocations;
+    play.undo(now);
+    assert(play.game.stats.pieces == 1);
+    assert(play.game.board.cells == afterOne.cells);
+    assert(play.game.falling.piece == second);
+    assert(play.game.frame == frameAfterOne);
+    play.stepTo(now);
+    assert(play.game.frame == frameAfterOne);
+    now += kTickNs * 3;
+    play.stepTo(now);
+    assert(play.game.frame == frameAfterOne + 3);
+    assert(allocations == before);
+
+    // Past the first piece it stays there, and the board is as it began.
+    play.undo(now);
+    play.undo(now);
+    assert(play.game.stats.pieces == 0);
+    assert(play.game.falling.piece == first);
+    assert(play.game.board.cells == core::Board{}.cells);
+
+    // A left held when the slot was saved doesn't keep moving the restored piece.
+    play.key(BindLeft, true, now);
+    now += kTickNs * 12;  // past DAS, so it has slid to the wall
+    play.stepTo(now);
+    play.key(BindHardDrop, true, now);
+    play.key(BindHardDrop, false, now + 1);
+    now += kTickNs;
+    play.stepTo(now);
+    play.undo(now);
+    int spawnX = play.game.falling.x;
+    now += kTickNs * 12;
+    play.stepTo(now);
+    assert(play.game.falling.x == spawnX);
+    play.key(BindLeft, false, now);
+
+    // The ring forgets the oldest, and undo stops there. Topping out here ends the run, so the board is emptied.
+    play.restart({}, 1, now);
+    play.stepTo(now);
+    for (int i = 0; i < kUndoDepth + 10; i++) {
+        drop(BindLeft);
+        play.game.board = {};
+    }
+    assert(play.undoCount == kUndoDepth);
+    for (int i = 0; i < kUndoDepth + 10; i++) play.undo(now);
+    assert(play.game.stats.pieces == 11);
+
+    // A mode without undo ignores the key.
+    Play plain;
+    plain.restart({}, 1, 0);
+    plain.stepTo(kTickNs);
+    plain.undo(kTickNs);
+    assert(plain.game.frame == 1 && plain.undoSlots.empty());
+}
+
 // A mode without garbage leaves the garbage RNG alone, seen here through random rounding.
 void testNoGarbageRowsKeepsRng() {
     auto sends = [](core::Game& game) {
@@ -494,6 +585,7 @@ int main() {
     testBlitzEnd();
     testDigGoal();
     testSandbox();
+    testUndo();
     testNoGarbageRowsKeepsRng();
     testPlayDoesNotAllocate();
     return 0;
