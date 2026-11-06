@@ -42,14 +42,14 @@ struct InputQueue {
 
     // An event that reaches us after its tick ran goes at the start of the
     // current tick. Positions stay in order either way.
-    void push(core::Action action, bool pressed, uint64_t timeNs, uint64_t startNs, uint64_t currentTick) {
+    void push(core::Action action, bool pressed, uint64_t timeNs, uint64_t startNs, uint64_t currentTick, bool hoisted = false) {
         TickPos pos = tickAt(timeNs > startNs ? timeNs - startNs : 0);
         if (pos.tick < currentTick) pos = {currentTick, 0};
         if (!events.empty() && pos.tick <= ticks.back()) {
             pos.tick = ticks.back();
             pos.subframe = std::max(pos.subframe, events.back().subframe);
         }
-        events.push_back({action, pressed, pos.subframe});
+        events.push_back({action, pressed, pos.subframe, hoisted});
         ticks.push_back(pos.tick);
         times.push_back(timeNs);
     }

@@ -126,7 +126,7 @@ void drawFrame(App& app, Ui& ui) {
         ui.drawSettings(app.settings, app.selected, app.capturing);
     } else {
         const char* title = !play.over ? nullptr : play.game.toppedOut ? "Topped out" : "Finished";
-        ui.drawPlay({&play.shown, play.over, play.pace, play.paceAhead, title, "Press retry to go again"});
+        ui.drawPlay({&play.shown, play.seconds(), play.over, play.pace, play.paceAhead, title, "Press retry to go again"});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];

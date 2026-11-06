@@ -1,5 +1,6 @@
 // Self-checks for input timing, saved settings and the 40L run.
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -124,7 +125,7 @@ void testSettings() {
     assert(loadBest(path)[40] == 0);
 }
 
-constexpr uint64_t kTickNs = 1'000'000'000 / core::kTicksPerSecond;
+constexpr uint64_t kTickNs = 16'666'667;  // rounded up, so n * kTickNs has reached tick n
 
 void testPlayKeys() {
     Play play;
@@ -146,10 +147,26 @@ void testPlayKeys() {
     assert(play.inputs.events[0].pressed);
     assert(play.inputs.ticks[0] == 0);
 
+    // Held left and right both carry over charged, most recently pressed last.
+    play.held.fill(0);
+    play.key(BindRight, true, 5000);
+    play.key(BindLeft, true, 5000);
+    play.restart({}, 1, 6000);
+    assert(play.inputs.events.size() == 2);
+    assert(play.inputs.events[0].action == Action::Right);
+    assert(play.inputs.events[1].action == Action::Left);
+    assert(play.inputs.events[0].hoisted && play.inputs.events[1].hoisted);
+    assert(play.inputs.events[1].subframe == 0);
+    // A press during play isn't.
+    play.key(BindHardDrop, false, 6000);
+    play.key(BindHardDrop, true, 7000);
+    assert(!play.inputs.events.back().hoisted);
+
     // A release with nothing held does nothing.
     play.held.fill(0);
-    play.key(BindRight, false, 5000);
-    assert(play.inputs.events.size() == 1);
+    play.restart({}, 1, 6000);
+    play.key(BindRight, false, 6000);
+    assert(play.inputs.events.empty());
 }
 
 void testPlayRun() {
@@ -166,7 +183,7 @@ void testPlayRun() {
 
     // Each line of a multi-line clear gets a split, and no best means no pace.
     play.game.stats.lines = 4;
-    play.stepTo(kTickNs * 12);
+    play.stepTo(kTickNs * 11);
     assert(play.splitLines == 4);
     assert(play.splits[1] == play.game.seconds());
     assert(play.splits[4] == play.game.seconds());
@@ -206,6 +223,26 @@ void testPlayRun() {
     assert(play.over);
     assert(play.best[40] == best);
     assert(loadBest(path)[40] == best);
+
+    // The finish time includes the subframe of the hard drop that finished.
+    {
+        Play finish;
+        finish.bestPath = path;
+        finish.restart({}, 1, 0);
+        finish.stepTo(kTickNs * 5);
+        finish.game.stats.lines = 39;
+        // Row 0 is full apart from where the piece will land.
+        auto landing = finish.game.ghost().cells();
+        for (int x = 0; x < core::kBoardWidth; x++) finish.game.board.at(x, 0) = core::Piece::Garbage;
+        for (const core::Cell& cell : landing) finish.game.board.at(cell.x, cell.y) = core::Piece::None;
+        uint64_t atTick5 = 5'000'000'000ull / core::kTicksPerSecond + 1;
+        finish.key(BindHardDrop, true, atTick5 + 4'166'667);  // a quarter of the way into tick 5
+        finish.stepTo(kTickNs * 7);
+        assert(finish.over);
+        assert(finish.game.frame == 6);
+        assert(std::abs(finish.seconds() - 5.25 / 60) < 1e-6);
+        assert(finish.best[40] == finish.seconds());
+    }
     std::filesystem::remove(path);
 }
 
@@ -229,13 +266,17 @@ void testPlayDoesNotAllocate() {
             play.stepShown(now);
         }
     };
-    playFor(120);
-    play.restart({}, 1, now);
-    playFor(120);
     size_t before = allocations;
-    play.game.toppedOut = false;
-    playFor(60 * 180);
+    for (int seconds = 0; seconds < 180; seconds++) {
+        playFor(60);
+        // Keep the run alive; this test is only about what the loop allocates.
+        play.game.board = {};
+        play.game.stats.lines = 0;
+        play.splitLines = 0;
+    }
     assert(allocations == before);
+    assert(!play.over);
+    assert(play.game.stats.pieces > 400);
 }
 
 }  // namespace

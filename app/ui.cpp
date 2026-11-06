@@ -315,14 +315,14 @@ void Ui::drawPlay(const PlayView& view) {
 
     card(kLeftX, 215, kColumnW, 321, "TIME");
     char buffer[32];
-    int hundredths = static_cast<int>(std::lround(game.seconds() * 100));
+    int hundredths = static_cast<int>(std::lround(view.seconds * 100));
     std::snprintf(buffer, sizeof buffer, "%d:%02d.%02d", hundredths / 6000, hundredths / 100 % 60, hundredths % 100);
     text(FontTime, buffer, kLeftX + 20, 303, colors.text, Align::Left, kTimeTracking);
     std::snprintf(buffer, sizeof buffer, "%d / 40", game.stats.lines);
     statRow(0, "Lines", buffer);
     std::snprintf(buffer, sizeof buffer, "%d", game.stats.pieces);
     statRow(1, "Pieces", buffer);
-    std::snprintf(buffer, sizeof buffer, "%.2f", game.seconds() > 0 ? game.stats.pieces / game.seconds() : 0.0);
+    std::snprintf(buffer, sizeof buffer, "%.2f", view.seconds > 0 ? game.stats.pieces / view.seconds : 0.0);
     statRow(2, "PPS", buffer);
     std::snprintf(buffer, sizeof buffer, "%.2f", game.stats.pieces > 0 ? static_cast<double>(game.stats.keys) / game.stats.pieces : 0.0);
     statRow(3, "KPP", buffer);

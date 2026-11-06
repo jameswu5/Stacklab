@@ -24,6 +24,7 @@ struct Palette {
 
 struct PlayView {
     const core::Game* game;
+    double seconds;         // the clock
     bool over;              // the piece is hidden and the banner shows
     const char* pace;       // text for the pace card
     bool paceAhead;         // whether the pace shows in the good colour

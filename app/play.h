@@ -13,11 +13,15 @@ constexpr int kGoalLines = 40;
 
 struct Play {
     core::Game game{core::Ruleset{}, core::Handling{}, 1};
-    core::Game shown = game;  // game stepped through the tick in progress, so inputs appear at once
+    // game stepped through the tick in progress, so inputs appear at once.
+    // Constructed, not copied, so it has the capacity that copying into it relies on.
+    core::Game shown{core::Ruleset{}, core::Handling{}, 1};
     InputQueue inputs;
     std::array<int, 8> held{};  // keys down per core::Action, since an action can have several keys
+    Bind lastMove = BindLeft;   // the most recently pressed of left and right
     uint64_t startNs = 0;
     bool over = false;
+    double endSeconds = 0;  // the clock once the run is over
 
     std::string bestPath;
     Splits best{};
@@ -32,4 +36,5 @@ struct Play {
     void key(Bind action, bool down, uint64_t timeNs);  // action is one of the first eight
     void stepTo(uint64_t nowNs);                        // runs every tick completed by this time
     void stepShown(uint64_t nowNs);                     // call after stepTo, before drawing `shown`
+    double seconds() const { return over ? endSeconds : shown.seconds(); }
 };
