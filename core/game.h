@@ -24,6 +24,7 @@ struct InputEvent {
     Action action;
     bool pressed;
     double subframe;
+    bool hoisted = false;  // left/right held since before the game: starts charged
 };
 
 // Stored in frames, as in TETR.IO. sdf == 41 means instant soft drop.
@@ -50,6 +51,7 @@ struct Ruleset {
     bool may20g = true;
     bool allow180 = true;
     bool allowHold = true;
+    bool clutch = true;
     int previews = 5;
     SpinBonuses spinBonuses = SpinBonuses::AllMiniPlus;
 
@@ -83,6 +85,12 @@ struct Falling {
     int rot = 0;  // 0 spawn, 1 CW, 2 180, 3 CCW
     int x = 0;
     double y = 0;  // fractional while falling; the occupied row is floor(y)
+
+    double locking = 0;  // frames spent on the ground since the last reset
+    int lockResets = 0;
+    int rotResets = 0;
+    int highestY = 0;  // lowest row reached; going below it refunds the resets
+    int totalRotations = 0;
 
     std::array<Cell, 4> cells() const;
 };
@@ -145,7 +153,52 @@ struct Game {
     double seconds() const { return static_cast<double>(frame) / kTicksPerSecond; }
 
 private:
+    struct Shift {
+        int dir;
+        bool held = false;
+        double arr = 0;
+        double das = 0;
+    };
+
+    bool fits(int rot, int x, int y) const;
+    void pushBag();
+    void nextPiece(bool isHold);
+    void spawn(Piece piece, bool isHold);
+    bool blockedOut();
+    void holdPiece();
+    void rotate(int amount);
+    Spin detectSpin(bool finOrTst) const;
+    bool shouldLock() const;
+    bool is20G() const;
+    bool fallBy(double amount);
+    void fall(double delta);
+    void lock();
+    int roundAttack(double amount);
+    void dcd();
+    void shift();
+    void processShift(Shift& s, double delta);
+    void processSubframe(double subframe);
+    void keyDown(const InputEvent& e);
+    void keyUp(const InputEvent& e);
+
+    Rng garbageRng_;  // TETR.IO keeps this separate from the bag; rounding draws from it
     std::vector<LockResult> locks_;
+    Shift left_{-1};
+    Shift right_{1};
+    int lastShift_ = -1;
+    bool softDropHeld_ = false;
+    bool cwHeld_ = false;
+    bool ccwHeld_ = false;
+    bool rot180Held_ = false;
+    bool holdHeld_ = false;
+    bool hitWall_ = false;
+    bool forceLock_ = false;
+    bool lastWasClear_ = false;
+    Spin lastSpin_ = Spin::None;
+    int safeLock_ = 0;
+    double subframe_ = 0;
+    double gravity_;
+    double garbageMultiplier_;
 };
 
 }  // namespace core
