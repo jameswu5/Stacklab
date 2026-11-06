@@ -484,6 +484,7 @@ void Game::lock() {
     result.lines = lines;
     result.spin = lastSpin_;
     result.perfectClear = pc;
+    result.garbageCleared = garbageCleared;
 
     if (garbage > 0 || specialBonus > 0) {
         result.sends[3] = roundAttack(garbage * garbageMultiplier_ + specialBonus);

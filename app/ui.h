@@ -48,6 +48,9 @@ public:
 
     // In output pixels.
     bool toggleHit(float x, float y) const;
+    bool boardCellAt(float x, float y, int& cellX, int& cellY) const;  // false outside the board
+    int queueSlotAt(float x, float y) const;                           // -1 outside the queue
+    bool holdHit(float x, float y) const;
 
 private:
     enum FontId { FontWord, FontPill, FontLabel, FontTime, FontRow, FontValue, FontSmall, kFontCount };

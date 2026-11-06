@@ -550,8 +550,9 @@ static void testFillGarbage() {
     Game dig(Ruleset{}, Handling{}, 5);
     dig.fillGarbage(2, 0);
     place(dig, Piece::I, 1, holeIn(dig, 0) - 2, 10.5);
-    tap(dig, Action::HardDrop);
+    const int digLocks = tap(dig, Action::HardDrop)[0].garbageCleared;
     assert(dig.stats.lines == 2 && dig.stats.garbageCleared == 2);
+    assert(digLocks == 2);
     for (int x = 0; x < kBoardWidth; x++) dig.board.at(x, 8) = Piece::J;
     place(dig, Piece::O, 0, 0, 12.5);
     tap(dig, Action::HardDrop);

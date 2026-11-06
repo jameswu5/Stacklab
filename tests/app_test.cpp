@@ -325,6 +325,103 @@ void testPlayRun() {
     std::filesystem::remove(path);
 }
 
+void testBlitzEnd() {
+    std::string path = (std::filesystem::temp_directory_path() / "stacklab_best_blitz.json").string();
+    std::filesystem::remove(path);
+    const Mode row = {.name = "Timed", .blurb = "", .rules = {}, .bestFile = "", .timeLimitSeconds = 2};
+    Play play;
+    play.mode = &row;
+    play.bestPath = path;
+    play.restart({}, 1, 0);
+    play.stepTo(kTickNs * 119);
+    assert(!play.over);
+    play.game.stats.score = 500;
+    play.stepTo(kTickNs * 120);
+    assert(play.over && play.seconds() == 2);
+    assert(play.best == 500 && loadBest(path) == 500);
+
+    // The best is the highest score, not the lowest.
+    play.restart({}, 1, 0);
+    play.game.stats.score = 400;
+    play.stepTo(kTickNs * 120);
+    assert(play.over && play.best == 500 && loadBest(path) == 500);
+    play.restart({}, 1, 0);
+    play.game.stats.score = 600;
+    play.stepTo(kTickNs * 120);
+    assert(play.best == 600 && loadBest(path) == 600);
+
+    // Topping out isn't a finished run.
+    play.restart({}, 1, 0);
+    play.game.stats.score = 700;
+    play.game.toppedOut = true;
+    play.stepTo(kTickNs * 200);
+    assert(play.over && play.best == 600);
+    std::filesystem::remove(path);
+}
+
+void testDigGoal() {
+    std::string path = (std::filesystem::temp_directory_path() / "stacklab_best_dig.json").string();
+    std::filesystem::remove(path);
+    const Mode row = {.name = "Dig", .blurb = "", .rules = {}, .goalLines = 3, .bestFile = "", .garbageRows = 3, .messiness = 1};
+    Play play;
+    play.mode = &row;
+    play.bestPath = path;
+    play.restart({}, 1, 0);
+    assert(play.game.board.at(0, 2) != core::Piece::None || play.game.board.at(1, 2) != core::Piece::None);
+    assert(play.game.board.cells == play.shown.board.cells);
+
+    // Plain lines don't count, and garbage lines do.
+    play.game.stats.lines = 10;
+    play.game.stats.garbageCleared = 2;
+    play.stepTo(kTickNs);
+    assert(!play.over);
+    play.game.stats.garbageCleared = 3;
+    play.stepTo(kTickNs * 2);
+    assert(play.over && play.best == play.seconds() && loadBest(path) == play.best);
+    std::filesystem::remove(path);
+}
+
+void testSandbox() {
+    const Mode row = {.name = "Sandbox", .blurb = "", .rules = {}, .editable = true};
+    Play play;
+    play.mode = &row;
+    play.restart({}, 1, 0);
+    play.stepTo(kTickNs * 1000);
+    assert(!play.over);
+
+    // Painting stops at the falling piece, and the next tick sees the rest.
+    const core::Cell inside = play.game.falling.cells()[0];
+    play.paint(inside.x, inside.y, core::Piece::Garbage);
+    assert(play.game.board.at(inside.x, inside.y) == core::Piece::None);
+    play.paint(0, 0, core::Piece::Garbage);
+    play.stepShown(kTickNs * 1000);
+    assert(play.shown.board.at(0, 0) == core::Piece::Garbage);
+    play.paint(0, 0, core::Piece::None);
+    assert(play.game.board.at(0, 0) == core::Piece::None);
+
+    // The queue cycles through the seven pieces, and hold through no piece as well.
+    const core::Piece first = play.game.queue[0];
+    for (int i = 0; i < 7; i++) {
+        play.cycleQueue(0);
+        assert(play.game.queue[0] != core::Piece::None && play.game.queue[0] != core::Piece::Garbage);
+    }
+    assert(play.game.queue[0] == first);
+    assert(play.game.hold == core::Piece::None);
+    play.cycleHold();
+    assert(play.game.hold == core::Piece::I);
+    for (int i = 0; i < 7; i++) play.cycleHold();
+    assert(play.game.hold == core::Piece::None);
+
+    // Topping out clears the board and carries on, without allocating.
+    for (int x = 3; x < 7; x++) play.game.board.at(x, 21) = core::Piece::Garbage;
+    play.key(BindHardDrop, true, kTickNs * 1000 + 1);
+    size_t before = allocations;
+    play.stepTo(kTickNs * 1002);
+    assert(allocations == before);
+    assert(play.game.stats.pieces > 0 && !play.over && !play.game.toppedOut);
+    assert(play.game.board.at(3, 21) == core::Piece::None);
+}
+
 // A few minutes of fast play, after a warm-up: nothing may reach the allocator.
 void testPlayDoesNotAllocate() {
     Play play;
@@ -367,6 +464,9 @@ int main() {
     testCountdown();
     testFirstPiece();
     testPlayRun();
+    testBlitzEnd();
+    testDigGoal();
+    testSandbox();
     testPlayDoesNotAllocate();
     return 0;
 }

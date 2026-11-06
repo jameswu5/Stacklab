@@ -284,6 +284,25 @@ bool Ui::toggleHit(float x, float y) const {
     return x >= width_ - (kBarSide + kToggleW) * scale_ && x <= width_ - kBarSide * scale_ && y >= 15 * scale_ && y <= (15 + kToggleH) * scale_;
 }
 
+bool Ui::boardCellAt(float x, float y, int& cellX, int& cellY) const {
+    float pointX = (x - originX_) / scale_ - kBoardX, pointY = (y - originY_) / scale_ - kBoardY;
+    if (pointX < 0 || pointY < 0 || pointX >= core::kBoardWidth * kCell || pointY >= core::kVisibleHeight * kCell) return false;
+    cellX = static_cast<int>(pointX / kCell);
+    cellY = core::kVisibleHeight - 1 - static_cast<int>(pointY / kCell);
+    return true;
+}
+
+int Ui::queueSlotAt(float x, float y) const {
+    float pointX = (x - originX_) / scale_ - kRightX, pointY = (y - originY_) / scale_ - (kRowY + 120 - kNextSlot / 2);
+    if (pointX < 0 || pointX >= kColumnW || pointY < 0 || pointY >= 5 * kNextSlot) return -1;
+    return static_cast<int>(pointY / kNextSlot);
+}
+
+bool Ui::holdHit(float x, float y) const {
+    float pointX = (x - originX_) / scale_ - kLeftX, pointY = (y - originY_) / scale_ - kRowY;
+    return pointX >= 0 && pointX < kColumnW && pointY >= 0 && pointY < 127;
+}
+
 void Ui::block(int x, int y, Color color, float alpha) {
     fill(kBoardX + x * kCell + 1, kBoardY + (core::kVisibleHeight - 1 - y) * kCell + 1, kCell - 2, kCell - 2, color, 7, alpha);
 }
@@ -326,7 +345,8 @@ void Ui::drawMenu(int selected, std::span<const double> bests) {
         text(FontRow, isMode ? kModes[row].blurb : "Handling, keys and display", x + 32, y + 58, colors.muted);
         if (isMode && bests[row] > 0) {
             char buffer[32];
-            formatTime(buffer, bests[row]);
+            if (kModes[row].bestIsScore()) std::snprintf(buffer, sizeof buffer, "%d", static_cast<int>(bests[row]));
+            else formatTime(buffer, bests[row]);
             text(FontLabel, "BEST", x + width - 32, y + 31, colors.muted, Align::Right, kLabelTracking);
             text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
         }
@@ -346,15 +366,26 @@ void Ui::drawPlay(const PlayView& view) {
     char buffer[32];
     formatTime(buffer, view.seconds);
     text(FontTime, buffer, kLeftX + 20, 303, colors.text, Align::Left, kTimeTracking);
-    std::snprintf(buffer, sizeof buffer, "%d / %d", game.stats.lines, view.mode->goalLines);
-    statRow(0, "Lines", buffer);
+    if (view.mode->bestIsScore()) {
+        std::snprintf(buffer, sizeof buffer, "%d", game.stats.score);
+        statRow(0, "Score", buffer);
+    } else {
+        if (view.mode->goalLines > 0) std::snprintf(buffer, sizeof buffer, "%d / %d", view.mode->goalProgress(game.stats), view.mode->goalLines);
+        else std::snprintf(buffer, sizeof buffer, "%d", game.stats.lines);
+        statRow(0, view.mode->garbageRows > 0 ? "Garbage" : "Lines", buffer);
+    }
     std::snprintf(buffer, sizeof buffer, "%d", game.stats.pieces);
     statRow(1, "Pieces", buffer);
     std::snprintf(buffer, sizeof buffer, "%.2f", view.seconds > 0 ? game.stats.pieces / view.seconds : 0.0);
     statRow(2, "PPS", buffer);
     std::snprintf(buffer, sizeof buffer, "%.2f", game.stats.pieces > 0 ? static_cast<double>(game.stats.keys) / game.stats.pieces : 0.0);
     statRow(3, "KPP", buffer);
-    statRow(4, "Finesse", "-");
+    if (view.mode->bestIsScore()) {
+        std::snprintf(buffer, sizeof buffer, "%d", game.stats.level);
+        statRow(4, "Level", buffer);
+    } else {
+        statRow(4, "Finesse", "-");
+    }
 
     fill(kBoardCardX, kRowY, 408, 788, colors.card, 28);
     fill(kBoardX, kBoardY, 380, 760, colors.boardBackground, 8);

@@ -9,11 +9,11 @@ namespace {
 // When the goal was reached: at the hard drop that caused the lock, so the
 // time isn't rounded to a whole tick, or at the end of the tick for a lock
 // that no input caused. Each hard drop in a tick causes one of its locks, in order.
-double finishSeconds(const core::Game& game, std::span<const core::InputEvent> inputs, const std::vector<core::LockResult>& locks, int linesBefore, int goalLines) {
-    int lines = linesBefore, locksBefore = 0;
+double finishSeconds(const core::Game& game, std::span<const core::InputEvent> inputs, const std::vector<core::LockResult>& locks, int progressBefore, const Mode& mode) {
+    int progress = progressBefore, locksBefore = 0;
     for (const core::LockResult& lock : locks) {
-        lines += lock.lines;
-        if (lines >= goalLines) break;
+        progress += mode.garbageRows > 0 ? lock.garbageCleared : lock.lines;
+        if (progress >= mode.goalLines) break;
         locksBefore++;
     }
     for (const core::InputEvent& input : inputs) {
@@ -27,6 +27,7 @@ double finishSeconds(const core::Game& game, std::span<const core::InputEvent> i
 
 void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs) {
     game = core::Game(mode->rules, handling, seed);
+    if (mode->garbageRows > 0) game.fillGarbage(mode->garbageRows, mode->messiness);
     shown = game;
     inputs.clear();
     startNs = runStartNs;
@@ -58,24 +59,51 @@ void Play::stepTo(uint64_t nowNs) {
     uint64_t target = tickAt(nowNs > startNs ? nowNs - startNs : 0).tick;
     while (!over && game.frame < target) {
         auto due = inputs.due(game.frame);
-        int linesBefore = game.stats.lines;
+        int progressBefore = mode->goalProgress(game.stats);
         const auto& locks = game.tick(due);
 
-        if (game.toppedOut) {
+        if (game.toppedOut && mode->editable) {
+            game.board = core::Board{};
+            game.respawn(game.falling.piece);
+        } else if (game.toppedOut) {
             over = true;
             endSeconds = game.seconds();
         }
-        if (game.stats.lines >= mode->goalLines) {
+        // The run has ended in each of these, so file work can't disturb play.
+        if (mode->goalLines > 0 && mode->goalProgress(game.stats) >= mode->goalLines) {
             over = true;
-            endSeconds = finishSeconds(game, due, locks, linesBefore, mode->goalLines);
-            // The run has ended, so file work can't disturb play.
+            endSeconds = finishSeconds(game, due, locks, progressBefore, *mode);
             if (best == 0 || endSeconds < best) {
                 best = endSeconds;
                 saveBest(best, bestPath);
             }
         }
+        if (mode->bestIsScore() && !game.toppedOut && game.frame >= static_cast<uint64_t>(mode->timeLimitSeconds) * core::kTicksPerSecond) {
+            over = true;
+            endSeconds = game.seconds();
+            if (game.stats.score > best) {
+                best = game.stats.score;
+                saveBestScore(game.stats.score, bestPath);
+            }
+        }
         inputs.consume(due.size());
     }
+}
+
+void Play::paint(int x, int y, core::Piece piece) {
+    for (const core::Cell& cell : game.falling.cells())
+        if (cell.x == x && cell.y == y) return;
+    game.board.at(x, y) = piece;
+}
+
+void Play::cycleQueue(int slot) {
+    core::Piece& piece = game.queue[slot];
+    piece = static_cast<core::Piece>(static_cast<int>(piece) % 7 + 1);
+}
+
+// Goes through no piece as well.
+void Play::cycleHold() {
+    game.hold = static_cast<core::Piece>((static_cast<int>(game.hold) + 1) % 8);
 }
 
 // The tick in progress is run on a copy with the inputs received so far, so
