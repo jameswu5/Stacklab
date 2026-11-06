@@ -109,7 +109,7 @@ constexpr int kTCorners[4][4] = {{-1, -1, 3, 0}, {1, -1, 0, 1}, {1, 1, 1, 2}, {-
 int row(double y) { return static_cast<int>(std::floor(y)); }
 
 // Indexed by Spin, then lines. TETR.IO's solo table, from tetris.wiki/TETR.IO.
-// ponytail: no replay has a mini clearing lines or a spin quad, so those rows are unconfirmed; correct them from a replay that has one
+// ponytail: no replay has a mini quad or a spin quad, so those two are unconfirmed; correct them from a replay that has one
 constexpr int kClearScores[3][5] = {
     {0, 100, 300, 500, 800},
     {100, 200, 400, 800, 1600},
@@ -504,7 +504,8 @@ void Game::lock() {
     lastWasClear_ = lines > 0;
 
     int points = kClearScores[static_cast<int>(lastSpin_)][lines];
-    if (lines > 0 && (spun || lines >= 4) && stats.b2b > 0) points = points * 3 / 2;
+    // Replays only pin pcB2b with allclear_b2b 1; other values are assumed to behave the same.
+    if (lines > 0 && (spun || lines >= 4 || pcB2b) && stats.b2b > 0) points = points * 3 / 2;
     if (stats.combo > 0) points += 50 * stats.combo;
     if (pc) points += kPcScore;
 
