@@ -237,13 +237,32 @@ Larger clears add 1 per line, or 2 per line with a spin.
 
 What each source can check:
 
-| Source | Compared | Can't check |
-|---|---|---|
-| Solo `.ttr` | Pieces, lines, every clear type, B2B, combo, level, and the 40L finish frame | Boards, because none is recorded; attack, because it's recorded as 0 |
-| League `.ttrm` | The final board, hold, queue and stats from the `end` event | Where in the game a mismatch began |
-| Hand-derived fixtures | Every lock | Anything about TETR.IO; they only show core agrees with our reading of Triangle's source |
+| Source | Compared | Agrees with | Can't check |
+|---|---|---|---|
+| Solo `.ttr` | Pieces, lines, every clear type, B2B, combo, level, score, and the 40L finish frame | TETR.IO | Boards, because none is recorded; attack, because it's recorded as 0 |
+| League `.ttrm`, the owner's and Triangle's archive | Final board, hold, next 5, falling piece, stats, score and total attack, from the `end` event | TETR.IO | Rounds with incoming garbage, which are skipped until phase 6; attack per lock, because only the total is recorded; where a mismatch began |
+| `.ttrm` rounds replayed through Triangle (`gen_fixtures.mjs --replay`, stays local) | Every lock: piece, lines, spin, perfect clear, each send, B2B, combo, board | Triangle only | Anything Triangle gets wrong; `no_szo`; levels |
+| `tests/fixtures/*.json` from `gen_fixtures.mjs` | Every lock, the end state, and each tick's piece position where traced | Triangle only | Same as above |
+| Hand-derived fixtures | Every lock | Our reading of Triangle's source | Anything about TETR.IO |
 
-Files live in `replays/`, which is gitignored because they include usernames.
+The archive isn't part of `ctest`, so run it by hand: `tools/unpack_archive.mjs`, then `replay_parity replay-archive/unpacked`.
+
+A skipped round is not a pass. Results, using Triangle `@haelp/teto@4.2.8`:
+
+| Set | Checked | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| The owner's replays against TETR.IO | 7 | 7 | 0 | 77 for garbage |
+| Archive against TETR.IO, 5,220 files | 1,053 | 987 | 66, all score: a no-spin perfect clear of 1 to 3 lines misses the B2B bonus | 109,648 for garbage, 61 never started |
+| The same 1,053 rounds per lock against Triangle, 36,390 locks | 1,053 | 1,053 | 0 | None |
+| Generated fixtures against Triangle | 787 | 787 | 0 | None |
+
+Still unchecked:
+
+- **Incoming garbage:** cancelling, garbage columns, blocking and the opener phase. Only about 1% of archive rounds can be checked, and they're short, one-sided games averaging 12 seconds.
+- **Against TETR.IO:** mini quad and spin quad, score or attack; RNG rounding; special bonus; multiplier growth. The last three agree with Triangle only.
+- **Against anything:** a spin quad. `tests/fixtures/` has no I-piece spin and no mini double, though the archive replays contain 173 mini doubles.
+
+Files live in `replays/` and `replay-archive/`, which are gitignored because they include usernames or players' inputs.
 
 Two rules found by real replays aren't in Triangle's engine: `no_szo` and level gravity. The level gravity formula, level 1 gravity and `levelgspeed` are inferred from 3 Blitz games, and are marked with `ponytail:` comments in the code.
 

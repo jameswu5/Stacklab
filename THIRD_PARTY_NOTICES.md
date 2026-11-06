@@ -3,7 +3,8 @@
 ## Triangle.js
 
 `core/game.cpp` ports the engine rules, kick tables and piece data of
-[Triangle.js](https://github.com/halp1/triangle).
+[Triangle.js](https://github.com/halp1/triangle). `tools/gen_fixtures.mjs` adapts its replay
+test's options mapping, and `tests/fixtures/` holds output from its engine.
 
 Copyright (c) 2025 halp
 
