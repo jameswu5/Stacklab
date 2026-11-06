@@ -86,6 +86,11 @@ void testSettings() {
     adjustRow(settings, RowArr, -1);  // already at the minimum
     adjustRow(settings, RowSdf, -1);
     adjustRow(settings, RowVsync, 1);
+    adjustRow(settings, RowSafelock, 1);
+    adjustRow(settings, RowIrs, 1);
+    assert(rowValue(settings, RowSafelock) == "On");
+    assert(rowValue(settings, RowIrs) == "Hold");
+    assert(rowValue(settings, RowIhs) == "Tap");
     assert(settings.profile().handling.das == 5.9);
     assert(settings.profile().handling.arr == 0);
     assert(settings.profile().handling.sdf == 40);
@@ -104,6 +109,9 @@ void testSettings() {
     assert(loaded.dark);
     assert(loaded.profile().name == "Second");
     assert(loaded.profile().handling.das == 5.9);
+    assert(loaded.profile().handling.safelock);
+    assert(loaded.profile().handling.irsHold);
+    assert(!loaded.profile().handling.ihsHold);
     assert(loaded.profile().keys[BindRight].size() == 2);
 
     // A damaged file reads as defaults.
@@ -162,11 +170,40 @@ void testPlayKeys() {
     play.key(BindHardDrop, true, 7000);
     assert(!play.inputs.events.back().hoisted);
 
+    // A held hold or rotate carries over hoisted too, ahead of the moves. Hard
+    // drop never does, and soft drop isn't hoisted.
+    play.held.fill(0);
+    play.key(BindLeft, true, 6000);
+    for (Bind bind : {BindHardDrop, BindSoftDrop, Bind180, BindCCW, BindCW, BindHold}) play.key(bind, true, 6000);
+    play.restart({}, 1, 7000);
+    const std::vector<Action> order = {Action::SoftDrop, Action::Hold, Action::RotateCW, Action::RotateCCW, Action::Rotate180, Action::Left};
+    assert(play.inputs.events.size() == order.size());
+    for (size_t i = 0; i < order.size(); i++) {
+        assert(play.inputs.events[i].action == order[i]);
+        assert(play.inputs.events[i].pressed);
+        assert(play.inputs.ticks[i] == 0);
+        assert(play.inputs.events[i].subframe == 0);
+        assert(play.inputs.events[i].hoisted == (order[i] != Action::SoftDrop));
+    }
+    core::Piece first = play.game.falling.piece;
+    play.stepTo(7000 + kTickNs);
+    assert(play.game.hold == first);
+
     // A release with nothing held does nothing.
     play.held.fill(0);
     play.restart({}, 1, 6000);
     play.key(BindRight, false, 6000);
     assert(play.inputs.events.empty());
+}
+
+// As in the 40L replays, whose options all set no_szo.
+void testFirstPiece() {
+    Play play;
+    for (uint32_t seed = 1; seed <= 500; seed++) {
+        play.restart({}, seed, 0);
+        core::Piece piece = play.game.falling.piece;
+        assert(piece != core::Piece::S && piece != core::Piece::Z && piece != core::Piece::O);
+    }
 }
 
 void testPlayRun() {
@@ -287,6 +324,7 @@ int main() {
     testQueue();
     testSettings();
     testPlayKeys();
+    testFirstPiece();
     testPlayRun();
     testPlayDoesNotAllocate();
     return 0;

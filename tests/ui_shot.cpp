@@ -13,10 +13,12 @@
 #include "app/ui.h"
 #include "core/game.h"
 
+// Only this thread, while drawing: Apple's GPU driver allocates on its own threads.
+static thread_local bool counting = false;
 static size_t allocations = 0;
 
 void* operator new(size_t size) {
-    allocations++;
+    if (counting) allocations++;
     if (void* memory = std::malloc(size)) return memory;
     throw std::bad_alloc();
 }
@@ -31,15 +33,15 @@ SDL_realloc_func realRealloc;
 SDL_free_func realFree;
 
 void* countedMalloc(size_t size) {
-    allocations++;
+    if (counting) allocations++;
     return realMalloc(size);
 }
 void* countedCalloc(size_t count, size_t size) {
-    allocations++;
+    if (counting) allocations++;
     return realCalloc(count, size);
 }
 void* countedRealloc(void* memory, size_t size) {
-    allocations++;
+    if (counting) allocations++;
     return realRealloc(memory, size);
 }
 
@@ -98,6 +100,14 @@ int main(int argc, char** argv) {
         SDL_DestroySurface(pixels);
     }
 
+    ui.dark = true;
+    ui.beginFrame();
+    ui.drawSettings(Settings{}, RowSafelock, false);
+    SDL_FlushRenderer(renderer);
+    SDL_Surface* settingsPixels = SDL_RenderReadPixels(renderer, nullptr);
+    SDL_SavePNG(settingsPixels, (std::string(argv[1]) + "/settings.png").c_str());
+    SDL_DestroySurface(settingsPixels);
+
     auto draw = [&](bool dark) {
         ui.dark = dark;
         ui.beginFrame();
@@ -109,15 +119,14 @@ int main(int argc, char** argv) {
         SDL_FlushRenderer(renderer);
     }
     // The flush is left out: what SDL's Metal backend does there is out of our hands.
-    size_t drawn = 0;
     for (int i = 0; i < 2000; i++) {
-        size_t before = allocations;
+        counting = true;
         draw(i % 2);
-        drawn += allocations - before;
+        counting = false;
         SDL_FlushRenderer(renderer);
     }
-    if (drawn != 0) {
-        std::fprintf(stderr, "Drawing allocated %zu times\n", drawn);
+    if (allocations != 0) {
+        std::fprintf(stderr, "Drawing allocated %zu times\n", allocations);
         return 1;
     }
 

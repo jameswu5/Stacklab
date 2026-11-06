@@ -374,14 +374,14 @@ void Ui::drawPlay(const PlayView& view) {
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {
     const Palette& colors = palette();
     topBar("Settings");
-    constexpr float width = 560, rowH = 38, x = (1440 - width) / 2, firstRow = kRowY + 20;
+    constexpr float width = 560, rowH = 34, x = (1440 - width) / 2, firstRow = kRowY + 20;
     fill(x, kRowY, width, 788, colors.card, 24);
     for (int row = 0; row < kRowCount; row++) {
         float y = firstRow + row * rowH;
         if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 12);
-        text(FontRow, rowLabel(row).c_str(), x + 24, y + 24.5f, colors.muted);
+        text(FontRow, rowLabel(row).c_str(), x + 24, y + 22.5f, colors.muted);
         std::string value = capturing && row == selected ? "Press a key" : rowValue(settings, row);
-        text(FontValue, value.c_str(), x + width - 24, y + 24.5f, colors.text, Align::Right);
+        text(FontValue, value.c_str(), x + width - 24, y + 22.5f, colors.text, Align::Right);
     }
     const char* hint = selected >= RowBindFirst && selected < RowVsync ? "Enter adds a key, Backspace clears, Esc goes back"
                        : selected == RowProfile                       ? "Left and right switch, Enter copies to a new profile, Esc goes back"
