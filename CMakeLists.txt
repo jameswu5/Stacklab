@@ -12,6 +12,9 @@ add_compile_options(-Wall -Wextra)
 add_library(core core/game.cpp core/fumen.cpp)
 target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR})
 
+add_library(ai ai/move_search.cpp)
+target_link_libraries(ai PUBLIC core)
+
 find_package(SDL3 REQUIRED)
 find_package(SDL3_ttf REQUIRED)
 add_executable(stacklab app/main.cpp app/play.cpp app/ui.cpp app/settings.cpp)
@@ -31,6 +34,11 @@ add_test(NAME core_test COMMAND core_test)
 add_executable(fumen_test tests/fumen_test.cpp)
 target_link_libraries(fumen_test PRIVATE core)
 add_test(NAME fumen_test COMMAND fumen_test)
+
+
+add_executable(ai_test tests/ai_test.cpp)
+target_link_libraries(ai_test PRIVATE ai)
+add_test(NAME ai_test COMMAND ai_test)
 
 add_executable(app_test tests/app_test.cpp app/play.cpp app/settings.cpp)
 target_link_libraries(app_test PRIVATE core SDL3::SDL3 nlohmann_json::nlohmann_json)
@@ -64,5 +72,6 @@ set_tests_properties(parity_catches_fixture_mismatch parity_catches_replay_misma
 # Tests rely on assert, which Release builds would otherwise compile out.
 target_compile_options(core_test PRIVATE -UNDEBUG)
 target_compile_options(fumen_test PRIVATE -UNDEBUG)
+target_compile_options(ai_test PRIVATE -UNDEBUG)
 target_compile_options(app_test PRIVATE -UNDEBUG)
 target_compile_options(replay_parity PRIVATE -UNDEBUG)

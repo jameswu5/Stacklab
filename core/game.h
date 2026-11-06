@@ -140,6 +140,15 @@ struct Rng {
 // Attack before rounding and multipliers, as in BRIEF.md section 5.3.
 double attackValue(int lines, Spin spin, int b2b, int combo, const Ruleset& rules);
 
+// Rule data for ai/, which searches moves without running a Game.
+struct Kicks {
+    int count;
+    int8_t offsets[5][2];  // {dx, dy}, where a positive dy moves the piece down
+};
+const Kicks& kickTable(Piece piece, int from, int to);
+// T corners as {dx, dy from the centre, front when rotation is either of these}.
+constexpr int kTCorners[4][4] = {{-1, -1, 3, 0}, {1, -1, 0, 1}, {1, 1, 1, 2}, {-1, 1, 2, 3}};
+
 // A plain value: copying it is how undo, retry and the bot take snapshots.
 struct Game {
     Ruleset rules;
