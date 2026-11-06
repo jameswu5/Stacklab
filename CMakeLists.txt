@@ -35,7 +35,6 @@ add_executable(fumen_test tests/fumen_test.cpp)
 target_link_libraries(fumen_test PRIVATE core)
 add_test(NAME fumen_test COMMAND fumen_test)
 
-
 add_executable(ai_test tests/ai_test.cpp)
 target_link_libraries(ai_test PRIVATE ai)
 add_test(NAME ai_test COMMAND ai_test)
