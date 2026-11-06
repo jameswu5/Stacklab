@@ -12,7 +12,7 @@ add_compile_options(-Wall -Wextra)
 add_library(core core/game.cpp core/fumen.cpp)
 target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR})
 
-add_library(ai ai/move_search.cpp)
+add_library(ai ai/move_search.cpp ai/finesse.cpp)
 target_link_libraries(ai PUBLIC core)
 
 find_package(SDL3 REQUIRED)
