@@ -193,24 +193,22 @@ void testEveryPlacementReproduces() {
 // be exactly what trying every key sequence in core finds, at the same cost.
 using Found = std::map<std::pair<std::array<int, 4>, Spin>, int>;
 
-void tryEverySequence(const core::Game& game, int depth, int maxDepth, Piece piece, Found& found) {
-    if (game.board.cells.size()) {
-        core::Game dropped = game;
-        auto cells = dropped.ghost().cells();
-        Driver driver{dropped};
-        driver.hardDrop();
-        assert(driver.locked);
-        auto key = std::make_pair(cellKey(cells), driver.spin);
-        auto it = found.find(key);
-        if (it == found.end() || it->second > depth) found[key] = depth;
-    }
+void tryEverySequence(const core::Game& game, int depth, int maxDepth, Found& found) {
+    core::Game dropped = game;
+    auto cells = dropped.ghost().cells();
+    Driver dropper{dropped};
+    dropper.hardDrop();
+    assert(dropper.locked);
+    auto key = std::make_pair(cellKey(cells), dropper.spin);
+    auto it = found.find(key);
+    if (it == found.end() || it->second > depth) found[key] = depth;
     if (depth == maxDepth) return;
     for (Move move : {Move::Left, Move::Right, Move::DasLeft, Move::DasRight, Move::RotateCW, Move::RotateCCW, Move::Rotate180, Move::SoftDrop, Move::Down}) {
         core::Game next = game;
         Driver driver{next};
         driver.move(move);
         assert(!driver.locked);
-        tryEverySequence(next, depth + 1, maxDepth, piece, found);
+        tryEverySequence(next, depth + 1, maxDepth, found);
     }
 }
 
@@ -231,7 +229,7 @@ void testMinimumsMatchBruteForce() {
         for (Piece piece : kPieces) {
             core::Game game = gameOn(board, piece, rules, handling);
             Found brute;
-            tryEverySequence(game, 0, kDepth, piece, brute);
+            tryEverySequence(game, 0, kDepth, brute);
 
             search.run(game.board, game.falling, rules);
             Found searched;
@@ -274,7 +272,6 @@ void testRealPlayIsFound() {
                     down[action] = input.pressed;
                     if (input.pressed && input.action != Action::Hold && input.action != Action::HardDrop) presses++;
                 }
-                Piece before = game.falling.piece;
                 int heldBefore = game.holdUsed;
                 bool shifting = down[0] || down[1];
                 bool isHardDrop = any && input.action == Action::HardDrop && input.pressed;
@@ -294,7 +291,6 @@ void testRealPlayIsFound() {
                         locks++;
                         spins += result[0].spin != Spin::None;
                     }
-                    (void)before;
                     presses = 0;
                     search.run(game.board, game.falling, game.rules);
                 } else if (heldBefore != game.holdUsed) {
