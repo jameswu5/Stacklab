@@ -14,8 +14,10 @@ target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR})
 
 find_package(SDL3 REQUIRED)
 find_package(SDL3_ttf REQUIRED)
-add_executable(stacklab app/main.cpp)
-target_link_libraries(stacklab PRIVATE core SDL3::SDL3 SDL3_ttf::SDL3_ttf)
+add_executable(stacklab app/main.cpp app/play.cpp app/ui.cpp app/settings.cpp)
+target_link_libraries(stacklab PRIVATE core SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json objc)
+add_custom_command(TARGET stacklab POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:stacklab>/assets)
 
 include(FetchContent)
 FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
@@ -26,9 +28,17 @@ add_executable(core_test tests/core_test.cpp)
 target_link_libraries(core_test PRIVATE core)
 add_test(NAME core_test COMMAND core_test)
 
+add_executable(app_test tests/app_test.cpp app/play.cpp app/settings.cpp)
+target_link_libraries(app_test PRIVATE core SDL3::SDL3 nlohmann_json::nlohmann_json)
+add_test(NAME app_test COMMAND app_test)
+
+add_executable(ui_shot tests/ui_shot.cpp app/ui.cpp app/settings.cpp)
+target_link_libraries(ui_shot PRIVATE core SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)
+
 add_executable(replay_parity tests/replay_parity.cpp)
 target_link_libraries(replay_parity PRIVATE core nlohmann_json::nlohmann_json)
 
 # Tests rely on assert, which Release builds would otherwise compile out.
 target_compile_options(core_test PRIVATE -UNDEBUG)
+target_compile_options(app_test PRIVATE -UNDEBUG)
 target_compile_options(replay_parity PRIVATE -UNDEBUG)
