@@ -150,6 +150,7 @@ void testPlayKeys() {
     // Retry keeps movement that's held, on tick 0, but not hard drop.
     play.key(BindHardDrop, true, 1000);
     play.restart({}, 1, 5000);
+    play.stepTo(5000);
     assert(play.inputs.events.size() == 1);
     assert(play.inputs.events[0].action == Action::Left);
     assert(play.inputs.events[0].pressed);
@@ -160,6 +161,7 @@ void testPlayKeys() {
     play.key(BindRight, true, 5000);
     play.key(BindLeft, true, 5000);
     play.restart({}, 1, 6000);
+    play.stepTo(6000);
     assert(play.inputs.events.size() == 2);
     assert(play.inputs.events[0].action == Action::Right);
     assert(play.inputs.events[1].action == Action::Left);
@@ -176,6 +178,7 @@ void testPlayKeys() {
     play.key(BindLeft, true, 6000);
     for (Bind bind : {BindHardDrop, BindSoftDrop, Bind180, BindCCW, BindCW, BindHold}) play.key(bind, true, 6000);
     play.restart({}, 1, 7000);
+    play.stepTo(7000);
     const std::vector<Action> order = {Action::SoftDrop, Action::Hold, Action::RotateCW, Action::RotateCCW, Action::Rotate180, Action::Left};
     assert(play.inputs.events.size() == order.size());
     for (size_t i = 0; i < order.size(); i++) {
@@ -194,6 +197,49 @@ void testPlayKeys() {
     play.restart({}, 1, 6000);
     play.key(BindRight, false, 6000);
     assert(play.inputs.events.empty());
+}
+
+void testCountdown() {
+    Play play;
+    play.restart({}, 1, 1000);
+    // Keys pressed and released during the countdown do nothing, even hard drop.
+    play.key(BindHardDrop, true, 500);
+    play.key(BindHardDrop, false, 600);
+    play.key(BindRight, true, 600);
+    play.key(BindRight, false, 700);
+    play.key(BindLeft, true, 800);
+    play.stepTo(999);
+    play.stepShown(999);
+    assert(!play.started);
+    assert(play.inputs.events.empty());
+    assert(play.game.frame == 0);
+    assert(play.shown.frame == 0);
+    assert(play.game.stats.pieces == 0);
+
+    // A key held when it ends carries over on tick 0.
+    play.stepTo(1000);
+    assert(play.started);
+    assert(play.inputs.events.size() == 1);
+    assert(play.inputs.events[0].action == Action::Left);
+    assert(play.inputs.events[0].hoisted);
+    assert(play.inputs.ticks[0] == 0);
+
+    // A key event can end it before the frame's step does, and comes after the carried keys.
+    play.restart({}, 1, 2000);
+    play.key(BindHold, true, 2000 + kTickNs);
+    assert(play.started);
+    assert(play.inputs.events.size() == 2);
+    assert(play.inputs.events[0].action == Action::Left);
+    assert(play.inputs.events[1].action == Action::Hold);
+    assert(!play.inputs.events[1].hoisted);
+    assert(play.inputs.ticks[1] == 1);
+
+    // A retry during the countdown starts it again.
+    play.restart({}, 1, 3000);
+    assert(!play.started);
+    play.restart({}, 1, 4000);
+    play.stepTo(3000);
+    assert(!play.started);
 }
 
 // As in the 40L replays, whose options all set no_szo.
@@ -324,6 +370,7 @@ int main() {
     testQueue();
     testSettings();
     testPlayKeys();
+    testCountdown();
     testFirstPiece();
     testPlayRun();
     testPlayDoesNotAllocate();

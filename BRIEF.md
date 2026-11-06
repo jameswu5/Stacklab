@@ -75,7 +75,7 @@ Rendering follows the display refresh rate, while simulation accuracy doesn't de
 The owner chose the "Cloud" design: soft rounded cards around the board. All sizes are in points on a 1440×900 window, and should scale with the window.
 
 - **Font:** Plus Jakarta Sans (OFL), bundled in `assets/fonts/` with its licence. Numbers use tabular figures.
-- **Top bar (68 high, 32 side padding):** "Stacklab" wordmark on the left (20, bold), mode name in a pill in the centre (14, semibold), light/dark toggle on the right.
+- **Top bar (68 high, 32 side padding):** "Stacklab" wordmark on the left (20, bold), mode name in a pill beside it (14, semibold), light/dark toggle on the right. The centre stays clear because pieces spawn there.
 - **Main row, centred, 20 gap:** left column, board card, right column. Both columns are 230 wide with cards stacked 20 apart.
 - **Left column:** Hold card, then a stats card with the time (44, bold) above rows for Lines, Pieces, PPS, KPP and Finesse, separated by 1pt lines.
 - **Right column:** Next card with 5 previews, then a "Pace vs best" card (32, bold, in the good colour).
@@ -97,15 +97,17 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 | Board checker | `#F4EFE7` | `#2A2933` |
 | Good | `#4FA88F` | `#93DED3` |
 
+Piece colours are saturated rather than pastel, because the owner tracks pieces in peripheral vision.
+
 | Piece | Light | Dark |
 |---|---|---|
-| I | `#7CCFC4` | `#93DED3` |
-| O | `#F2D06B` | `#F6DD8A` |
-| T | `#B9A0E6` | `#C9B4F0` |
-| S | `#9BD48A` | `#B0E09F` |
-| Z | `#F19A9E` | `#F5AEB1` |
-| J | `#86AEE8` | `#A0C2F0` |
-| L | `#F4B076` | `#F7C394` |
+| I | `#00AFB3` | `#2BD9D9` |
+| O | `#F0B400` | `#FFD52E` |
+| T | `#8F45DE` | `#C07EFF` |
+| S | `#2FB344` | `#4EDB4A` |
+| Z | `#E5344B` | `#FF5F70` |
+| J | `#2B6BE8` | `#5A9BFF` |
+| L | `#F27A17` | `#FF8C2B` |
 
 ## 4. Modes
 
@@ -280,7 +282,7 @@ This is the go/no-go risk for the project, and it's tested first.
 
 ## 8. Bot
 
-Fully our own C++ implementation. The owner will supply open-source repositories for ideas. **Check each licence before copying code**, since ideas are fine but code carries obligations.
+Fully our own C++ implementation, using ideas from [Cold Clear 2](https://github.com/MinusKelvin/cold-clear-2) (MIT or Apache-2.0) and [Zetris](https://github.com/ZetrisAI/Zetris) (BSD-3-Clause, based on MisaMino). **Check each licence before copying code**, since ideas are fine but code carries obligations.
 
 **Design:**
 
@@ -359,7 +361,6 @@ Attack calculation is written and unit-tested in phase 1, even though versus arr
 
 - **TETR.IO replays** per section 5.4, needed from phase 1 for solo and phase 6 for versus. Include one recent Tetra League replay for the ruleset.
 - **Current handling settings**, to use as the default profile.
-- **Reference repositories** for the bot, before phase 7.
 - **X-rank replays** for benchmarks, before phase 8, and ideally access to an X-rank player for validation.
 - **Review of drill sets** in phase 5.
 - **Final name**, whenever convenient. It must be an original name, not "Tetris" or similar.

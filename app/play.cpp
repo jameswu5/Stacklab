@@ -35,33 +35,40 @@ double finishSeconds(const core::Game& game, std::span<const core::InputEvent> i
 
 }  // namespace
 
-void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t timeNs) {
+void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs) {
     game = core::Game(sprintRules(), handling, seed);
     shown = game;
     inputs.clear();
-    startNs = timeNs;
+    startNs = runStartNs;
+    started = false;
     over = false;
     splits = {};
     splitLines = 0;
     std::snprintf(pace, sizeof pace, "-");
     paceAhead = false;
-    // Keys held through a retry carry over, with the most recently pressed move
+}
+
+void Play::begin() {
+    started = true;
+    // Keys held when the run starts carry over, with the most recently pressed move
     // last so it sets direction. Replays show hoisted hold, 180 and moves, in that
     // order. CW and CCW are assumed to match 180, and soft drop to carry unhoisted.
-    if (held[BindSoftDrop] > 0) inputs.push(core::Action::SoftDrop, true, timeNs, startNs, 0);
+    if (held[BindSoftDrop] > 0) inputs.push(core::Action::SoftDrop, true, startNs, startNs, 0);
     Bind firstMove = lastMove == BindLeft ? BindRight : BindLeft;
     for (Bind bind : {BindHold, BindCW, BindCCW, Bind180, firstMove, lastMove})
-        if (held[bind] > 0) inputs.push(static_cast<core::Action>(bind), true, timeNs, startNs, 0, true);
+        if (held[bind] > 0) inputs.push(static_cast<core::Action>(bind), true, startNs, startNs, 0, true);
 }
 
 void Play::key(Bind action, bool down, uint64_t timeNs) {
+    if (!started && timeNs >= startNs) begin();
     int& count = held[action];
     if (down ? count++ > 0 : count == 0 || --count > 0) return;
     if (down && (action == BindLeft || action == BindRight)) lastMove = action;
-    if (!over) inputs.push(static_cast<core::Action>(action), down, timeNs, startNs, game.frame);
+    if (started && !over) inputs.push(static_cast<core::Action>(action), down, timeNs, startNs, game.frame);
 }
 
 void Play::stepTo(uint64_t nowNs) {
+    if (!started && nowNs >= startNs) begin();
     uint64_t target = tickAt(nowNs > startNs ? nowNs - startNs : 0).tick;
     while (!over && game.frame < target) {
         auto due = inputs.due(game.frame);
@@ -102,7 +109,7 @@ void Play::stepTo(uint64_t nowNs) {
 // again on the real game once complete, so this doesn't affect the result.
 void Play::stepShown(uint64_t nowNs) {
     shown = game;
-    if (over) return;
+    if (over || !started) return;
     auto due = inputs.due(game.frame);
     shown.tick(due);
 

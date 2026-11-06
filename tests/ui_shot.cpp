@@ -108,6 +108,14 @@ int main(int argc, char** argv) {
     SDL_SavePNG(settingsPixels, (std::string(argv[1]) + "/settings.png").c_str());
     SDL_DestroySurface(settingsPixels);
 
+    core::Game fresh(core::Ruleset{}, core::Handling{}, 1);
+    ui.beginFrame();
+    ui.drawPlay({&fresh, 0, false, "-", false, "Ready", nullptr});
+    SDL_FlushRenderer(renderer);
+    SDL_Surface* countdownPixels = SDL_RenderReadPixels(renderer, nullptr);
+    SDL_SavePNG(countdownPixels, (std::string(argv[1]) + "/countdown.png").c_str());
+    SDL_DestroySurface(countdownPixels);
+
     auto draw = [&](bool dark) {
         ui.dark = dark;
         ui.beginFrame();

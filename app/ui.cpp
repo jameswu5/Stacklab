@@ -15,12 +15,12 @@ constexpr Color hex(uint32_t rgb) {
 // Piece order: None, I, J, L, O, S, T, Z, Garbage.
 constexpr Palette kLight = {
     hex(0xFBF6EF), hex(0xFFFFFF), hex(0x3A3440), hex(0x8F8791), hex(0xF1EBE3), hex(0xFFFFFF), hex(0xF9F5EE), hex(0xF4EFE7), hex(0x4FA88F),
-    {hex(0), hex(0x7CCFC4), hex(0x86AEE8), hex(0xF4B076), hex(0xF2D06B), hex(0x9BD48A), hex(0xB9A0E6), hex(0xF19A9E), hex(0x8F8791)},
+    {hex(0), hex(0x00AFB3), hex(0x2B6BE8), hex(0xF27A17), hex(0xF0B400), hex(0x2FB344), hex(0x8F45DE), hex(0xE5344B), hex(0x8F8791)},
     0.42f,
 };
 constexpr Palette kDark = {
     hex(0x22212B), hex(0x2C2B37), hex(0xF2EEF2), hex(0x9C98A6), hex(0x383744), hex(0x4B4A5A), hex(0x25242E), hex(0x2A2933), hex(0x93DED3),
-    {hex(0), hex(0x93DED3), hex(0xA0C2F0), hex(0xF7C394), hex(0xF6DD8A), hex(0xB0E09F), hex(0xC9B4F0), hex(0xF5AEB1), hex(0x9C98A6)},
+    {hex(0), hex(0x2BD9D9), hex(0x5A9BFF), hex(0xFF8C2B), hex(0xFFD52E), hex(0x4EDB4A), hex(0xC07EFF), hex(0xFF5F70), hex(0x9C98A6)},
     0.30f,
 };
 
@@ -254,10 +254,11 @@ void Ui::topBar(const char* mode) {
     float left = -originX_ / scale_, right = (width_ - originX_) / scale_, top = -originY_ / scale_;
     text(FontWord, "Stacklab", left + kBarSide, top + 43, colors.text);
 
+    // Beside the wordmark, since pieces spawn above the board in the centre.
+    float pillX = left + kBarSide + textWidth(FontWord, "Stacklab") / scale_ + 16;
     float pillW = textWidth(FontPill, mode) / scale_ + 36;
-    float center = (left + right) / 2;
-    fill(center - pillW / 2, top + 17, pillW, 34, colors.card, 17);
-    text(FontPill, mode, center, top + 39.5f, colors.text, Align::Center);
+    fill(pillX, top + 17, pillW, 34, colors.card, 17);
+    text(FontPill, mode, pillX + pillW / 2, top + 39.5f, colors.text, Align::Center);
 
     float toggleX = right - kBarSide - kToggleW, toggleY = top + 15;
     fill(toggleX, toggleY, kToggleW, kToggleH, colors.line, kToggleH / 2);
@@ -365,9 +366,11 @@ void Ui::drawPlay(const PlayView& view) {
 
     if (view.bannerTitle) {
         float centerX = kBoardX + 190, centerY = kBoardY + 380;
-        fill(centerX - 130, centerY - 56, 260, 112, colors.card, 24);
-        text(FontTime, view.bannerTitle, centerX, centerY + 6, colors.text, Align::Center);
-        text(FontRow, view.bannerHint, centerX, centerY + 34, colors.muted, Align::Center);
+        if (view.bannerHint) {
+            fill(centerX - 130, centerY - 56, 260, 112, colors.card, 24);
+            text(FontRow, view.bannerHint, centerX, centerY + 34, colors.muted, Align::Center);
+        }
+        text(FontTime, view.bannerTitle, centerX, centerY + (view.bannerHint ? 6 : 16), colors.text, Align::Center);
     }
 }
 

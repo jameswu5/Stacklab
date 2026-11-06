@@ -48,7 +48,7 @@ void applyPresentMode(App& app) {
 }
 
 void restart(App& app, uint64_t timeNs) {
-    app.play.restart(app.settings.profile().handling, static_cast<uint32_t>(SDL_GetPerformanceCounter()), timeNs);
+    app.play.restart(app.settings.profile().handling, static_cast<uint32_t>(SDL_GetPerformanceCounter()), timeNs + kCountdownNs);
 }
 
 void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
@@ -125,8 +125,10 @@ void drawFrame(App& app, Ui& ui) {
     if (app.inSettings) {
         ui.drawSettings(app.settings, app.selected, app.capturing);
     } else {
-        const char* title = !play.over ? nullptr : play.game.toppedOut ? "Topped out" : "Finished";
-        ui.drawPlay({&play.shown, play.seconds(), play.over, play.pace, play.paceAhead, title, "Press retry to go again"});
+        const char* title = nullptr;
+        if (play.over) title = play.game.toppedOut ? "Topped out" : "Finished";
+        else if (!play.started) title = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
+        ui.drawPlay({&play.shown, play.seconds(), play.over, play.pace, play.paceAhead, title, play.over ? "Press retry to go again" : nullptr});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];

@@ -29,7 +29,7 @@ struct PlayView {
     const char* pace;       // text for the pace card
     bool paceAhead;         // whether the pace shows in the good colour
     const char* bannerTitle;
-    const char* bannerHint;
+    const char* bannerHint;  // null shows the title alone, with no card
 };
 
 class Ui {
