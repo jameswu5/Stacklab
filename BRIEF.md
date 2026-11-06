@@ -173,7 +173,7 @@ The exact fields get settled when the runner is built. Fumen import is required,
 
 ## 5. TETR.IO parity
 
-**"Exact" means:** given the seed, config, handling and inputs from a real TETR.IO replay, our engine produces the same board after every locked piece, and the same attack and garbage values. The automated replay test in section 5.4 decides this.
+**"Exact" means:** given the seed, config, handling and inputs from a real TETR.IO replay, our engine ends the game in the same state as TETR.IO recorded, and produces the same attack and garbage values. Replays hold no mid-game state, so a divergence on any piece only shows up at the end. The automated replay test in section 5.4 decides this.
 
 **What it can't cover:** TETR.IO is closed source and its rules change over time. Parity is measured against a pinned set of replays, and rulesets are versioned so they can be updated. Network effects in online matches have no equivalent in a local game. In replays, recorded garbage arrival times are fed in directly.
 
@@ -230,7 +230,19 @@ Larger clears add 1 per line, or 2 per line with a spin.
 
 ### 5.4 Replay parity test
 
-`tests/replay_parity` loads a replay, applies its config, handling and inputs, then compares results after each lock. It reports the first mismatch with the frame, the board diff and the input history.
+`tests/replay_parity` loads a replay, applies its config, handling and inputs, then compares the final result with what TETR.IO recorded. For JSON fixtures that record every lock, it compares after each lock instead and reports the first mismatch with the frame, the board diff and the input history.
+
+What each source can check:
+
+| Source | Compared | Can't check |
+|---|---|---|
+| Solo `.ttr` | Pieces, lines, every clear type, B2B, combo, level, and the 40L finish frame | Boards, because none is recorded; attack, because it's recorded as 0 |
+| League `.ttrm` | The final board, hold, queue and stats from the `end` event | Where in the game a mismatch began |
+| Hand-derived fixtures | Every lock | Anything about TETR.IO; they only show core agrees with our reading of Triangle's source |
+
+Files live in `replays/`, which is gitignored because they include usernames.
+
+Two rules found by real replays aren't in Triangle's engine: `no_szo` and level gravity. The level gravity formula, level 1 gravity and `levelgspeed` are inferred from 3 Blitz games, and are marked with `ponytail:` comments in the code.
 
 **Required fixtures, supplied by the owner:**
 
