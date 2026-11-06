@@ -1,10 +1,11 @@
 // Renders the play screen to PNGs at 2x, using the same hand-filled game in
-// both themes, for comparing against the design. Also checks that drawing doesn't
+// both themes, and the other screens, for comparing against the design. Also checks that drawing doesn't
 // allocate once warmed up. Usage: ui_shot <out-dir> <base-dir>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
@@ -89,7 +90,7 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&game, game.seconds(), false, nullptr, nullptr});
+        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, nullptr});
         SDL_FlushRenderer(renderer);
         SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
         std::string path = std::string(argv[1]) + (dark ? "/dark.png" : "/light.png");
@@ -110,17 +111,28 @@ int main(int argc, char** argv) {
 
     core::Game fresh(core::Ruleset{}, core::Handling{}, 1);
     ui.beginFrame();
-    ui.drawPlay({&fresh, 0, false, "Ready", nullptr});
+    ui.drawPlay({&kModes[0], &fresh, 0, false, "Ready", nullptr});
     SDL_FlushRenderer(renderer);
     SDL_Surface* countdownPixels = SDL_RenderReadPixels(renderer, nullptr);
     SDL_SavePNG(countdownPixels, (std::string(argv[1]) + "/countdown.png").c_str());
     SDL_DestroySurface(countdownPixels);
 
+    for (bool dark : {false, true}) {
+        ui.dark = dark;
+        ui.beginFrame();
+        const std::array<double, kModeCount> bests{60.824};
+        ui.drawMenu(0, bests);
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-dark.png" : "/menu-light.png")).c_str());
+        SDL_DestroySurface(menuPixels);
+    }
+
     auto draw = [&](bool dark) {
         ui.dark = dark;
         ui.beginFrame();
         game.frame++;
-        ui.drawPlay({&game, game.seconds(), false, nullptr, nullptr});
+        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, nullptr});
     };
     for (int i = 0; i < 10; i++) {
         draw(i % 2);

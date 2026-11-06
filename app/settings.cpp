@@ -102,16 +102,15 @@ void bindKey(Profile& profile, Bind bind, SDL_Scancode key) {
     profile.keys[bind].push_back(key);
 }
 
-Splits loadBest(const std::string& path) {
+double loadBest(const std::string& path) {
     json file = readJson(path);
-    Splits splits{};
-    std::vector<double> saved = get(file, "splits", std::vector<double>{});
-    if (saved.size() == splits.size()) std::copy(saved.begin(), saved.end(), splits.begin());
-    return splits;
+    // Files from before splits were dropped hold the time per line, ending with the finish.
+    std::vector<double> splits = get(file, "splits", std::vector<double>{});
+    return get(file, "seconds", splits.empty() ? 0.0 : splits.back());
 }
 
-void saveBest(const Splits& splits, const std::string& path) {
-    writeJson({{"splits", splits}}, path);
+void saveBest(double seconds, const std::string& path) {
+    writeJson({{"seconds", seconds}}, path);
 }
 
 std::string rowLabel(int row) {
