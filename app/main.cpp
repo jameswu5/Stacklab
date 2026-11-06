@@ -1,11 +1,213 @@
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <objc/message.h>
 
-#include "core/game.h"
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <string>
+
+#include "app/play.h"
+#include "app/settings.h"
+#include "app/ui.h"
+
+namespace {
+
+constexpr uint64_t kUncappedFrameNs = 1'000'000'000 / 480;  // with VSync off, how often to poll and draw
+
+struct App {
+    Settings settings;
+    std::string settingsPath;
+    std::array<int, SDL_SCANCODE_COUNT> binds{};  // scancode to Bind, or -1
+    SDL_Renderer* renderer = nullptr;
+    Play play;
+
+    bool inSettings = false;
+    int selected = 0;
+    bool capturing = false;
+
+    uint64_t frameNs = 0, worstFrameNs = 0;
+};
+
+void applyBinds(App& app) {
+    app.binds.fill(-1);
+    for (int bind = 0; bind < kBindCount; bind++)
+        for (SDL_Scancode key : app.settings.profile().keys[bind]) app.binds[key] = bind;
+}
+
+// With fewer drawables queued, what reaches the screen was drawn more recently.
+void limitDrawableQueue(SDL_Renderer* renderer) {
+    void* layer = SDL_GetRenderMetalLayer(renderer);
+    if (!layer) return;
+    reinterpret_cast<void (*)(void*, SEL, unsigned long)>(objc_msgSend)(layer, sel_registerName("setMaximumDrawableCount:"), 2);
+}
+
+void applyPresentMode(App& app) {
+    SDL_SetRenderVSync(app.renderer, app.settings.vsync ? 1 : SDL_RENDERER_VSYNC_DISABLED);
+}
+
+void restart(App& app, uint64_t timeNs) {
+    app.play.restart(app.settings.profile().handling, static_cast<uint32_t>(SDL_GetPerformanceCounter()), timeNs);
+}
+
+void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
+    if (key.repeat) return;
+    int bind = app.binds[key.scancode];
+    if (bind < 0) return;
+    if (bind == BindRetry) {
+        if (key.down) restart(app, key.timestamp);
+    } else if (bind == BindMenu) {
+        if (key.down) {
+            app.inSettings = true;
+            app.play.held.fill(0);
+        }
+    } else {
+        app.play.key(static_cast<Bind>(bind), key.down, key.timestamp);
+    }
+}
+
+// Fixed keys here, so a bad keybind can't lock anyone out of fixing it.
+void handleSettingsKey(App& app, const SDL_KeyboardEvent& key) {
+    if (!key.down) return;
+    Settings& settings = app.settings;
+    bool onBindRow = app.selected >= RowBindFirst && app.selected < RowVsync;
+    if (app.capturing) {
+        if (key.repeat) return;
+        if (key.scancode != SDL_SCANCODE_ESCAPE) {
+            bindKey(settings.profile(), static_cast<Bind>(app.selected - RowBindFirst), key.scancode);
+            applyBinds(app);
+        }
+        app.capturing = false;
+        return;
+    }
+    switch (key.scancode) {
+        case SDL_SCANCODE_ESCAPE:
+            if (key.repeat) break;
+            app.inSettings = false;
+            saveSettings(settings, app.settingsPath);
+            restart(app, key.timestamp);
+            break;
+        case SDL_SCANCODE_UP: app.selected = (app.selected + kRowCount - 1) % kRowCount; break;
+        case SDL_SCANCODE_DOWN: app.selected = (app.selected + 1) % kRowCount; break;
+        case SDL_SCANCODE_LEFT:
+        case SDL_SCANCODE_RIGHT:
+            adjustRow(settings, app.selected, key.scancode == SDL_SCANCODE_LEFT ? -1 : 1);
+            applyBinds(app);
+            applyPresentMode(app);
+            break;
+        case SDL_SCANCODE_RETURN:
+            if (key.repeat) break;
+            if (app.selected == RowProfile) {
+                Profile copy = settings.profile();
+                copy.name = "Profile " + std::to_string(settings.profiles.size() + 1);
+                settings.profiles.push_back(copy);
+                settings.active = static_cast<int>(settings.profiles.size()) - 1;
+                applyBinds(app);
+            } else if (onBindRow) {
+                app.capturing = true;
+            }
+            break;
+        case SDL_SCANCODE_BACKSPACE:
+            if (onBindRow) {
+                settings.profile().keys[app.selected - RowBindFirst].clear();
+                applyBinds(app);
+            }
+            break;
+        default: break;
+    }
+}
+
+void drawFrame(App& app, Ui& ui) {
+    const Play& play = app.play;
+    ui.dark = app.settings.dark;
+    ui.beginFrame();
+    if (app.inSettings) {
+        ui.drawSettings(app.settings, app.selected, app.capturing);
+    } else {
+        const char* title = !play.over ? nullptr : play.game.toppedOut ? "Topped out" : "Finished";
+        ui.drawPlay({&play.shown, play.over, play.pace, play.paceAhead, title, "Press retry to go again"});
+    }
+    if (app.settings.overlay) {
+        char frameLine[64], inputLine[64];
+        std::snprintf(frameLine, sizeof frameLine, "Frame %.1f ms, worst %.1f", app.frameNs / 1e6, app.worstFrameNs / 1e6);
+        std::snprintf(inputLine, sizeof inputLine, "Input to sim %.2f ms, worst %.2f", play.lastInputNs / 1e6, play.worstInputNs / 1e6);
+        ui.drawOverlay(frameLine, inputLine, app.settings.vsync ? "VSync on" : "VSync off");
+    }
+}
+
+}  // namespace
 
 int main(int, char**) {
-    if (!SDL_Init(SDL_INIT_VIDEO) || !TTF_Init()) return 1;
+    if (!SDL_Init(SDL_INIT_VIDEO) || !TTF_Init()) {
+        SDL_Log("Couldn't start: %s", SDL_GetError());
+        return 1;
+    }
+    SDL_Window* window = nullptr;
+    App app;
+    if (!SDL_CreateWindowAndRenderer("Stacklab", 1440, 900, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window, &app.renderer)) {
+        SDL_Log("Couldn't create the window: %s", SDL_GetError());
+        return 1;
+    }
+    limitDrawableQueue(app.renderer);
+
+    char* prefPath = SDL_GetPrefPath("Stacklab", "Stacklab");
+    std::string pref = prefPath ? prefPath : "";
+    SDL_free(prefPath);
+    app.settingsPath = pref + "settings.json";
+    app.play.bestPath = pref + "best-40l.json";
+    app.settings = loadSettings(app.settingsPath);
+    app.play.best = loadBest(app.play.bestPath);
+    applyBinds(app);
+    applyPresentMode(app);
+
+    Ui ui(app.renderer, std::string(SDL_GetBasePath()) + "assets/fonts/");
+    restart(app, SDL_GetTicksNS());
+    uint64_t frameStart = SDL_GetTicksNS(), worstWindowStart = frameStart;
+
+    bool running = true;
+    while (running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            switch (event.type) {
+                case SDL_EVENT_QUIT: running = false; break;
+                case SDL_EVENT_KEY_DOWN:
+                case SDL_EVENT_KEY_UP:
+                    if (app.inSettings) handleSettingsKey(app, event.key);
+                    else handlePlayKey(app, event.key);
+                    break;
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                    SDL_ConvertEventToRenderCoordinates(app.renderer, &event);
+                    if (ui.toggleHit(event.button.x, event.button.y)) app.settings.dark = !app.settings.dark;
+                    break;
+                default: break;
+            }
+        }
+
+        if (!app.inSettings) {
+            uint64_t now = SDL_GetTicksNS();
+            app.play.stepTo(now);
+            app.play.stepShown(now);
+        }
+        drawFrame(app, ui);
+        SDL_RenderPresent(app.renderer);
+
+        if (!app.settings.vsync) {
+            uint64_t spent = SDL_GetTicksNS() - frameStart;
+            if (spent < kUncappedFrameNs) SDL_DelayPrecise(kUncappedFrameNs - spent);
+        }
+        uint64_t now = SDL_GetTicksNS();
+        app.frameNs = now - frameStart;
+        frameStart = now;
+        app.worstFrameNs = std::max(app.worstFrameNs, app.frameNs);
+        if (now - worstWindowStart > 1'000'000'000) {  // the worst values cover about the last second
+            app.worstFrameNs = app.frameNs;
+            app.play.worstInputNs = app.play.lastInputNs;
+            worstWindowStart = now;
+        }
+    }
+
+    saveSettings(app.settings, app.settingsPath);
     TTF_Quit();
     SDL_Quit();
     return 0;
