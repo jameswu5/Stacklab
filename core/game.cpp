@@ -59,11 +59,6 @@ constexpr int8_t kShapes[8][4][4][2] = {
      {{0, 2}, {0, 1}, {1, 1}, {1, 0}}},
 };
 
-struct Kicks {
-    int count;
-    int8_t offsets[5][2];  // {dx, dy}, where a positive dy moves the piece down
-};
-
 // SRS+, indexed by [from][to].
 constexpr Kicks kKicks[4][4] = {
     {{},
@@ -103,9 +98,6 @@ constexpr Kicks kIKicks[4][4] = {
      {}},
 };
 
-// T corners as {dx, dy from the centre, front when rotation is either of these}.
-constexpr int kTCorners[4][4] = {{-1, -1, 3, 0}, {1, -1, 0, 1}, {1, 1, 1, 2}, {-1, 1, 2, 3}};
-
 int row(double y) { return static_cast<int>(std::floor(y)); }
 
 // Indexed by Spin, then lines. TETR.IO's solo table, from tetris.wiki/TETR.IO.
@@ -118,6 +110,8 @@ constexpr int kClearScores[3][5] = {
 constexpr int kPcScore = 3500;
 
 }  // namespace
+
+const Kicks& kickTable(Piece piece, int from, int to) { return (piece == Piece::I ? kIKicks : kKicks)[from][to]; }
 
 std::array<Cell, 4> Falling::cells() const {
     std::array<Cell, 4> out;
