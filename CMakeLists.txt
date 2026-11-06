@@ -38,6 +38,25 @@ target_link_libraries(ui_shot PRIVATE core SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohman
 add_executable(replay_parity tests/replay_parity.cpp)
 target_link_libraries(replay_parity PRIVATE core nlohmann_json::nlohmann_json)
 
+file(GLOB PARITY_FIXTURES CONFIGURE_DEPENDS tests/fixtures/*.json)
+foreach(fixture ${PARITY_FIXTURES})
+  get_filename_component(name ${fixture} NAME_WE)
+  add_test(NAME parity_${name} COMMAND replay_parity ${fixture})
+endforeach()
+
+# Real replays stay local because they include usernames. Skipped if there are none.
+set(REPLAY_DIR ${CMAKE_SOURCE_DIR}/replays CACHE PATH "Folder of TETR.IO replays")
+add_test(NAME parity_replays COMMAND replay_parity ${REPLAY_DIR})
+set_tests_properties(parity_replays PROPERTIES SKIP_RETURN_CODE 77)
+
+# The runner itself: synthetic replays load, and wrong results are caught.
+set(SELFCHECK ${CMAKE_SOURCE_DIR}/tests/fixtures/selfcheck)
+add_test(NAME parity_loader COMMAND replay_parity ${SELFCHECK}/replays_ok)
+add_test(NAME parity_catches_fixture_mismatch COMMAND replay_parity ${SELFCHECK}/wrong_board.json)
+add_test(NAME parity_catches_replay_mismatch COMMAND replay_parity ${SELFCHECK}/replays_bad)
+set_tests_properties(parity_catches_fixture_mismatch parity_catches_replay_mismatch
+  PROPERTIES PASS_REGULAR_EXPRESSION "board differs")
+
 # Tests rely on assert, which Release builds would otherwise compile out.
 target_compile_options(core_test PRIVATE -UNDEBUG)
 target_compile_options(app_test PRIVATE -UNDEBUG)
