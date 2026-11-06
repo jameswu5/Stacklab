@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "app/settings.h"
 #include "app/timing.h"
@@ -13,6 +14,9 @@
 // ponytail: the owner's replays use stride's shorter Ready-Set-Go, whose length
 // isn't recorded or published. Tune this against TETR.IO by feel.
 constexpr uint64_t kCountdownNs = 1'000'000'000;
+
+// ponytail: older placements are forgotten past this; a slot costs about 1 KB.
+constexpr int kUndoDepth = 256;
 
 struct Play {
     const Mode* mode = &kModes[0];
@@ -33,12 +37,22 @@ struct Play {
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 
+    // A ring of the state each placement started from, for modes with undo.
+    // Constructed up front for the same reason as `shown`, so play doesn't allocate.
+    std::vector<core::Game> undoSlots;
+    int undoCount = 0, undoNewest = 0;
+
     void restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs);
     void begin();                                       // ends the countdown
     void key(Bind action, bool down, uint64_t timeNs);  // action is one of the first eight
     void stepTo(uint64_t nowNs);                        // runs every tick completed by this time
     void stepShown(uint64_t nowNs);                     // call after stepTo, before drawing `shown`
     double seconds() const { return over ? endSeconds : shown.seconds(); }
+
+    void saveUndo();
+    // Back to where the last placement started, with the clock too. A key held
+    // through this has to be pressed again.
+    void undo(uint64_t timeNs);
 
     // Sandbox edits, on the real game. Painting skips the falling piece's cells, so it can't end up inside one.
     void paint(int x, int y, core::Piece piece);
