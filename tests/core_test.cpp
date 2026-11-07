@@ -543,28 +543,36 @@ static void testFillGarbage() {
         return hole;
     };
 
-    Game same(Ruleset{}, Handling{}, 5);
-    same.fillGarbage(kVisibleHeight, 0);
-    for (int y = 0; y < kVisibleHeight; y++) assert(holeIn(same, y) == holeIn(same, 0));
-    assert(same.board.at(0, kVisibleHeight) == Piece::None);
-    for (const Cell& c : same.falling.cells()) assert(same.board.at(c.x, c.y) == Piece::None);
-
+    // A hole never repeats the row below's, and every column gets used.
     Game moving(Ruleset{}, Handling{}, 5);
-    moving.fillGarbage(kVisibleHeight, 1);
-    for (int y = 1; y < kVisibleHeight; y++) assert(holeIn(moving, y) != holeIn(moving, y - 1));
+    moving.fillGarbage(kVisibleHeight);
+    assert(moving.board.at(0, kVisibleHeight) == Piece::None);
+    for (const Cell& c : moving.falling.cells()) assert(moving.board.at(c.x, c.y) == Piece::None);
+    std::array<bool, kBoardWidth> used{};
+    for (uint32_t seed = 1; seed <= 200; seed++) {
+        Game g(Ruleset{}, Handling{}, seed);
+        g.fillGarbage(kVisibleHeight);
+        for (int y = 0; y < kVisibleHeight; y++) {
+            used[holeIn(g, y)] = true;
+            if (y > 0) assert(holeIn(g, y) != holeIn(g, y - 1));
+        }
+    }
+    for (bool column : used) assert(column);
 
     // The seed decides the board, and the bag is what it would have been anyway.
     Game copy(Ruleset{}, Handling{}, 5);
-    copy.fillGarbage(kVisibleHeight, 1);
+    copy.fillGarbage(kVisibleHeight);
     assert(copy.board.cells == moving.board.cells);
     Game other(Ruleset{}, Handling{}, 6);
-    other.fillGarbage(kVisibleHeight, 1);
+    other.fillGarbage(kVisibleHeight);
     assert(other.board.cells != moving.board.cells);
     assert(moving.queue == Game(Ruleset{}, Handling{}, 5).queue);
 
     // Only rows holding garbage count toward a dig goal.
     Game dig(Ruleset{}, Handling{}, 5);
-    dig.fillGarbage(2, 0);
+    dig.fillGarbage(2);
+    dig.board.at(holeIn(dig, 1), 1) = Piece::Garbage;  // lines the holes up, for the I
+    dig.board.at(holeIn(dig, 0), 1) = Piece::None;
     place(dig, Piece::I, 1, holeIn(dig, 0) - 2, 10.5);
     const int digLocks = tap(dig, Action::HardDrop)[0].garbageCleared;
     assert(dig.stats.lines == 2 && dig.stats.garbageCleared == 2);

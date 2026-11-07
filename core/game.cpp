@@ -193,10 +193,10 @@ Game::Game(const Ruleset& rules, const Handling& handling, uint32_t seed)
 
 // Single-player setup, not TETR.IO's incoming garbage (phase 6). Its RNG draws
 // leave the bag alone, so a seed gives the same pieces with or without this.
-void Game::fillGarbage(int rows, double messiness) {
+void Game::fillGarbage(int rows) {
     int hole = static_cast<int>(std::floor(garbageRng_.nextFloat() * kBoardWidth));
     for (int y = 0; y < rows; y++) {
-        if (y > 0 && garbageRng_.nextFloat() < messiness) {
+        if (y > 0) {
             const int column = static_cast<int>(std::floor(garbageRng_.nextFloat() * (kBoardWidth - 1)));
             hole = column < hole ? column : column + 1;  // skips the current hole, so it always moves
         }

@@ -201,10 +201,10 @@ struct Game {
     // tick and stays valid until the next call.
     const std::vector<LockResult>& tick(std::span<const InputEvent> inputs, std::span<const GarbageEvent> garbage = {});
 
-    // Fills the bottom rows of an empty board. A row's hole moves from the row
-    // below's with probability `messiness`. `rows` must be at most kVisibleHeight,
+    // Fills the bottom rows of an empty board. A row's hole is random among the
+    // columns other than the row below's. `rows` must be at most kVisibleHeight,
     // so the rows stay clear of the spawn.
-    void fillGarbage(int rows, double messiness);
+    void fillGarbage(int rows);
 
     // Puts `piece` at the spawn after outside edits to the board, queue or hold,
     // leaving holdUsed alone. Tops out again if the spawn is still blocked.
