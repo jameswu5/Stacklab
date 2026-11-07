@@ -281,6 +281,7 @@ bool Game::blockedOut() {
 void Game::holdPiece() {
     if (holdUsed || !rules.allowHold) return;
     holdUsed = true;
+    lastSpin_ = Spin::None;  // Triangle keeps it; TETR.IO's recorded minis don't
     const Piece held = hold;
     hold = falling.piece;
     if (held != Piece::None) {
@@ -490,10 +491,11 @@ int Game::cancelGarbage(int amount) {
     return send;
 }
 
-// Raises the board by whatever garbage has finished travelling, up to the cap.
+// Raises the board by whatever garbage has finished travelling, up to the cap. It goes
+// in arrival order, so garbage still travelling holds back anything behind it. Triangle
+// sorts by confirm frame here, which replays with out of order confirms rule out.
 void Game::tankGarbage(bool hard) {
     if (incoming_.empty()) return;
-    std::stable_sort(incoming_.begin(), incoming_.end(), [](const Incoming& a, const Incoming& b) { return a.frame < b.frame; });
 
     const int lines = static_cast<int>(std::floor(std::min(garbageCap_, static_cast<double>(rules.garbageCapMax))));
     const int64_t now = static_cast<int64_t>(frame) - (hard ? 0 : 1);
@@ -609,6 +611,7 @@ void Game::lock(bool hard) {
     nextPiece(false);
     lastSpin_ = Spin::None;
 
+    result.sent = outgoing;
     for (int send : outgoing) {
         if (send == 0) continue;
         stats.garbageSent += send;
@@ -651,6 +654,7 @@ void Game::dcd() {
 void Game::shift() {
     if (fits(falling.rot, falling.x + lastShift_, row(falling.y))) {
         falling.x += lastShift_;
+        lastSpin_ = Spin::None;  // Triangle keeps it; TETR.IO's recorded minis don't
         if (falling.lockResets < 31) falling.lockResets++;
         hitWall_ = false;
         if (is20G()) sink(softDropHeld_ ? 1 : 0);

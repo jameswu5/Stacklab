@@ -861,6 +861,20 @@ static void testGarbageQueue() {
     assert(holeIn(holes, 1) == first);
     assert(holeIn(holes, 0) == second);
 
+    // Garbage rises in arrival order, even if the later batch was confirmed first:
+    // the first batch still travelling holds it back.
+    Game order(rules, Handling{}, 1);
+    const GarbageEvent both[] = {{GarbageEvent::Arrive, 9, 1, 0, 1}, {GarbageEvent::Arrive, 9, 2, 0, 1}, {GarbageEvent::Confirm, 9, 2}};
+    order.tick({}, both);
+    run(order, 30);
+    locksClean(order);
+    assert(garbageRows(order) == 0);
+    const GarbageEvent confirmFirst[] = {{GarbageEvent::Confirm, 9, 1}};
+    order.tick({}, confirmFirst);
+    run(order, 19);
+    locksClean(order);
+    assert(garbageRows(order) == 2);
+
     // Older rounds draw nothing when a cancel finishes a batch.
     Ruleset older;
     older.cancelMovesHole = false;
@@ -897,6 +911,13 @@ static void testGarbageQueue() {
     dropQuad(cancel);
     assert(cancel.stats.attack == 4);
     assert(cancel.stats.garbageSent == 1);
+    Game sentCheck(rules, Handling{}, 1);
+    receive(sentCheck, 1, 3);
+    fillExcept(sentCheck, 4, {{9, 0}, {9, 1}, {9, 2}, {9, 3}});
+    place(sentCheck, Piece::I, 1, 7, 3);
+    const LockResult sentLock = tap(sentCheck, Action::HardDrop)[0];
+    assert(sentLock.sends[3] == 4);
+    assert(sentLock.sent[3] == 1);
     assert(garbageRows(cancel) == 0);
     locksClean(cancel);
     assert(garbageRows(cancel) == 0);

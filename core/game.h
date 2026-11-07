@@ -138,6 +138,7 @@ struct LockResult {
     bool perfectClear = false;
     int garbageCleared = 0;
     std::array<int, 5> sends{};  // surge (3), normal attack, PC; unused entries are 0
+    std::array<int, 5> sent{};   // the same, after cancelling
     int b2b = -1;
     int combo = -1;
 };
