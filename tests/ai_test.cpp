@@ -339,6 +339,10 @@ void testHandCases() {
     search.run(cave.board, cave.falling, rules);
     assert(has({{{2, 5}, {3, 5}, {4, 5}, {5, 5}}}, Spin::None) > 0);
 
+    // No piece, as when a drill's queue runs out: nowhere to place, and after a real search too.
+    search.run(core::Board{}, core::Falling{}, rules);
+    assert(search.placements.empty());
+
     // No 180 means no 180 in any path.
     core::Ruleset no180;
     no180.allow180 = false;

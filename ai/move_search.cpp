@@ -56,6 +56,7 @@ void MoveSearch::run(const core::Board& board, const core::Falling& start, const
     for (uint16_t id : queue_) nodes_[id] = {};
     queue_.clear();
     placements.clear();
+    if (start.piece == core::Piece::None) return;  // a drill out of queue; its shape has no bounds to search within
     piece_ = start.piece;
 
     for (int x = 0; x < core::kBoardWidth; x++) {
