@@ -1,0 +1,10 @@
+# Hand-set weights for ai::Bot, not tuned yet. See BotWeights in ai/bot.h for what each means.
+holes -4
+height -0.3
+danger -1
+bumpiness -0.4
+well 0.6
+tSlot 2.5
+attack 2
+b2b 1.5
+wasted -1.5
