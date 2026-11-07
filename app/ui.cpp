@@ -17,11 +17,13 @@ constexpr Palette kLight = {
     hex(0xFBF6EF), hex(0xFFFFFF), hex(0x3A3440), hex(0x8F8791), hex(0xF1EBE3), hex(0xFFFFFF), hex(0xF9F5EE), hex(0xF4EFE7),
     {hex(0), hex(0x00AFB3), hex(0x2B6BE8), hex(0xF27A17), hex(0xF0B400), hex(0x2FB344), hex(0x8F45DE), hex(0xE5344B), hex(0x8F8791)},
     0.42f,
+    0.20f,
 };
 constexpr Palette kDark = {
     hex(0x22212B), hex(0x2C2B37), hex(0xF2EEF2), hex(0x9C98A6), hex(0x383744), hex(0x4B4A5A), hex(0x25242E), hex(0x2A2933),
     {hex(0), hex(0x2BD9D9), hex(0x5A9BFF), hex(0xFF8C2B), hex(0xFFD52E), hex(0x4EDB4A), hex(0xC07EFF), hex(0xFF5F70), hex(0x9C98A6)},
     0.30f,
+    0.16f,
 };
 
 // Layout, in points.
@@ -36,9 +38,10 @@ constexpr const char* kFontFiles[] = {"PlusJakartaSans-Regular.ttf", "PlusJakart
 struct FontSpec {
     int file;
     float size;
+    bool digitsOnly = false;  // for a size whose full atlas could outgrow a texture
 };
 // Same order as Ui::FontId.
-constexpr FontSpec kFontSpecs[] = {{2, 20}, {1, 14}, {1, 12}, {2, 44}, {0, 16}, {1, 15}, {0, 12}};
+constexpr FontSpec kFontSpecs[] = {{2, 20}, {1, 14}, {1, 12}, {2, 44}, {0, 16}, {1, 15}, {0, 12}, {2, 140, true}};
 
 void formatTime(char (&buffer)[32], double seconds) {
     int hundredths = static_cast<int>(std::lround(seconds * 100));
@@ -146,6 +149,7 @@ Ui::Ui(SDL_Renderer* renderer, const std::string& fontDir) : renderer_(renderer)
         fonts_[id].ttf = TTF_OpenFont((fontDir + kFontFiles[kFontSpecs[id].file]).c_str(), kFontSpecs[id].size);
         if (!fonts_[id].ttf) SDL_Log("Couldn't open font: %s", SDL_GetError());
         fonts_[id].size = kFontSpecs[id].size;
+        fonts_[id].digitsOnly = kFontSpecs[id].digitsOnly;
         TTF_SetFontHinting(fonts_[id].ttf, TTF_HINTING_NONE);
     }
 }
@@ -176,6 +180,7 @@ void Ui::rebuild(float scale) {
         int atlasW = 1, atlasH = 1;
         constexpr SDL_Color white = {255, 255, 255, 255};
         for (int c = 32; c < 127; c++) {
+            if (font.digitsOnly && !std::isdigit(c)) continue;
             Uint32 codepoint = c == '-' ? 0x2212 : c;  // a true minus, for pace and empty stats
             int minX = 0, advance = 0;
             TTF_GetGlyphMetrics(font.ttf, codepoint, &minX, nullptr, nullptr, nullptr, &advance);
@@ -518,6 +523,12 @@ void Ui::drawPlay(const PlayView& view) {
             fill(topRight ? cellX : cellX + kCell - cornerSquare, topRight ? cellY : cellY + kCell - cornerSquare, cornerSquare, cornerSquare, colors.checker);
             fill(topRight ? cellX + kCell - cornerSquare : cellX, topRight ? cellY + kCell - cornerSquare : cellY, cornerSquare, cornerSquare, colors.checker);
         }
+    }
+    // Lines left, under everything that's played, so it can never hide a block.
+    if (view.mode->goalLines > 0 && view.mode->garbageRows == 0 && !view.over) {
+        std::snprintf(buffer, sizeof buffer, "%d", std::max(view.mode->goalLines - game.stats.lines, 0));
+        SDL_SetTextureAlphaModFloat(fonts_[FontLinesLeft].atlas, colors.linesLeftAlpha);
+        text(FontLinesLeft, buffer, kBoardX + 190, kBoardY + 138, colors.muted, Align::Center);
     }
     for (int y = 0; y < core::kBoardHeight; y++)
         for (int x = 0; x < core::kBoardWidth; x++)

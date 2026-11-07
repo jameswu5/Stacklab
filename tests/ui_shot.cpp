@@ -174,6 +174,27 @@ int main(int argc, char** argv) {
     SDL_SavePNG(levelsPixels, (std::string(argv[1]) + "/levels-finesse.png").c_str());
     SDL_DestroySurface(levelsPixels);
 
+    // Lines left under a stack tall enough to cover part of it, then at the start of a run.
+    core::Game tall = sampleGame();
+    for (int y = 6; y < 19; y++)
+        for (int x = 0; x < 4; x++) tall.board.at(x, y) = core::Piece::S;
+    tall.stats.lines = 3;
+    for (bool dark : {false, true}) {
+        ui.dark = dark;
+        ui.beginFrame();
+        ui.drawPlay({&kModes[0], &tall, tall.seconds(), false, nullptr, "", 0, {}});
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* linesPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(linesPixels, (std::string(argv[1]) + (dark ? "/lines-left-dark.png" : "/lines-left-light.png")).c_str());
+        SDL_DestroySurface(linesPixels);
+        ui.beginFrame();
+        ui.drawPlay({&kModes[0], &fresh, 0, false, nullptr, "", 0, {}});
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* startPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(startPixels, (std::string(argv[1]) + (dark ? "/lines-left-start-dark.png" : "/lines-left-start-light.png")).c_str());
+        SDL_DestroySurface(startPixels);
+    }
+
     // A drill with one target placed, with the list of drills, in both themes.
     std::vector<Drill> drills(2);
     drills[0].name = "First steps 1";

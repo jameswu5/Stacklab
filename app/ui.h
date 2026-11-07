@@ -24,6 +24,7 @@ struct Palette {
     Color background, card, text, muted, line, knob, boardBackground, checker;
     std::array<Color, 9> pieces;  // indexed by core::Piece
     float ghostAlpha;
+    float linesLeftAlpha;
 };
 
 // One ended run, for the session history.
@@ -70,7 +71,7 @@ public:
     bool holdHit(float x, float y) const;
 
 private:
-    enum FontId { FontWord, FontPill, FontLabel, FontTime, FontRow, FontValue, FontSmall, kFontCount };
+    enum FontId { FontWord, FontPill, FontLabel, FontTime, FontRow, FontValue, FontSmall, FontLinesLeft, kFontCount };
     enum class Align { Left, Center, Right };
 
     struct Glyph {
@@ -82,6 +83,7 @@ private:
     struct Font {
         TTF_Font* ttf = nullptr;
         float size = 0;
+        bool digitsOnly = false;
         SDL_Texture* atlas = nullptr;
         std::array<Glyph, 128> glyphs;
         std::vector<float> kerning;  // lazily filled, NaN until measured
