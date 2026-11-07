@@ -515,6 +515,13 @@ void testHoldRestartsTheCount() {
     assert(judged && judged->piece == Piece::T);
     checkJudged(judged, 0, 0, 0);
 
+    // A key held since before the run isn't a press for this piece.
+    Player carried(core::Board{}, Piece::T, rules);
+    carried.press({{Action::Left, true, 0, true}});
+    carried.press({{Action::Left, false, 0}});
+    auto carriedJudged = carried.drop();
+    assert(carriedJudged && carriedJudged->presses == 0 && carriedJudged->faults == 0);
+
     core::Ruleset noHold = rules;
     noHold.allowHold = false;
     Player held(core::Board{}, Piece::T, noHold);

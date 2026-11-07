@@ -58,7 +58,7 @@ constexpr struct {
     const char* name;
 } kStatRows[] = {{StatScore, "Score"}, {StatLevel, "Level"}, {StatGarbage, "Garbage"}, {StatLines, "Lines"}, {StatPieces, "Pieces"}, {StatPPS, "PPS"}, {StatKPP, "KPP"}, {StatAPM, "APM"}, {StatAPP, "APP"}, {StatFinesse, "Finesse"}};
 
-void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double seconds, int goalLines) {
+void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double seconds, int goalLines, const ai::FaultStats* faults = nullptr) {
     double perPiece = stats.pieces > 0 ? 1.0 / stats.pieces : 0;
     double perSecond = seconds > 0 ? 1 / seconds : 0;
     switch (stat) {
@@ -74,8 +74,23 @@ void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double 
         case StatKPP: std::snprintf(buffer, sizeof buffer, "%.2f", stats.keys * perPiece); break;
         case StatAPM: std::snprintf(buffer, sizeof buffer, "%.1f", stats.attack * perSecond * 60); break;
         case StatAPP: std::snprintf(buffer, sizeof buffer, "%.2f", stats.attack * perPiece); break;
-        case StatFinesse: std::snprintf(buffer, sizeof buffer, "-"); break;
+        case StatFinesse:
+            if (faults) std::snprintf(buffer, sizeof buffer, "%d", faults->total);
+            else std::snprintf(buffer, sizeof buffer, "-");
+            break;
     }
+}
+
+// The piece and orientation to work on, such as "T CCW x3".
+void formatWorstFaults(char (&buffer)[32], const ai::FaultStats& faults) {
+    constexpr const char* kPieceNames[] = {"", "I", "J", "L", "O", "S", "T", "Z"};
+    constexpr const char* kRotations[] = {"spawn", "CW", "180", "CCW"};
+    int worst = 0, piece = 0, rot = 0;
+    for (int p = 1; p < 8; p++)
+        for (int r = 0; r < 4; r++)
+            if (faults.byPiece[p][r] > worst) worst = faults.byPiece[p][r], piece = p, rot = r;
+    if (worst == 0) std::snprintf(buffer, sizeof buffer, "-");
+    else std::snprintf(buffer, sizeof buffer, "%s %s x%d", kPieceNames[piece], kRotations[rot], worst);
 }
 
 float clamp01(float value) { return std::clamp(value, 0.0f, 1.0f); }
@@ -366,7 +381,9 @@ void Ui::statRow(float x, float y, float w, const char* name, const char* value)
 void Ui::results(const PlayView& view) {
     const Palette& colors = palette();
     const RunResult& run = view.history.back();
-    constexpr float width = 300, height = 346, x = kBoardX + 190 - width / 2, top = kBoardY + 380 - height / 2;
+    const bool finesse = (view.mode->stats & StatFinesse) && view.faults;
+    constexpr float width = 300, x = kBoardX + 190 - width / 2;
+    const float height = finesse ? 422 : 346, top = kBoardY + 380 - height / 2;
     fill(x, top, width, height, colors.card, 24);
     const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : "Finished";
     text(FontWord, title, x + width / 2, top + 42, colors.text, Align::Center);
@@ -379,6 +396,14 @@ void Ui::results(const PlayView& view) {
         if (!(row.stat & (StatPPS | StatKPP | StatAPM | StatAPP))) continue;
         formatStat(buffer, row.stat, run.stats, run.seconds, view.mode->goalLines);
         statRow(x + 24, y, width - 48, row.name, buffer);
+        y += 38;
+    }
+    if (finesse) {
+        formatStat(buffer, StatFinesse, run.stats, run.seconds, 0, view.faults);
+        statRow(x + 24, y, width - 48, "Finesse", buffer);
+        y += 38;
+        formatWorstFaults(buffer, *view.faults);
+        statRow(x + 24, y, width - 48, "Most faults", buffer);
         y += 38;
     }
     formatRank(buffer, *view.mode, view.best);
@@ -465,7 +490,12 @@ void Ui::drawPlay(const PlayView& view) {
     float rowY = 326;
     for (const auto& row : kStatRows) {
         if (!(view.mode->stats & row.stat)) continue;
-        formatStat(buffer, row.stat, game.stats, view.seconds, view.mode->goalLines);
+        formatStat(buffer, row.stat, game.stats, view.seconds, view.mode->goalLines, view.faults);
+        // Stays until the next piece locks. Beside the board, so it can't hide the stack.
+        if (row.stat == StatFinesse && view.faults && view.faults->last > 0 && !view.over) {
+            fill(kLeftX + 10, rowY + 2, kColumnW - 20, 36, colors.pieces[static_cast<int>(core::Piece::Z)], 10, 0.22f);
+            std::snprintf(buffer, sizeof buffer, "%d (+%d)", view.faults->total, view.faults->last);
+        }
         statRow(kLeftX + 20, rowY, kColumnW - 40, row.name, buffer);
         rowY += 38;
     }

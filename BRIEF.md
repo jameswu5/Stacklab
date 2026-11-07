@@ -85,7 +85,7 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 - **Ghost:** the piece colour at 42% opacity in light mode and 30% in dark mode.
 - **Toggle:** a pill with sun and moon icons, and a circular knob behind the active one.
 - **Menu:** the screen the app opens on. A centred card, 560 wide, with a row for each mode and one for Settings. Rows show the name (20, bold), a line of description and any personal best. Fixed keys: up, down and Enter.
-- **Results:** when a run ends, a card over the board (300 wide) shows the outcome, the time, PPS, KPP, APM, APP and the best. Retry works from it directly. The Next card becomes a Session card, listing this mode's ended runs this session, newest first. Retried or abandoned runs aren't listed, and history isn't saved.
+- **Results:** when a run ends, a card over the board (300 wide) shows the outcome, the time, PPS, KPP, APM, APP, the best and, where the mode lists it, finesse faults with the piece and orientation that had the most. Retry works from it directly. The Next card becomes a Session card, listing this mode's ended runs this session, newest first. Retried or abandoned runs aren't listed, and history isn't saved.
 
 | Colour | Light | Dark |
 |---|---|---|
@@ -164,7 +164,9 @@ struct Mode {
 
 ### Drill format
 
-A drill is a JSON file in `data/drills/`, or under the pref path in `drills/` for the owner's own. Its name, without `.json`, is its id. The menu's Drills row lists them in id order.
+A drill is a JSON file in `data/drills/`, or under the pref path in `drills/` for the owner's own. Its name, without `.json`, is its id. The menu's Drills row lists them in id order. Files load when the app starts.
+
+**Adding a fumen drill:** create `~/Library/Application Support/Stacklab/Stacklab/drills/` if it isn't there, and put a `.json` file in it containing `{"name": "...", "board": "v115@..."}`. The fumen's locked pieces become the queue and targets, in order.
 
 ```json
 {
@@ -316,6 +318,13 @@ This is the go/no-go risk for the project, and it's tested first.
 **Move search.** A breadth-first search over position, rotation and spin state, using the real kick and movement rules. It records reachable placements and the minimum inputs for each. Finesse, the PC solver and the bot all share it. Performance matters, so use bitboards.
 
 **Finesse.** Compare the player's inputs for a placement against the search's minimum. It's computed rather than tabled, so it automatically respects the active rules and tucks.
+
+- A fault is a press beyond the minimum for the same cells and spin, never below 0. Move, rotate and soft drop each cost one per press, held or not. Hard drop is on neither side, and a key held since before the run costs nothing.
+- Hold never costs anything, and restarts the count for the piece it brings out.
+- A 180 is one press when the rules allow it, so two rotations are then a fault. Waiting for gravity is free for the player, so it can hide a fault but not invent one.
+- A lock that can't be judged fairly gets no judgement: it isn't among the search's placements, it landed on the ground in the same tick as a key, or it shares a tick with another lock.
+- The Finesse row shows the run's total. It turns red with the last placement's count, as in `12 (+2)`, until the next piece locks. Undo takes faults back with the piece, and a drill's miss or next drill starts them over.
+- **Finesse is off in modes with `rules.levels`, such as Blitz, and shows "-".** The search doesn't let time pass, so at high gravity it could invent faults.
 
 **PC solver.** Depth-first search over placements with bitboards, pruning, and memoisation. Handles hold and runs on a worker thread. There are two questions with different costs:
 

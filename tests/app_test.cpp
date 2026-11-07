@@ -180,7 +180,7 @@ void testPlayKeys() {
     assert(!play.inputs.events.back().hoisted);
 
     // A held hold or rotate carries over hoisted too, ahead of the moves. Hard
-    // drop never does, and soft drop isn't hoisted.
+    // drop never does.
     play.held.fill(0);
     play.key(BindLeft, true, 6000);
     for (Bind bind : {BindHardDrop, BindSoftDrop, Bind180, BindCCW, BindCW, BindHold}) play.key(bind, true, 6000);
@@ -193,7 +193,7 @@ void testPlayKeys() {
         assert(play.inputs.events[i].pressed);
         assert(play.inputs.ticks[i] == 0);
         assert(play.inputs.events[i].subframe == 0);
-        assert(play.inputs.events[i].hoisted == (order[i] != Action::SoftDrop));
+        assert(play.inputs.events[i].hoisted);
     }
     core::Piece first = play.game.falling.piece;
     play.stepTo(7000 + kTickNs);
@@ -738,6 +738,193 @@ void testDrillRun() {
     }
 }
 
+// How the owner adds a drill: only a name and a fumen. A garbage stack with a well,
+// then a flat I, an O and an L standing on its long side, on top of the garbage.
+constexpr const char* kFumenDrill = R"({"name": "Imported", "board": "v115@9gI8AeI8AeI8AeI8Kex6IvhBT3IK4I"})";
+
+void testFumenDrill() {
+    const Mode row = {.name = "Drills", .blurb = "", .rules = {}, .undo = true, .drills = true};
+
+    auto dir = std::filesystem::temp_directory_path() / "stacklab_fumen_drills";
+    std::filesystem::remove_all(dir);
+    const std::filesystem::path folders[] = {dir};
+    // The folder doesn't exist until the owner makes it, and that's no error.
+    assert(loadDrills(folders).drills.empty() && loadDrills(folders).errors.empty());
+    std::filesystem::create_directories(dir);
+    { std::ofstream(dir / "imported.json") << kFumenDrill; }
+    const DrillSet set = loadDrills(folders);
+    std::filesystem::remove_all(dir);
+    assert(set.errors.empty() && set.drills.size() == 1);
+    const Drill& drill = set.drills[0];
+    assert(drill.id == "imported" && drill.name == "Imported");
+
+    using enum core::Piece;
+    assert(drill.pieces == (std::vector{I, O, L}));
+    assert(drill.board.at(0, 3) == Garbage && drill.board.at(8, 0) == Garbage && drill.board.at(9, 0) == None && drill.board.at(0, 4) == None);
+    assert(drill.targets.size() == 3);
+    auto covers = [](const DrillTarget& target, int x, int y) {
+        for (const core::Cell& cell : target.cells)
+            if (cell.x == x && cell.y == y) return true;
+        return false;
+    };
+    assert(covers(drill.targets[0], 0, 4) && covers(drill.targets[0], 3, 4));
+    assert(covers(drill.targets[1], 4, 4) && covers(drill.targets[1], 5, 5));
+    assert(covers(drill.targets[2], 6, 6) && covers(drill.targets[2], 7, 4));
+
+    DrillPlayer p;
+    p.play.mode = &row;
+    p.play.drill = &drill;
+    p.play.restart({}, 1, p.now);
+    p.start();
+
+    // Three taps where holding left is one press, after a pointless wiggle: 5 presses for 1.
+    p.tap(BindLeft);
+    p.tap(BindRight);
+    p.place(0, 0);
+    assert(p.play.filled == 1);
+    assert(p.play.finesse.judged && p.play.finesse.judged->presses == 5 && p.play.finesse.judged->minimum == 1);
+    assert(p.play.faults.total == 4 && p.play.faults.last == 4);
+
+    // A miss starts the attempt over, and its faults with it.
+    p.place(0, 0);  // O on the I
+    assert(p.play.filled == 0 && p.play.game.stats.pieces == 0 && p.play.missedUntilNs > 0);
+    assert(p.play.faults.total == 0 && p.play.faults.last == 0);
+    p.start();
+
+    // Undo on the first piece stays there, and forgets the press.
+    p.tap(BindLeft);
+    p.play.undo(p.now);
+    p.place(0, 0);  // 3 presses for 1 again
+    assert(p.play.faults.total == 2 && p.play.faults.last == 2);
+    assert(p.play.faults.byPiece[static_cast<int>(I)][0] == 2);
+
+    // A fault that's undone is gone, and the count starts over on the same piece.
+    p.tap(BindLeft);
+    p.tap(BindRight);
+    p.place(0, 4);
+    assert(p.play.filled == 3 && p.play.faults.total == 4 && p.play.faults.last == 2);
+    p.play.undo(p.now);
+    assert(p.play.filled == 1 && p.play.game.falling.piece == O);
+    assert(p.play.faults.total == 2 && p.play.faults.last == 2);
+    assert(p.play.faults.byPiece[static_cast<int>(O)][0] == 0);
+    p.place(0, 4);
+    assert(p.play.finesse.judged && p.play.finesse.judged->presses == 0);
+    assert(p.play.filled == 3 && p.play.faults.total == 2 && p.play.faults.last == 0);
+
+    // Clean, and that's the drill done.
+    p.place(1, 5);
+    assert(p.play.finesse.judged && p.play.finesse.judged->presses == 3 && p.play.finesse.judged->faults == 0);
+    assert(p.play.over && p.play.filled == 7);
+    assert(p.play.faults.total == 2);
+
+    // The held piece comes back after the queue runs out, and is judged from its new spawn.
+    DrillPlayer held;
+    held.play.mode = &row;
+    held.play.drill = &drill;
+    held.play.restart({}, 1, held.now);
+    held.start();
+    held.tap(BindLeft);  // forgotten: hold restarts the count
+    held.tap(BindHold);
+    held.place(0, 4);
+    assert(held.play.faults.total == 0);
+    held.place(1, 5);
+    assert(held.play.game.falling.piece == I && held.play.game.hold == None);
+    held.place(0, 0);
+    assert(held.play.over);
+    assert(held.play.finesse.judged && held.play.finesse.judged->piece == I && held.play.finesse.judged->presses == 3);
+    assert(held.play.faults.total == 2);
+
+    // A fumen drill's placements, undo included, don't allocate once it's going.
+    DrillPlayer quiet;
+    quiet.play.mode = &row;
+    quiet.play.drill = &drill;
+    quiet.play.restart({}, 1, quiet.now);
+    quiet.start();
+    size_t before = allocations;
+    quiet.place(0, 0);
+    quiet.play.stepShown(quiet.now);
+    quiet.play.undo(quiet.now);
+    quiet.place(0, 0);
+    quiet.place(0, 4);
+    quiet.play.stepShown(quiet.now);
+    assert(allocations == before);
+}
+
+void testFinesseInPlay() {
+    const Mode plain = {.name = "Plain", .blurb = "", .rules = {}};
+    DrillPlayer p;
+    p.play.mode = &plain;
+    p.play.restart({}, 1, p.now);
+    p.start();
+    p.tap(BindLeft);
+    p.tap(BindRight);
+    p.tap(BindHardDrop);
+    assert(p.play.faults.total == 2 && p.play.faults.last == 2);
+    // Never on `shown`, the copy that's stepped ahead: drawing it judges nothing.
+    p.play.stepShown(p.now);
+    assert(p.play.faults.total == 2);
+    p.tap(BindHardDrop);
+    assert(p.play.faults.total == 2 && p.play.faults.last == 0);
+
+    // Retry starts the count and the totals over.
+    p.tap(BindLeft);
+    p.play.restart({}, 1, p.now);
+    assert(p.play.faults.total == 0);
+    p.start();
+    p.tap(BindHardDrop);
+    assert(p.play.finesse.judged && p.play.finesse.judged->presses == 0);
+
+    // Keys held through the countdown aren't presses, soft drop included.
+    p.play.restart({}, 1, p.now + 1000);
+    p.play.key(BindLeft, true, p.now);
+    p.play.key(BindSoftDrop, true, p.now);
+    p.start();
+    p.play.key(BindLeft, false, p.now + 1);
+    p.play.key(BindSoftDrop, false, p.now + 1);
+    p.tap(BindHardDrop);
+    assert(p.play.finesse.judged && p.play.finesse.judged->presses == 0 && p.play.faults.total == 0);
+
+    // A hidden mode judges nothing.
+    const Mode levels = {.name = "Levels", .blurb = "", .rules = {.levels = true}};
+    DrillPlayer hidden;
+    hidden.play.mode = &levels;
+    hidden.play.restart({}, 1, hidden.now);
+    hidden.start();
+    hidden.tap(BindLeft);
+    hidden.tap(BindRight);
+    hidden.tap(BindHardDrop);
+    assert(hidden.play.game.stats.pieces == 1);
+    assert(!hidden.play.finesse.judged && hidden.play.faults.total == 0 && hidden.play.faults.last == 0);
+    for (const Mode& mode : kModes)
+        if (mode.rules.levels) assert(!(mode.stats & StatFinesse));
+
+    // A Sandbox edit starts the piece's count over against the new board, which is
+    // judged as it now stands. Editing the queue or hold doesn't touch this piece.
+    const Mode sandbox = {.name = "Sandbox", .blurb = "", .rules = {}, .editable = true};
+    DrillPlayer edit;
+    edit.play.mode = &sandbox;
+    edit.play.restart({}, 1, edit.now);
+    edit.start();
+    edit.tap(BindLeft);
+    edit.play.paint(0, 0, core::Piece::Garbage);
+    edit.play.cycleQueue(0);
+    edit.play.cycleHold();
+    edit.tap(BindHardDrop);
+    assert(edit.play.finesse.judged && edit.play.finesse.judged->presses == 0);
+    assert(edit.play.game.board.at(0, 0) == core::Piece::Garbage);
+
+    // Topping out in Sandbox clears the board, and the next piece is judged on it.
+    bool cleared = false;
+    for (int i = 0; i < 60 && !cleared; i++) {
+        edit.tap(BindHardDrop);
+        cleared = edit.play.game.board.cells == core::Board{}.cells;
+    }
+    assert(cleared);
+    edit.tap(BindLeft);
+    edit.tap(BindHardDrop);
+    assert(edit.play.finesse.judged && edit.play.finesse.judged->presses == 1 && edit.play.finesse.judged->faults == 0);
+}
+
 // A mode without garbage leaves the garbage RNG alone, seen here through random rounding.
 void testNoGarbageRowsKeepsRng() {
     auto sends = [](core::Game& game) {
@@ -815,8 +1002,12 @@ int main() {
     testNoGarbageRowsKeepsRng();
     testDrillFiles();
     testDrillRun();
+    testFumenDrill();
+    testFinesseInPlay();
     testPlayDoesNotAllocate(kModes[0]);
     const Mode withUndo = {.name = "Undo", .blurb = "", .rules = {}, .undo = true};
     testPlayDoesNotAllocate(withUndo);
+    const Mode withEdits = {.name = "Sandbox", .blurb = "", .rules = {}, .editable = true};
+    testPlayDoesNotAllocate(withEdits);
     return 0;
 }

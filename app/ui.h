@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "ai/finesse.h"
 #include "app/settings.h"
 #include "core/game.h"
 #include "modes/drill.h"
@@ -45,6 +46,7 @@ struct PlayView {
     std::span<const RunResult> history;  // this session's ended runs, oldest first; when over, the last is this run
     const Drill* drill = nullptr;  // names the run, and its targets are drawn
     uint64_t filled = 0;           // a bit per target already placed
+    const ai::FaultStats* faults = nullptr;  // null if the mode can't judge finesse
 };
 
 class Ui {

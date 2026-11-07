@@ -89,10 +89,15 @@ int main(int argc, char** argv) {
 
     Ui ui(renderer, std::string(argv[2]) + "/assets/fonts/");
     core::Game game = sampleGame();
+    // The last placement had two faults, as the Finesse row shows them.
+    ai::FaultStats faults;
+    faults.total = 12;
+    faults.last = 2;
+    faults.byPiece[static_cast<int>(core::Piece::T)][3] = 5;
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}});
+        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults});
         SDL_FlushRenderer(renderer);
         SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
         std::string path = std::string(argv[1]) + (dark ? "/dark.png" : "/light.png");
@@ -141,7 +146,7 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&kModes[0], &game, 60.47, true, nullptr, "R to retry, Escape for the menu", 58.02, history});
+        ui.drawPlay({&kModes[0], &game, 60.47, true, nullptr, "R to retry, Escape for the menu", 58.02, history, nullptr, 0, &faults});
         SDL_FlushRenderer(renderer);
         SDL_Surface* resultsPixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(resultsPixels, (std::string(argv[1]) + (dark ? "/results-dark.png" : "/results-light.png")).c_str());
@@ -159,6 +164,16 @@ int main(int argc, char** argv) {
     SDL_SavePNG(statsPixels, (std::string(argv[1]) + "/all-stats.png").c_str());
     SDL_DestroySurface(statsPixels);
 
+    // Blitz, whose results have no finesse, and a levels mode that lists finesse, which shows "-".
+    Mode levelsWithFinesse = kModes[1];
+    levelsWithFinesse.stats |= StatFinesse;
+    ui.beginFrame();
+    ui.drawPlay({&levelsWithFinesse, &game, game.seconds(), false, nullptr, "", 0, {}});
+    SDL_FlushRenderer(renderer);
+    SDL_Surface* levelsPixels = SDL_RenderReadPixels(renderer, nullptr);
+    SDL_SavePNG(levelsPixels, (std::string(argv[1]) + "/levels-finesse.png").c_str());
+    SDL_DestroySurface(levelsPixels);
+
     // A drill with one target placed, with the list of drills, in both themes.
     std::vector<Drill> drills(2);
     drills[0].name = "First steps 1";
@@ -171,10 +186,11 @@ int main(int argc, char** argv) {
     drillGame.queue = {core::Piece::J, core::Piece::None, core::Piece::None, core::Piece::None, core::Piece::None};
     drillGame.falling.piece = core::Piece::O;
     drillGame.falling.x = 4;
+    const ai::FaultStats afterMiss;  // a miss starts the attempt over, and its faults with it
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&kModes[5], &drillGame, 2.5, false, dark ? "Missed" : nullptr, "", 0, {}, &drills[0], 1});
+        ui.drawPlay({&kModes[5], &drillGame, 2.5, false, dark ? "Missed" : nullptr, "", 0, {}, &drills[0], 1, dark ? &afterMiss : &faults});
         SDL_FlushRenderer(renderer);
         SDL_Surface* drillPixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(drillPixels, (std::string(argv[1]) + (dark ? "/drill-dark.png" : "/drill-light.png")).c_str());
@@ -191,7 +207,7 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         ui.beginFrame();
         game.frame++;
-        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}});
+        ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults});
     };
     for (int i = 0; i < 10; i++) {
         draw(i % 2);

@@ -16,7 +16,8 @@ std::array<int, 4> cellKey(std::array<core::Cell, 4> cells) {
 
 }  // namespace
 
-Finesse::Finesse(const core::Game& game) : spawn_(game) { restart(game); }
+// Constructed, not copied, so spawn_ has the capacity that copying into it relies on.
+Finesse::Finesse(const core::Game& game) : spawn_(core::Ruleset{}, core::Handling{}, 1) { restart(game); }
 
 void Finesse::restart(const core::Game& game) {
     judged.reset();
@@ -60,7 +61,7 @@ const std::vector<core::LockResult>& Finesse::tick(core::Game& game, std::span<c
             presses = 0;
             held = true;
             holdUsed = true;
-        } else {
+        } else if (!input.hoisted) {
             presses++;
         }
     }

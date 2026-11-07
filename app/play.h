@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ai/finesse.h"
 #include "app/settings.h"
 #include "app/timing.h"
 #include "core/game.h"
@@ -27,6 +28,8 @@ struct Play {
     // game stepped through the tick in progress, so inputs appear at once.
     // Constructed, not copied, so it has the capacity that copying into it relies on.
     core::Game shown{core::Ruleset{}, core::Handling{}, 1};
+    ai::Finesse finesse{game};
+    ai::FaultStats faults;
     InputQueue inputs;
     std::array<int, 8> held{};  // keys down per core::Action, since an action can have several keys
     Bind lastMove = BindLeft;   // the most recently pressed of left and right
@@ -49,6 +52,7 @@ struct Play {
     struct UndoSlot {
         core::Game game;
         uint64_t filled;
+        ai::FaultStats faults;
     };
     std::vector<UndoSlot> undoSlots;
     int undoCount = 0, undoNewest = 0;
