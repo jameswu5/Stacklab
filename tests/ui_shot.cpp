@@ -195,6 +195,48 @@ int main(int argc, char** argv) {
         SDL_DestroySurface(startPixels);
     }
 
+    // The coach mid-run with a hint, then just after a placement killed the PC, then its results.
+    const Mode& coachMode = kModes[6];
+    PcView coached;
+    coached.status = "PC ready";
+    std::snprintf(coached.hintLine, sizeof coached.hintLine, "Hold first, then place the T");
+    coached.showHint = true;
+    coached.hintPiece = core::Piece::T;
+    coached.hintCells = {{{8, 7}, {7, 6}, {8, 6}, {9, 6}}};
+    coached.pcs = 3;
+    coached.streak = 2;
+    PcView killed;
+    killed.status = "No PC";
+    std::snprintf(killed.detail, sizeof killed.detail, "in 4 lines with these pieces");
+    killed.alert = "That piece killed it: undo";
+    std::snprintf(killed.hintLine, sizeof killed.hintLine, "H for a hint");
+    killed.pcs = 3;
+    killed.outOfReach = true;
+    PcView thinking;
+    thinking.status = "Possible";
+    std::snprintf(thinking.detail, sizeof thinking.detail, "need more pieces");
+    std::snprintf(thinking.hintLine, sizeof thinking.hintLine, "No hint for this one");
+    PcView finished = killed;
+    finished.bestPcs = 7;
+    finished.tally.attempts = {12, 9, 11, 8, 10, 9, 7};
+    finished.tally.successes = {5, 3, 6, 2, 4, 3, 1};
+    const std::vector<RunResult> coachHistory = {{&coachMode, 60.47, runStats, false, false}};
+    auto shot = [&](const PcView& pc, bool over, const char* name, bool dark) {
+        ui.dark = dark;
+        ui.beginFrame();
+        ui.drawPlay({&coachMode, &game, game.seconds(), over, nullptr, "R to retry, Escape for the menu", 0, coachHistory, nullptr, 0, &faults, &pc});
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* coachPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(coachPixels, (std::string(argv[1]) + "/coach-" + name + (dark ? "-dark.png" : "-light.png")).c_str());
+        SDL_DestroySurface(coachPixels);
+    };
+    for (bool dark : {false, true}) {
+        shot(coached, false, "hint", dark);
+        shot(killed, false, "killed", dark);
+        shot(thinking, false, "possible", dark);
+        shot(finished, true, "results", dark);
+    }
+
     // A drill with one target placed, with the list of drills, in both themes.
     std::vector<Drill> drills(2);
     drills[0].name = "First steps 1";
@@ -229,6 +271,7 @@ int main(int argc, char** argv) {
         ui.beginFrame();
         game.frame++;
         ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults});
+        ui.drawPlay({&coachMode, &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &killed});
     };
     for (int i = 0; i < 10; i++) {
         draw(i % 2);

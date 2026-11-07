@@ -10,7 +10,7 @@
 #include "core/game.h"
 
 // The first eight match core::Action.
-enum Bind { BindLeft, BindRight, BindSoftDrop, BindHardDrop, BindCW, BindCCW, Bind180, BindHold, BindRetry, BindMenu, BindUndo, kBindCount };
+enum Bind { BindLeft, BindRight, BindSoftDrop, BindHardDrop, BindCW, BindCCW, Bind180, BindHold, BindRetry, BindMenu, BindUndo, BindHint, kBindCount };
 
 struct Profile {
     std::string name = "Default";
@@ -27,6 +27,7 @@ struct Profile {
         {SDL_SCANCODE_R},
         {SDL_SCANCODE_ESCAPE},
         {SDL_SCANCODE_Q},
+        {SDL_SCANCODE_H},
     }};
 };
 
@@ -51,6 +52,19 @@ void bindKey(Profile& profile, Bind bind, SDL_Scancode key);
 double loadBest(const std::string& path);
 void saveBest(double seconds, const std::string& path);
 void saveBestScore(int score, const std::string& path);
+
+// The PC coach's attempts and successes, by bag phase.
+struct PcTally {
+    std::array<int, 7> attempts{}, successes{};
+};
+
+struct PcRecord {
+    int best = 0;  // the most perfect clears in one run
+    PcTally tally;
+};
+
+PcRecord loadPcRecord(const std::string& path);
+void savePcRecord(const PcRecord& record, const std::string& path);
 
 // The settings screen is a flat list of rows.
 enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowSafelock, RowIrs, RowIhs, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, kRowCount };

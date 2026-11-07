@@ -78,6 +78,11 @@ void startRun(App& app, const Drill* drill, uint64_t timeNs) {
     app.play.best = app.bests[app.menuRow];
     app.screen = Screen::Play;
     restart(app, timeNs);
+    if (mode.pcFile) {
+        app.play.coach->path = app.prefPath + mode.pcFile;
+        app.play.coach->record = loadPcRecord(app.play.coach->path);
+        app.play.coach->hintKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindHint);
+    }
 }
 
 void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
@@ -131,9 +136,12 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
         if (key.down) {
             app.screen = app.play.drill ? Screen::Drills : Screen::Menu;
             app.play.held.fill(0);
+            if (app.play.mode->pcFile) app.play.coach->save();
         }
     } else if (bind == BindUndo) {
         if (key.down) app.play.undo(key.timestamp);
+    } else if (bind == BindHint) {
+        if (key.down && app.play.mode->pcFile) app.play.coach->toggleHint();
     } else {
         app.play.key(static_cast<Bind>(bind), key.down, key.timestamp);
     }
@@ -213,7 +221,13 @@ void drawFrame(App& app, Ui& ui) {
         if (play.over) hint = keyName(BindRetry) + " to retry, " + keyName(BindMenu) + " for the menu";
         else if (SDL_GetTicksNS() < play.missedUntilNs) banner = "Missed";
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
-        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults});
+        PcView pcView;
+        const PcView* pc = nullptr;
+        if (play.mode->pcFile) {
+            pcView = play.coach->view(play.shown, play.mode->goalLines, play.over);
+            pc = &pcView;
+        }
+        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];
@@ -318,6 +332,7 @@ int main(int, char**) {
     }
 
     saveSettings(app.settings, app.settingsPath);
+    if (app.play.coach) app.play.coach->save();
     TTF_Quit();
     SDL_Quit();
     return 0;
