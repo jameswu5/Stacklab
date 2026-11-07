@@ -86,8 +86,9 @@ struct PcAdviceOptions {
 
 class PcSolver {
 public:
-    // Only ever uses the known pieces. NeedMorePieces says the shape left by placing them
-    // all isn't ruled out by the simple checks, not that the rest can be done.
+    // Found only ever uses the known pieces. NeedMorePieces says what comes next isn't ruled out:
+    // with exactly enough known, hold can skip one for an unseen piece, and some piece the bag
+    // allows then finishes it. With fewer known, placing them all just passes the simple checks.
     PcResult solve(const PcQuery& query, const std::atomic<bool>* cancel = nullptr, int maxNodes = kPcDefaultNodes);
 
     // Also tries every order of unseen pieces the bag allows, at the first line count the known

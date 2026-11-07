@@ -309,11 +309,13 @@ PcResult PcSolver::run(const PcQuery& query, const std::atomic<bool>* cancel, in
                 return answer(PcStatus::Found);
             }
             if (stopped_ || capped_) return answer(PcStatus::Unknown);
-            continue;
+            // With exactly enough known, hold can skip one of them to use the next, unseen piece.
+            if (placements < known || query.queueEnds || !query.rules.allowHold) continue;
         }
 
-        unseen_ = unseen;
-        const bool possible = attempt(lines, placements, unseen);
+        // That one unseen piece is cheap to try in full. Past it, the known pieces only rule things out.
+        unseen_ = unseen || placements == known;
+        const bool possible = attempt(lines, placements, unseen_);
         if (stopped_) return answer(PcStatus::Unknown);
         if (possible && unseen) {
             if (!finish(query, result)) return answer(PcStatus::Unknown);
@@ -321,7 +323,8 @@ PcResult PcSolver::run(const PcQuery& query, const std::atomic<bool>* cancel, in
             return answer(PcStatus::Found);
         }
         if (!possible && capped_) return answer(PcStatus::Unknown);
-        return answer(possible ? PcStatus::NeedMorePieces : PcStatus::Impossible);
+        if (possible) return answer(PcStatus::NeedMorePieces);
+        if (unseen && placements > known) return answer(PcStatus::Impossible);
     }
     result.lines = maxLines;
     return answer(PcStatus::Impossible);

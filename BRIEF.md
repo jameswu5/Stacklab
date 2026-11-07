@@ -350,7 +350,8 @@ This is the go/no-go risk for the project, and it's tested first.
 
 - It uses the move search's reachability, so tucks and spins count, and lines may clear partway. Every answer it gives comes with real inputs.
 - `maxLines` caps a clear's height, 4 by default. The fewest lines that work are tried first.
-- Its answer is one of: found; not enough pieces known; impossible within that height with these pieces; or unknown, when the node budget runs out, it's cancelled, or the stack is over 10 rows. An odd cell count is the only "never".
+- Its answer is one of: found, from the visible pieces alone; not enough pieces known; impossible within that height, whatever comes; or unknown, when the node budget runs out, it's cancelled, or the stack is over 10 rows. An odd cell count is the only "never".
+- With exactly as many pieces visible as a clear needs, hold can skip one and use the next, unseen piece. So failing with the visible pieces is only impossible if no piece the bag allows would do it. With hold empty and one more visible than needed, every reachable choice is already visible.
 - **Pruning must stay sound across line clears.** It only uses what clears can't change: each column gets exactly one cell per line cleared, so columns between two finished ones must need a multiple of 4 between them, and occupied rows can't outnumber the lines left. Checking empty regions of the board for a multiple of 4 gives wrong "impossible" answers, because a clear joins the regions above and below it.
 
 There are two questions with different costs:
