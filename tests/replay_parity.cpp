@@ -1,7 +1,7 @@
 // Compares core::Game against recorded results. BRIEF.md section 5.4.
 //
 //   replay_parity <fixture.json>  every lock, against hand-derived or Triangle.js values
-//   replay_parity <folder>        each .ttr and .ttrm under it, against TETR.IO's own end state
+//   replay_parity <folder>        each .ttr, .ttrm and .ttrmx under it, against TETR.IO's own end state
 //
 // Only the second proves we match TETR.IO. Replays hold no mid-game state, so a
 // divergence on any lock only shows up at the end of the round. Exits 77 if the
@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include "core/game.h"
+#include "tests/ttrmx.h"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -415,7 +417,7 @@ enum class Skip { No, GarbageStub, NeverStarted };
 // files don't, so for those the board can't be checked directly. Solo stats also
 // report 0 attack, so sends only get checked on replays with garbage on. Recorded
 // garbage arrivals are fed in directly, since they depend on the other player.
-std::optional<std::string> playReplay(const json& replay, Skip& skip) {
+std::optional<std::string> playReplay(const json& replay, const std::string& date, Skip& skip) {
     const json* endEvent = nullptr;
     std::vector<Input> inputs;
     std::vector<Garbage> garbage;
@@ -481,6 +483,12 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
     if (endFrame > rules.garbageMargin && data.contains("options")) {
         rules.garbageMultiplier -= (endFrame - rules.garbageMargin) * rules.garbageIncrease / 60;
         rules.garbageMultiplier = std::round(rules.garbageMultiplier * 1e6) / 1e6;
+    }
+    // Triangle's cutoff, 15:00 at UTC-4. It keeps a whole second queue for older rounds, which
+    // only draws differently from this one with messiness_inner set or a fractional cap.
+    rules.cancelMovesHole = date >= "2025-05-06T19:00:00";
+    if (!rules.cancelMovesHole && (rules.messinessInner != 0 || rules.garbageCapIncrease != 0)) {
+        return "unsupported options: older garbage queue with messiness_inner or garbagecapincrease\n";
     }
     core::Game game(rules, handlingFrom(options), options["seed"].get<uint32_t>());
 
@@ -595,11 +603,11 @@ int runReplays(const fs::path& folder) {
     if (fs::is_directory(folder)) {
         for (const auto& entry : fs::recursive_directory_iterator(folder)) {
             const std::string ext = entry.path().extension().string();
-            if (ext == ".ttr" || ext == ".ttrm") files.push_back(entry.path());
+            if (ext == ".ttr" || ext == ".ttrm" || ext == ".ttrmx") files.push_back(entry.path());
         }
     }
     if (files.empty()) {
-        std::cout << "SKIPPED: no .ttr or .ttrm replays in " << folder.string() << "\n";
+        std::cout << "SKIPPED: no .ttr, .ttrm or .ttrmx replays in " << folder.string() << "\n";
         return kExitSkipped;
     }
     std::sort(files.begin(), files.end());
@@ -611,11 +619,23 @@ int runReplays(const fs::path& folder) {
             failed++;
             std::cout << "FAIL " << label << ": " << why << "\n";
         };
-        std::ifstream file(path);
-        const json top = json::parse(file, nullptr, false);
-        if (top.is_discarded()) {
-            fail(name, "not JSON");
-            continue;
+        json top;
+        if (path.extension() == ".ttrmx") {
+            std::ifstream file(path, std::ios::binary);
+            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), {});
+            try {
+                top = TtrmxReader(bytes).read()["replay"];
+            } catch (const std::exception& e) {
+                fail(name, e.what());
+                continue;
+            }
+        } else {
+            std::ifstream file(path);
+            top = json::parse(file, nullptr, false);
+            if (top.is_discarded()) {
+                fail(name, "not JSON");
+                continue;
+            }
         }
         if (!top.contains("replay") || !top["replay"].is_object()) {
             fail(name, "unknown format, top-level keys: " + [&] { std::string k; for (const auto& [key, v] : top.items()) k += key + " "; return k; }());
@@ -641,7 +661,7 @@ int runReplays(const fs::path& folder) {
 
         for (const auto& [label, round] : rounds) {
             Skip skip = Skip::No;
-            const auto m = playReplay(*round, skip);
+            const auto m = playReplay(*round, top.value("ts", std::string()), skip);
             if (skip == Skip::GarbageStub) skippedGarbage++;
             else if (skip == Skip::NeverStarted) neverStarted++;
             else if (m) fail(label, *m);
