@@ -176,6 +176,7 @@ struct Kicks {
     int8_t offsets[5][2];  // {dx, dy}, where a positive dy moves the piece down
 };
 const Kicks& kickTable(Piece piece, int from, int to);
+Falling spawnFalling(Piece piece);  // a piece at the spawn
 // T corners as {dx, dy from the centre, front when rotation is either of these}.
 constexpr int kTCorners[4][4] = {{-1, -1, 3, 0}, {1, -1, 0, 1}, {1, 1, 1, 2}, {-1, 1, 2, 3}};
 

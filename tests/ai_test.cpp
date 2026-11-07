@@ -12,6 +12,7 @@
 
 #include "ai/finesse.h"
 #include "ai/move_search.h"
+#include "tests/move_driver.h"
 
 namespace {
 
@@ -22,8 +23,6 @@ using core::Piece;
 using core::Spin;
 
 constexpr Piece kPieces[] = {Piece::I, Piece::J, Piece::L, Piece::O, Piece::S, Piece::T, Piece::Z};
-
-int rowOf(const core::Game& game) { return static_cast<int>(std::floor(game.falling.y)); }
 
 // The piece's cells as a value that ignores which rotation made them.
 std::array<int, 4> cellKey(std::array<core::Cell, 4> cells) {
@@ -46,58 +45,6 @@ core::Board withPlaced(core::Board board, std::array<core::Cell, 4> cells, Piece
     }
     return out;
 }
-
-// Runs ticks in core until the piece locks or the ticks run out.
-struct Driver {
-    core::Game& game;
-    ai::Finesse* finesse = nullptr;
-    bool locked = false;
-    Spin spin = Spin::None;
-
-    void tick(std::initializer_list<core::InputEvent> inputs) {
-        if (locked) return;
-        std::span span(inputs.begin(), inputs.size());
-        const auto& locks = finesse ? finesse->tick(game, span) : game.tick(span);
-        if (locks.empty()) return;
-        locked = true;
-        spin = locks[0].spin;
-    }
-
-    void tap(Action action) { tick({{action, true, 0}, {action, false, 0}}); }
-
-    void move(Move move) {
-        switch (move) {
-            case Move::Left: tap(Action::Left); break;
-            case Move::Right: tap(Action::Right); break;
-            case Move::RotateCW: tap(Action::RotateCW); break;
-            case Move::RotateCCW: tap(Action::RotateCCW); break;
-            case Move::Rotate180: tap(Action::Rotate180); break;
-            case Move::DasLeft:
-            case Move::DasRight: {
-                Action action = move == Move::DasLeft ? Action::Left : Action::Right;
-                tick({{action, true, 0}});
-                for (int i = 0; i < game.handling.das + 1; i++) tick({});
-                tick({{action, false, 0}});
-                break;
-            }
-            case Move::SoftDrop: {
-                tick({{Action::SoftDrop, true, 0}});
-                for (int last = -1; !locked && last != rowOf(game);) {
-                    last = rowOf(game);
-                    tick({});
-                }
-                tick({{Action::SoftDrop, false, 0}});
-                break;
-            }
-            case Move::Down:
-                tick({{Action::SoftDrop, true, 0}});
-                tick({{Action::SoftDrop, false, 0}});
-                break;
-        }
-    }
-
-    void hardDrop() { tick({{Action::HardDrop, true, 0}, {Action::HardDrop, false, 0}}); }
-};
 
 core::Game gameOn(const core::Board& board, Piece piece, const core::Ruleset& rules, const core::Handling& handling) {
     core::Game game(rules, handling, 1);
