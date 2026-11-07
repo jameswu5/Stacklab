@@ -3,6 +3,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -25,6 +26,21 @@ struct InputEvent {
     bool pressed;
     double subframe;
     bool hoisted = false;  // held since before the game: left/right starts charged
+};
+
+// Garbage on its way to this player, in the order the round received it.
+struct GarbageEvent {
+    enum Type : uint8_t {
+        Arrive,   // queued but can't rise yet; amount is before passthrough
+        Confirm,  // its travel time starts on this frame
+        Target,   // gameId is who this player's attacks go to
+    };
+    Type type;
+    int gameId;  // the sender, except for Target
+    int iid = 0;
+    int ackIid = 0;  // the last of this player's sends the sender had seen
+    int amount = 0;
+    size_t beforeInput = 0;  // applied ahead of inputs[beforeInput], or after all of them
 };
 
 // Stored in frames, as in TETR.IO. sdf == 41 means instant soft drop.
@@ -75,6 +91,15 @@ struct Ruleset {
     int garbageMargin = 10800;
     bool garbageSpecialBonus = false;
     bool roundDown = true;  // false rounds fractions randomly
+
+    int garbageSpeed = 20;  // frames from Confirm until garbage can rise
+    double garbageCap = 8;  // rows that can rise per lock
+    double garbageCapIncrease = 0;
+    int garbageCapMargin = 0;
+    int garbageCapMax = 40;
+    int openerPhase = 0;  // for this many pieces an attack cancels up to twice its value
+    double messinessChange = 1;  // chance the hole moves between batches of garbage
+    double messinessInner = 0;   // chance the hole moves between rows of a batch
 };
 
 struct Board {
@@ -127,6 +152,8 @@ struct Stats {
     int levelLines = 0;  // lines toward the next level
     int score = 0;
     int garbageCleared = 0;  // cleared lines that held garbage
+    int garbageSent = 0;      // attack left after cancelling
+    int garbageReceived = 0;  // incoming left when confirmed; TETR.IO's stats fit this
 };
 
 // Park-Miller LCG, matching TETR.IO's piece order for a given seed.
@@ -169,7 +196,7 @@ struct Game {
 
     // Advances one tick (1/60 s). The result lists pieces locked during this
     // tick and stays valid until the next call.
-    const std::vector<LockResult>& tick(std::span<const InputEvent> inputs);
+    const std::vector<LockResult>& tick(std::span<const InputEvent> inputs, std::span<const GarbageEvent> garbage = {});
 
     // Fills the bottom rows of an empty board. A row's hole moves from the row
     // below's with probability `messiness`. `rows` must be at most kVisibleHeight,
@@ -193,6 +220,18 @@ private:
         double das = 0;
     };
 
+    struct Incoming {
+        int gameId;
+        int iid;
+        int amount;
+        int64_t frame;  // when it was confirmed; effectively never until then
+    };
+
+    struct Outgoing {
+        int iid;
+        int amount;
+    };
+
     bool fits(int rot, int x, int y) const;
     void pushBag();
     void nextPiece(bool isHold);
@@ -206,7 +245,11 @@ private:
     bool fallBy(double amount);
     void sink(int pointsPerRow);
     void fall(double delta);
-    void lock();
+    void lock(bool hard);
+    void applyGarbage(const GarbageEvent& e);
+    int cancelGarbage(int amount);
+    void tankGarbage(bool hard);
+    void rerollColumn();
     void gainLevels(int lines);
     int roundAttack(double amount);
     void dcd();
@@ -234,6 +277,15 @@ private:
     double subframe_ = 0;
     double gravity_;
     double garbageMultiplier_;
+    double garbageCap_;
+
+    std::vector<Incoming> incoming_;
+    std::vector<Outgoing> outgoing_;  // sends the opponent hasn't acknowledged
+    int target_ = -1;  // ponytail: one opponent, as in League; keep sends per player for bigger rooms
+    int lastSendIid_ = 0;
+    int cancelSent_ = 0;  // what cancels have let through, for the opener phase
+    int lastColumn_ = -1;  // -1 until the first roll
+    bool columnChanged_ = false;
 };
 
 }  // namespace core
