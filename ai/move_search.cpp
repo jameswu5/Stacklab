@@ -104,7 +104,7 @@ void MoveSearch::run(const core::Board& board, const core::Falling& start, const
         int cost = node.cost + 1;
         int moved = std::min(node.resets + 1, kMaxResets);
 
-        // Falling clears a spin, so a hard drop only keeps one from the ground.
+        // Falling and moving clear a spin, so a hard drop only keeps one from the ground.
         int floor = landing(rot, x, y);
         Node& placed = nodes_[stateId(rot, x, floor, floor == y ? spin : core::Spin::None)];
         if (!placed.placed) {
@@ -116,7 +116,7 @@ void MoveSearch::run(const core::Board& board, const core::Falling& start, const
 
         for (int dir : {-1, 1}) {
             if (!fits(rot, x + dir, y)) continue;
-            visit(rot, x + dir, y, spin, cost, moved, node.lowest, id, dir < 0 ? Move::Left : Move::Right);
+            visit(rot, x + dir, y, core::Spin::None, cost, moved, node.lowest, id, dir < 0 ? Move::Left : Move::Right);
             // The first cell moves on the press and the rest once DAS charges, ticks
             // later, so running out of resets on the first cell ends the slide there.
             if (landing(rot, x + dir, y) == y && moved >= rules.lockResets) continue;
@@ -125,7 +125,7 @@ void MoveSearch::run(const core::Board& board, const core::Falling& start, const
                 to += dir;
                 resets = std::min(resets + 1, kMaxResets);
             }
-            visit(rot, to, y, spin, cost, resets, node.lowest, id, dir < 0 ? Move::DasLeft : Move::DasRight);
+            visit(rot, to, y, core::Spin::None, cost, resets, node.lowest, id, dir < 0 ? Move::DasLeft : Move::DasRight);
         }
 
         for (int amount : {1, -1, 2}) {

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 // JavaScript never fuses a*b+c; on arm64 the compiler otherwise would.
 #pragma clang fp contract(off)
@@ -176,7 +177,8 @@ Game::Game(const Ruleset& rules, const Handling& handling, uint32_t seed)
       rng(seed),
       garbageRng_(seed),
       gravity_(rules.gravity),
-      garbageMultiplier_(rules.garbageMultiplier) {
+      garbageMultiplier_(rules.garbageMultiplier),
+      garbageCap_(rules.garbageCap) {
     queue.reserve(rules.previews + 8);
     locks_.reserve(8);
     if (rules.noSzo) {
@@ -284,6 +286,7 @@ bool Game::blockedOut() {
 void Game::holdPiece() {
     if (holdUsed || !rules.allowHold) return;
     holdUsed = true;
+    lastSpin_ = Spin::None;  // Triangle keeps it; TETR.IO's recorded minis don't
     const Piece held = hold;
     hold = falling.piece;
     if (held != Piece::None) {
@@ -291,6 +294,8 @@ void Game::holdPiece() {
     } else {
         nextPiece(true);
     }
+    // TETR.IO's recorded end states keep the old hold when holding ends the game.
+    if (toppedOut) hold = held;
 }
 
 void Game::rotate(int amount) {
@@ -423,7 +428,7 @@ void Game::fall(double delta) {
         falling.locking += delta;
         if (falling.locking > rules.lockTime || forceLock_ || shouldLock()) {
             if (handling.safelock) safeLock_ = 7;
-            lock();
+            lock(false);
         }
         return;
     }
@@ -435,7 +440,94 @@ int Game::roundAttack(double amount) {
     return static_cast<int>(floored) + (garbageRng_.nextFloat() < amount - floored ? 1 : 0);
 }
 
-void Game::lock() {
+void Game::applyGarbage(const GarbageEvent& e) {
+    switch (e.type) {
+        case GarbageEvent::Arrive: {
+            // Sends that crossed this garbage in flight cancel against it. Anything
+            // the sender had seen by then was already accounted for on its side.
+            int amount = e.amount;
+            std::vector<Outgoing> kept;
+            for (Outgoing out : outgoing_) {
+                if (out.iid <= e.ackIid) continue;
+                const int crossed = std::min(out.amount, amount);
+                out.amount -= crossed;
+                amount -= crossed;
+                if (out.amount > 0) kept.push_back(out);
+            }
+            outgoing_ = std::move(kept);
+            if (amount > 0) incoming_.push_back({e.gameId, e.iid, amount, INT64_MAX / 2});
+            break;
+        }
+        case GarbageEvent::Confirm: {
+            const auto item = std::find_if(incoming_.begin(), incoming_.end(), [&](const Incoming& g) {
+                return g.iid == e.iid && g.gameId == e.gameId;
+            });
+            if (item != incoming_.end()) {
+                item->frame = static_cast<int64_t>(frame);
+                stats.garbageReceived += item->amount;
+            }
+            break;
+        }
+        case GarbageEvent::Target: target_ = e.gameId; break;
+    }
+}
+
+void Game::rerollColumn() { lastColumn_ = static_cast<int>(std::floor(garbageRng_.nextFloat() * kBoardWidth)); }
+
+// Returns what's left of `amount` to send.
+int Game::cancelGarbage(int amount) {
+    int send = amount;
+    int cancel = 0;
+    int size = 0;
+    for (const Incoming& g : incoming_) size += g.amount;
+    if (stats.pieces + 1 <= rules.openerPhase && size >= cancelSent_) cancel += amount;
+    while ((send > 0 || cancel > 0) && !incoming_.empty()) {
+        if (--incoming_.front().amount <= 0) {
+            incoming_.erase(incoming_.begin());
+            if (rules.cancelMovesHole && garbageRng_.nextFloat() < rules.messinessChange) {
+                rerollColumn();
+                columnChanged_ = true;
+            }
+        }
+        if (send > 0) send--;
+        else cancel--;
+    }
+    cancelSent_ += send;
+    return send;
+}
+
+// Raises the board by whatever garbage has finished travelling, up to the cap. It goes
+// in arrival order, so garbage still travelling holds back anything behind it. Triangle
+// sorts by confirm frame here, which replays with out of order confirms rule out.
+void Game::tankGarbage(bool hard) {
+    if (incoming_.empty()) return;
+
+    const int lines = static_cast<int>(std::floor(std::min(garbageCap_, static_cast<double>(rules.garbageCapMax))));
+    const int64_t now = static_cast<int64_t>(frame) - (hard ? 0 : 1);
+    for (int i = 0; i < lines && !incoming_.empty(); i++) {
+        Incoming& item = incoming_.front();
+        if (item.frame + rules.garbageSpeed > now) break;
+        item.amount--;
+
+        if ((lastColumn_ < 0 || garbageRng_.nextFloat() < rules.messinessInner) && !columnChanged_) rerollColumn();
+        columnChanged_ = false;
+
+        // Rows 38 and 39 stay put and row 37 is lost, as in Triangle's insertGarbage.
+        std::copy_backward(board.cells.begin(), board.cells.begin() + (kBoardHeight - 3) * kBoardWidth,
+                           board.cells.begin() + (kBoardHeight - 2) * kBoardWidth);
+        for (int x = 0; x < kBoardWidth; x++) board.at(x, 0) = x == lastColumn_ ? Piece::None : Piece::Garbage;
+
+        if (item.amount <= 0) {
+            incoming_.erase(incoming_.begin());
+            if (garbageRng_.nextFloat() < rules.messinessChange) {
+                rerollColumn();
+                columnChanged_ = true;
+            }
+        }
+    }
+}
+
+void Game::lock(bool hard) {
     holdUsed = false;
     for (const Cell& cell : falling.cells()) board.at(cell.x, cell.y) = falling.piece;
 
@@ -503,6 +595,18 @@ void Game::lock() {
     stats.garbageCleared += garbageCleared;
     lastWasClear_ = lines > 0;
 
+    // Combo blocking: a clear only cancels, and garbage rises on a lock that clears nothing.
+    std::array<int, 5> outgoing = result.sends;
+    if (lines > 0) {
+        for (int& send : outgoing) {
+            if (send == 0) continue;
+            send = cancelGarbage(send);
+            if (send > 0) break;
+        }
+    } else {
+        tankGarbage(hard);
+    }
+
     int points = kClearScores[static_cast<int>(lastSpin_)][lines];
     // Replays only pin pcB2b with allclear_b2b 1; other values are assumed to behave the same.
     if (lines > 0 && (spun || lines >= 4 || pcB2b) && stats.b2b > 0) points = points * 3 / 2;
@@ -511,6 +615,13 @@ void Game::lock() {
 
     nextPiece(false);
     lastSpin_ = Spin::None;
+
+    result.sent = outgoing;
+    for (int send : outgoing) {
+        if (send == 0) continue;
+        stats.garbageSent += send;
+        if (target_ >= 0) outgoing_.push_back({++lastSendIid_, send});
+    }
 
     stats.pieces++;
     stats.lines += lines;
@@ -548,6 +659,7 @@ void Game::dcd() {
 void Game::shift() {
     if (fits(falling.rot, falling.x + lastShift_, row(falling.y))) {
         falling.x += lastShift_;
+        lastSpin_ = Spin::None;  // Triangle keeps it; TETR.IO's recorded minis don't
         if (falling.lockResets < 31) falling.lockResets++;
         hitWall_ = false;
         if (is20G()) sink(softDropHeld_ ? 1 : 0);
@@ -610,7 +722,7 @@ void Game::keyDown(const InputEvent& e) {
         case Action::HardDrop:
             if (safeLock_ != 0) break;
             sink(2);
-            lock();
+            lock(true);
             break;
         case Action::Hold:
             holdHeld_ = true;
@@ -644,16 +756,21 @@ void Game::keyUp(const InputEvent& e) {
     }
 }
 
-const std::vector<LockResult>& Game::tick(std::span<const InputEvent> inputs) {
+const std::vector<LockResult>& Game::tick(std::span<const InputEvent> inputs, std::span<const GarbageEvent> garbage) {
     locks_.clear();
     if (toppedOut) return locks_;
 
     subframe_ = 0;
-    for (const InputEvent& e : inputs) {
-        if (e.pressed) {
-            keyDown(e);
+    size_t nextGarbage = 0;
+    for (size_t i = 0; i <= inputs.size(); i++) {
+        for (; nextGarbage < garbage.size() && garbage[nextGarbage].beforeInput <= i; nextGarbage++) {
+            applyGarbage(garbage[nextGarbage]);
+        }
+        if (i == inputs.size()) break;
+        if (inputs[i].pressed) {
+            keyDown(inputs[i]);
         } else {
-            keyUp(e);
+            keyUp(inputs[i]);
         }
         if (toppedOut) return locks_;
     }
@@ -665,6 +782,7 @@ const std::vector<LockResult>& Game::tick(std::span<const InputEvent> inputs) {
 
     if (static_cast<int64_t>(frame) > rules.gravityMargin) gravity_ += rules.gravityIncrease / 60;
     if (static_cast<int64_t>(frame) > rules.garbageMargin) garbageMultiplier_ += rules.garbageIncrease / 60;
+    if (static_cast<int64_t>(frame) > rules.garbageCapMargin) garbageCap_ += rules.garbageCapIncrease / 60;
     return locks_;
 }
 
