@@ -402,6 +402,14 @@ void testStatuses() {
     assert(result.status == PcStatus::NeedMorePieces);
     assert(result.lines == 4 && result.piecesNeeded == 10 && result.steps.empty());
 
+    // Too few known for 2 lines, and these can't do it however they go, but 4 lines isn't ruled out.
+    PcQuery taller;
+    for (int y = 0; y < 2; y++) taller.board.at(1, y) = taller.board.at(5, y) = Piece::Garbage;
+    taller.current = Piece::I;
+    taller.rules = rules;
+    result = solver.solve(taller);
+    assert(result.status == PcStatus::NeedMorePieces && result.lines == 4);
+
     // The same 2 lines with the right pieces.
     PcQuery two;
     two.current = Piece::I;
@@ -650,6 +658,84 @@ void testUnseenPieces() {
     assert(solver.solveWithUnseen(almost, nullptr, 2'000'000).status == PcStatus::Found);
 }
 
+// Exactly as many pieces visible as a clear needs. Hold can skip one of them and use the next,
+// unseen piece, so failing with the visible pieces isn't a no.
+void testHoldReachesUnseen() {
+    PcSolver solver;
+    PcQuery query;
+    const char* rows[] = {"T......LLL", "TT.....OOL", "T......OOJ", ".......JJJ"};  // floor first
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 10; x++)
+            if (rows[y][x] != '.') query.board.at(x, y) = Piece::Garbage;
+    query.current = Piece::I;
+    query.queue = {Piece::Z, Piece::S, Piece::I, Piece::S, Piece::O};
+    const Piece seen[] = {Piece::T, Piece::L, Piece::O, Piece::J, Piece::I, Piece::Z, Piece::S, Piece::I, Piece::S, Piece::O};
+    query.bagLeft = ai::pcBagLeft(seen);
+    query.rules = noGravity();
+
+    PcResult result = solver.solve(query);
+    assert(result.status == PcStatus::NeedMorePieces && result.lines == 4 && result.piecesNeeded == 6 && result.steps.empty());
+    assert(solver.solve(query, nullptr, 1).status == PcStatus::Unknown);
+
+    // solveWithUnseen names a piece that does it, and that piece's solution plays.
+    result = solver.solveWithUnseen(query);
+    assert(result.status == PcStatus::Found && result.assumed.size() == 1);
+    checkByPlaying(query, result);
+
+    // With the piece that really came next, it's proven.
+    PcQuery known = query;
+    known.queue.push_back(Piece::L);
+    known.bagLeft = ai::pcBagLeft(std::vector<Piece>{Piece::T, Piece::L, Piece::O, Piece::J, Piece::I, Piece::Z, Piece::S, Piece::I, Piece::S, Piece::O, Piece::L});
+    result = solver.solve(known);
+    assert(result.status == PcStatus::Found);
+    checkByPlaying(known, result);
+
+    // Only "no" if no piece the bag allows does it, checked against the plain search. A drill's
+    // queue ending, or hold being off, takes the unseen piece away.
+    std::mt19937 rng(4);
+    MoveSearch search, plain;
+    int yes = 0, maybe = 0, no = 0;
+    for (int round = 0; round < 800 && maybe + no < 120; round++) {
+        Solvable game;
+        if (!makeSolvable(2 + round % 3, rng, search, game)) continue;
+        const size_t count = 2;  // the plain search takes far too long with more
+        if (game.pieces.size() < count) continue;
+        PcQuery state = queryFrom(game, game.pieces.size() - count, count);
+        if (round % 2) state.queue[rng() % state.queue.size()] = kPieces[rng() % 7];
+        if (round % 3 == 0) {
+            state.hold = state.queue.back();
+            state.queue.pop_back();
+        }
+        state.queueEnds = false;
+        state.maxLines = (cellCount(state.board) + 4 * static_cast<int>(count)) / 10;
+        std::vector<Piece> reachable;
+        for (Piece piece : kPieces) {
+            std::vector<Piece> queue = state.queue;
+            queue.push_back(piece);
+            if (plainSearch(state.board, state.current, state.hold, true, queue, state.rules, plain)) reachable.push_back(piece);
+        }
+        const bool proven = plainSearch(state.board, state.current, state.hold, true, state.queue, state.rules, plain);
+        for (Piece only : kPieces) {
+            state.bagLeft = 1 << static_cast<int>(only);
+            const PcStatus status = solver.solve(state).status;
+            if (status == PcStatus::Unknown) continue;
+            const bool works = std::find(reachable.begin(), reachable.end(), only) != reachable.end();
+            assert(status == (proven ? PcStatus::Found : works ? PcStatus::NeedMorePieces : PcStatus::Impossible));
+            (proven ? yes : works ? maybe : no)++;
+        }
+        state.bagLeft = 0;
+        if (!proven) {
+            state.queueEnds = true;
+            assert(solver.solve(state).status == PcStatus::Impossible);
+            state.queueEnds = false;
+            state.rules.allowHold = false;
+            assert(solver.solve(state).status == PcStatus::Impossible);
+        }
+    }
+    std::printf("hold reaching an unseen piece: %d proven, %d possible, %d no\n", yes, maybe, no);
+    assert(maybe > 20 && no > 20);
+}
+
 // Every order the unseen pieces can come in: the rest of this bag, then whole bags.
 void allFutures(uint8_t bag, int length, std::vector<Piece>& pieces, std::vector<std::vector<Piece>>& out) {
     if (length == 0) {
@@ -665,9 +751,11 @@ void allFutures(uint8_t bag, int length, std::vector<Piece>& pieces, std::vector
     }
 }
 
-// The exact share of futures with a perfect clear after this placement, when the pieces left are
-// all in view once the next one shows, so a rollout never has to guess.
-double exactChance(PcSolver& solver, const PcQuery& query, Piece piece, bool pressedHold, std::array<core::Cell, 4> cells, const std::vector<std::vector<Piece>>& futures) {
+// The share of futures with a perfect clear after this placement, provable from the previews, or
+// with the whole future known. With hold off and the pieces left all in view once the next one
+// shows, a rollout never has to guess, so the first is exact. With hold on they're its bounds,
+// since hold can then skip a piece for an unseen one.
+double exactChance(PcSolver& solver, const PcQuery& query, Piece piece, bool pressedHold, std::array<core::Cell, 4> cells, const std::vector<std::vector<Piece>>& futures, bool wholeFuture = false) {
     PcQuery after = query;
     lockCells(after.board, cells, piece);
     after.holdUsed = false;
@@ -681,7 +769,7 @@ double exactChance(PcSolver& solver, const PcQuery& query, Piece piece, bool pre
         trial.queue.insert(trial.queue.end(), future.begin(), future.end());
         trial.current = trial.queue.front();
         trial.queue.erase(trial.queue.begin());
-        trial.queue.resize(query.queue.size());
+        if (!wholeFuture) trial.queue.resize(query.queue.size());
         hits += solver.solve(trial, nullptr, 2'000'000).status == PcStatus::Found;
     }
     return static_cast<double>(hits) / futures.size();
@@ -756,6 +844,7 @@ void testAdvice() {
         uint8_t bag = 1 << static_cast<int>(small.pieces[from + 2]) | 1 << static_cast<int>(kPieces[rng() % 7]);
         if (round % 2 == 0) bag |= 1 << static_cast<int>(kPieces[rng() % 7]);
         query.bagLeft = bag;
+        query.rules.allowHold = false;
 
         // One unseen piece is needed, or two if hold brings out the next piece now.
         std::vector<std::vector<Piece>> futures;
@@ -771,16 +860,13 @@ void testAdvice() {
         assert(error <= 5 * sigma + 1e-9);
 
         double best = 0, worst = 1;
-        const std::pair<Piece, bool> options[] = {{query.current, false}, {query.queue[0], true}};
-        for (const auto& [piece, hold] : options) {
-            search.run(query.board, core::spawnFalling(piece), query.rules);
-            std::vector<std::array<core::Cell, 4>> placements;
-            for (const ai::Placement& placement : search.placements) placements.push_back(search.cells(placement));
-            for (const auto& cells : placements) {
-                const double chance = exactChance(solver, query, piece, hold, cells, futures);
-                best = std::max(best, chance);
-                worst = std::min(worst, chance);
-            }
+        search.run(query.board, core::spawnFalling(query.current), query.rules);
+        std::vector<std::array<core::Cell, 4>> placements;
+        for (const ai::Placement& placement : search.placements) placements.push_back(search.cells(placement));
+        for (const auto& cells : placements) {
+            const double chance = exactChance(solver, query, query.current, false, cells, futures);
+            best = std::max(best, chance);
+            worst = std::min(worst, chance);
         }
         totalError += error;
         worstError = std::max(worstError, error);
@@ -788,6 +874,16 @@ void testAdvice() {
         spread += best > worst;
         assert(exact <= best + 1e-9);
         cases++;
+
+        query.rules.allowHold = true;
+        const ai::PcAdvice held = solver.advise(query, nullptr, {.maxSamples = 2048, .nodesPerSolve = 2'000'000});
+        if (held.status == PcStatus::NeedMorePieces) {
+            const double low = exactChance(solver, query, held.step.piece, held.step.hold, held.step.cells, futures);
+            const double high = exactChance(solver, query, held.step.piece, held.step.hold, held.step.cells, futures, true);
+            assert(low <= high + 1e-9);
+            assert(held.chance >= low - 5 * std::sqrt(low * (1 - low) / held.samples) - 1e-9);
+            assert(held.chance <= high + 5 * std::sqrt(high * (1 - high) / held.samples) + 1e-9);
+        }
     }
     std::printf("advice against a count of every future: %d cases, %d with choices that differ, mean error %.3f, worst %.3f, mean shortfall from the best choice %.3f\n", cases, spread, totalError / cases, worstError, totalRegret / cases);
     assert(cases >= 20 && spread >= 15 && totalRegret / cases < 0.03);
@@ -1094,6 +1190,7 @@ int main(int argc, char** argv) {
     stage("buried", testBuriedRows);
     stage("plain", testAgainstPlainSearch);
     stage("unseen", testUnseenPieces);
+    stage("holdunseen", testHoldReachesUnseen);
     stage("advice", testAdvice);
     return 0;
 }
