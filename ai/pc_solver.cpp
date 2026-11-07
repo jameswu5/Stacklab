@@ -439,6 +439,7 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
 PcStatus PcSolver::rollout(PcQuery state, const std::vector<core::Piece>& future, size_t window, uint32_t seed, const std::atomic<bool>* cancel, int nodes) {
     std::mt19937 rng(seed);
     size_t used = 0;
+    window = std::max<size_t>(window, 1);  // the next piece counts as visible, so a plan can't hold into a guess
     while (true) {
         while (state.queue.size() < window + (state.current == core::Piece::None)) {
             if (used == future.size()) return PcStatus::Impossible;

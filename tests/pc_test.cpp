@@ -733,6 +733,15 @@ void testAdvice() {
     const ai::PcAdvice one = solver.advise(empty, nullptr, few), two = solver.advise(empty, nullptr, few);
     assert(!one.partial && one.samples == 4 && one.hasStep && cellKey(one.step.cells) == cellKey(two.step.cells) && one.chance == two.chance);
 
+    // No previews: holding brings out a piece nobody has seen, which a rollout mustn't take from its guess.
+    PcQuery noPreviews;
+    for (int y = 0; y < 2; y++)
+        for (int x = 4; x < 10; x++) noPreviews.board.at(x, y) = Piece::Garbage;
+    noPreviews.current = Piece::O;
+    noPreviews.rules = noGravity();
+    const ai::PcAdvice blind = solver.advise(noPreviews, nullptr, {.maxSamples = 8, .nodesPerSolve = 5'000});
+    assert(blind.status == PcStatus::NeedMorePieces && blind.hasStep && blind.samples == 8);
+
     // Against a count of every future, on boards small enough to count. Each stays near the truth,
     // and what's chosen is about as good as the best choice there is.
     int cases = 0, spread = 0;
