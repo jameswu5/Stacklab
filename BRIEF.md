@@ -10,7 +10,9 @@ Success means three things:
 
 1. Stacking here feels the same as stacking in TETR.IO.
 2. Given the same seed, handling and inputs, the simulation produces the same result as TETR.IO (section 5).
-3. New modes and drills are cheap to add, usually as a table entry or a data file.
+3. New modes and drills are cheap to add, usually as a table entry or a data file. A technique coach (section 7) is the exception: it's code and tuning.
+
+The owner's first concrete target is TETR.IO's PC badge: 10 perfect clears in one 40L run. The project began as a way to learn those solves, so the perfect clear trainer is built around it.
 
 ### Identity
 
@@ -149,11 +151,11 @@ struct Mode {
 | Trainer | Function |
 |---|---|
 | Finesse | Live feedback comparing inputs against the optimal count, with fault stats per piece and orientation |
-| Perfect clear | Opener and continuation drills, a "PC still possible" indicator, a solution overlay, and success-rate stats |
-| LST | Scripted stages for building and continuing the stack, then adaptive drills where justified |
-| Setups | Generic drill runner for the starter set and imported fumens |
+| Perfect clear | A coach on random 7-bag queues, under 40L's rules: a "PC still possible" indicator, a solution overlay on demand, feedback on each placement, and success rates by bag phase, aimed at the badge |
+| LST | A coach on random queues, built alongside the bot, since it shares the bot's search and evaluation |
+| Setups | The drill runner, for fumens the owner imports |
 
-**Starter drills:** PC opener, LST, TKI, DT Cannon, MKO, a dig set and 4-wide. Set definitions are drafted by the implementer and checked by the owner.
+**Random queues, not memorised placements.** Learning to place pieces in one fixed queue teaches little, so trainers use random queues and a coach that knows the technique (section 7). The fumen runner stays, for the owner's own setups and possibly for a coach's starting boards, but no fixed drill sets are authored. Named setups such as TKI, DT Cannon and MKO get a coach only if the owner wants to learn them.
 
 ### Common to all modes
 
@@ -334,7 +336,14 @@ This is the go/no-go risk for the project, and it's tested first.
 
 **Solution overlay.** Show the next placement as a ghost, on demand. Hidden by default so it doesn't undercut training.
 
-**LST.** No simple rule defines a "valid LST" stack, so it starts as authored stages. Adaptive drills use a table of accepted states, added only if the scripted version proves too limiting.
+**Technique coaches.** Each technique gets a coach that answers three things after every placement: is the technique still alive, what's a good placement here (hidden until asked), and how was the one just made: fine, worse than the best, or fatal to the technique.
+
+- **Fair to what was visible:** a placement isn't marked wrong because of pieces the player hadn't seen. Telling a mistake from bad luck needs the success-across-unseen-bags question above, sampled if necessary.
+- **Mistakes teach:** after a fatal placement, the player can undo and retry on the same queue, then see a solution. A new attempt gets a new queue.
+
+**PC coach.** It's the solver, so its answers are exact and tests can check them. For the badge, 10 PCs in 40 lines means no spare lines: every clear is part of a PC, PC heights are even, and a 2-line PC banks lines for a later 6-line one. Each PC starts empty at a different bag position with hold carried over, and with 10 pieces per 4-line PC there are 7 repeating starting phases, so success is measured per phase and as a streak.
+
+**LST coach.** No simple rule defines a "valid LST" stack, so this is a search with a hand-written evaluation, and it can give confident bad advice. No test can settle it: the owner validates it by playing. Built alongside the bot, as a bot with a different evaluation.
 
 ## 8. Bot
 
@@ -394,13 +403,13 @@ Each phase ends with something the owner can play.
 | 1. Feel | Core sim, SDL3 app, handling, keybinds, 40L, solo replay parity | Solo replays pass, and the owner confirms it feels right. **Go/no-go.** |
 | 2. Framework | Menus, settings UI, mode table, stats, history, Blitz, Dig, Sandbox | A submode is added with one table row |
 | 3. Training tools | Move search, finesse, drill runner, fumen import, undo | Owner completes an imported drill with live finesse feedback |
-| 4. Perfect clear | Solver, indicator, overlay, PC drills | "Possible" indicator stays correct and doesn't cause frame drops |
-| 5. Pattern library | LST and the starter drills | Owner signs off each set |
+| 4. Perfect clear | Solver, PC coach, indicator, overlay, success rates by phase | "Possible" indicator stays correct and doesn't cause frame drops |
+| 5. Technique coaches | The LST coach, then others the owner asks for. Built during phase 7 | Owner signs off each coach by playing it |
 | 6. Versus rules | Garbage, surge, multi-player match, versus replay parity | Tetra League replays pass with no mismatches |
 | 7. Bot | Search, evaluation, presets, toggles, self-play tuning | Presets span new player to the owner's level |
 | 8. X-rank bot | Sustained tuning against the targets in section 8 | The X-rank preset meets all three targets; likely the longest phase |
 
-Attack calculation is written and unit-tested in phase 1, even though versus arrives later, since scoring depends on it. Phases 3 to 5 come before the bot because trainers are the priority and they build the search that the bot reuses.
+Attack calculation is written and unit-tested in phase 1, even though versus arrives later, since scoring depends on it. Phases 3 and 4 come before the bot because trainers are the priority and they build the search that the bot reuses. The order from here is 4, 6, then 7 with 5 alongside it, since coaches beyond PC share the bot's evaluation, and the bot needs phase 6's garbage for versus.
 
 ## 10. Risks
 
@@ -411,14 +420,14 @@ Attack calculation is written and unit-tested in phase 1, even though versus arr
 | Undocumented parity edge cases | Delays phases 1 and 6 | Replay test finds the first mismatch; compare against Triangle |
 | Bot doesn't reach X-rank strength at human speed | Top preset falls short of the owner's goal | Lower presets ship first; self-play tuning, then a learned evaluation if needed |
 | PC success-rate query too slow | Feature limited | Precompute or sample, or leave it out |
-| Drill authoring takes time | Slower content growth | Fumen import; owner reviews sets |
+| A coach gives confident bad advice | Teaches the wrong habit | PC answers are exact and tested; the owner validates the LST coach by playing |
 
 ## 11. Owner inputs
 
 - **TETR.IO replays** per section 5.4, needed from phase 1 for solo and phase 6 for versus. Include one recent Tetra League replay for the ruleset.
 - **Current handling settings**, to use as the default profile.
 - **X-rank replays** for benchmarks, before phase 8, and ideally access to an X-rank player for validation.
-- **Review of drill sets** in phase 5.
+- **Playing each technique coach** to validate it, in phase 5.
 - **Final name**, whenever convenient. It must be an original name, not "Tetris" or similar.
 
 ## 12. Sources
