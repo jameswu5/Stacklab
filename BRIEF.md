@@ -329,7 +329,14 @@ This is the go/no-go risk for the project, and it's tested first.
 - The Finesse row shows the run's total. It turns red with the last placement's count, as in `12 (+2)`, until the next piece locks. Undo takes faults back with the piece, and a drill's miss or next drill starts them over.
 - **Finesse is off in modes with `rules.levels`, such as Blitz, and shows "-".** The search doesn't let time pass, so at high gravity it could invent faults.
 
-**PC solver.** Depth-first search over placements with bitboards, pruning, and memoisation. Handles hold and runs on a worker thread. There are two questions with different costs:
+**PC solver.** Depth-first search over placements with bitboards, pruning, and memoisation. Handles hold and runs on a worker thread. It takes only what the player can see, as a `PcQuery`: the board, falling piece, hold, previews and what's left of the bag. It never takes a `core::Game`, whose queue runs past the previews.
+
+- It uses the move search's reachability, so tucks and spins count, and lines may clear partway. Every answer it gives comes with real inputs.
+- `maxLines` caps a clear's height, 4 by default. The fewest lines that work are tried first.
+- Its answer is one of: found; not enough pieces known; impossible within that height with these pieces; or unknown, when the node budget runs out, it's cancelled, or the stack is over 10 rows. An odd cell count is the only "never".
+- **Pruning must stay sound across line clears.** It only uses what clears can't change: each column gets exactly one cell per line cleared, so columns between two finished ones must need a multiple of 4 between them, and occupied rows can't outnumber the lines left. Checking empty regions of the board for a multiple of 4 gives wrong "impossible" answers, because a clear joins the regions above and below it.
+
+There are two questions with different costs:
 
 - *Is there a solution with the visible queue?* Should be fast enough to run after every piece.
 - *What's the chance of success across unseen bags?* Much more expensive, so precompute or sample it, and only show it in the UI once it's fast enough.

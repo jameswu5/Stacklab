@@ -113,6 +113,15 @@ constexpr int kPcScore = 3500;
 
 const Kicks& kickTable(Piece piece, int from, int to) { return (piece == Piece::I ? kIKicks : kKicks)[from][to]; }
 
+Falling spawnFalling(Piece piece) {
+    Falling falling;
+    falling.piece = piece;
+    falling.x = piece == Piece::O ? 4 : 3;
+    falling.y = kSpawnY;
+    falling.highestY = kSpawnHighestY;
+    return falling;
+}
+
 std::array<Cell, 4> Falling::cells() const {
     std::array<Cell, 4> out;
     const auto& shape = kShapes[static_cast<int>(piece)][rot];
@@ -241,11 +250,7 @@ void Game::spawn(Piece piece, bool isHold) {
     forceLock_ = false;
     if (!isHold) holdUsed = false;
 
-    falling = Falling{};
-    falling.piece = piece;
-    falling.x = piece == Piece::O ? 4 : 3;
-    falling.y = kSpawnY;
-    falling.highestY = kSpawnHighestY;
+    falling = spawnFalling(piece);
 
     if (blockedOut()) {
         toppedOut = true;
