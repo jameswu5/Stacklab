@@ -104,7 +104,7 @@ private:
     std::thread thread_;  // last, so everything it uses exists first
 };
 
-void PcProgress::note(const core::LockResult& lock, int dealt) {
+void PcProgress::note(const core::LockResult& lock, int placed) {
     if (!attempted) tally.attempts[phase]++;
     attempted = true;
     linesInAttempt += lock.lines;
@@ -114,9 +114,10 @@ void PcProgress::note(const core::LockResult& lock, int dealt) {
     pcs++;
     streak++;
     if (withinLimit) tally.successes[phase]++;
-    phase = dealt % 7;
+    phase = placed % 7;
     linesInAttempt = 0;
     attempted = false;
+    residueShown = false;
 }
 
 PcCoach::PcCoach() : worker_(std::make_unique<PcWorker>()) {
@@ -128,6 +129,7 @@ PcCoach::~PcCoach() = default;
 void PcCoach::save() {
     if (saved_) return;
     saved_ = true;
+    if (nullified_) return;
     record.best = std::max(record.best, progress.pcs);
     for (int i = 0; i < 7; i++) {
         record.tally.attempts[i] += progress.tally.attempts[i];
@@ -136,21 +138,28 @@ void PcCoach::save() {
     if (!path.empty()) savePcRecord(record, path);
 }
 
-void PcCoach::start(const core::Game& game) {
+void PcCoach::start(const core::Game& game, std::span<const core::Piece> dealtBefore) {
     save();
     saved_ = false;
+    nullified_ = false;
     progress = {};
-    seen.clear();
+    placedBefore_ = static_cast<int>(dealtBefore.size()) - (game.hold != core::Piece::None);
+    progress.phase = placedBefore_ % 7;
+    seen.assign(dealtBefore.begin(), dealtBefore.end());
     seen.push_back(game.falling.piece);
     lastPieces_ = -1;
     lastStatus_ = ai::PcStatus::Unknown;
-    killed_ = hintWanted_ = false;
+    killedBy_ = nullptr;
+    hintWanted_ = false;
     ask(game);
 }
 
 void PcCoach::rollback(const PcProgress& saved, const core::Game& game) {
     progress = saved;
-    killed_ = hintWanted_ = false;
+    nullified_ = true;
+    killedBy_ = nullptr;
+    hintWanted_ = false;
+    lastPieces_ = -1;  // the next answer is a new starting point, so it blames nothing
     ask(game);
 }
 
@@ -158,7 +167,7 @@ void PcCoach::rollback(const PcProgress& saved, const core::Game& game) {
 // pieces come again because the queue is restored with the game.
 void PcCoach::noteSeen(const core::Game& game) {
     const size_t previews = std::min<size_t>(game.rules.previews, game.queue.size());
-    const size_t total = game.stats.pieces + 1 + (game.hold != core::Piece::None) + previews;
+    const size_t total = placedBefore_ + game.stats.pieces + 1 + (game.hold != core::Piece::None) + previews;
     if (seen.size() > total) seen.resize(total);
     while (seen.size() < total) seen.push_back(game.queue[previews - (total - seen.size())]);
 }
@@ -183,6 +192,7 @@ void PcCoach::ask(const core::Game& game) {
     askedCurrent_ = game.falling.piece;
     askedHold_ = game.hold;
     askedHoldUsed_ = game.holdUsed;
+    if (style == PcStyle::Count) return;
     PcRequest& request = worker_->next();
     request.id = askId_;
     fillQuery(game, request.query);
@@ -191,9 +201,12 @@ void PcCoach::ask(const core::Game& game) {
 
 // Pressing hold changes the question as well as placing a piece does.
 void PcCoach::afterTick(std::span<const core::LockResult> locks, const core::Game& game) {
-    const int dealtAfter = game.stats.pieces + (game.hold != core::Piece::None);
-    for (size_t i = 0; i < locks.size(); i++) progress.note(locks[i], dealtAfter - static_cast<int>(locks.size() - 1 - i));
-    if (!locks.empty()) killed_ = hintWanted_ = false;
+    const int placedAfter = placedBefore_ + game.stats.pieces;
+    for (size_t i = 0; i < locks.size(); i++) progress.note(locks[i], placedAfter - static_cast<int>(locks.size() - 1 - i));
+    if (!locks.empty()) {
+        killedBy_ = nullptr;
+        hintWanted_ = false;
+    }
     if (game.stats.pieces != askedPieces_ || game.falling.piece != askedCurrent_ || game.hold != askedHold_ || game.holdUsed != askedHoldUsed_) ask(game);
 }
 
@@ -206,23 +219,44 @@ void PcCoach::take(const PcAnswer& answer) {
     if (answer.id != askId_) return;
     answered_ = true;
     answer_ = answer;
-    // Only a placement counts, so not pressing hold, and not going back with undo.
-    if (answer.status == ai::PcStatus::Impossible && lastStatus_ != ai::PcStatus::Impossible && lastPieces_ >= 0 && askedPieces_ > lastPieces_) {
-        killed_ = true;
-        killedLast_ = askedPieces_ == lastPieces_ + 1;
+    // A placement or a hold, since undo clears lastPieces_ and nothing else asks.
+    if (answer.status == ai::PcStatus::Impossible && lastStatus_ != ai::PcStatus::Impossible && lastPieces_ >= 0) {
+        killedBy_ = askedPieces_ == lastPieces_ ? "That hold killed it: undo" : askedPieces_ == lastPieces_ + 1 ? "That piece killed it: undo" : "Recent piece killed it: undo";
     }
     lastPieces_ = askedPieces_;
     lastStatus_ = answer.status;
+}
+
+bool PcCoach::runDone() const {
+    if (progress.pcs >= kPcGoal) return true;
+    return style == PcStyle::Practice && (progress.pcs > 0 || progress.linesInAttempt > kPcMaxLines);
 }
 
 PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
     PcView out;
     out.pcs = progress.pcs;
     out.streak = progress.streak;
-    out.bestPcs = std::max(record.best, progress.pcs);
-    out.outOfReach = pcGoalOutOfReach(progress.pcs, std::max(goalLines - game.stats.lines, 0));
+    out.bestPcs = nullified_ ? record.best : std::max(record.best, progress.pcs);
+    out.nullified = nullified_;
+    out.outOfReach = goalLines > 0 && pcGoalOutOfReach(progress.pcs, std::max(goalLines - game.stats.lines, 0));
     out.tally = record.tally;
+    if (style == PcStyle::Practice) {
+        out.goal = 1;
+        std::snprintf(out.residue, sizeof out.residue, "%d", placedBefore_ % 7);  // the one chosen, even after its PC
+        if (!game.toppedOut) out.outcome = progress.pcs > 0 ? "Perfect clear" : "Over 4 lines";
+    } else if (progress.pcs >= kPcGoal) {
+        out.outcome = "10 perfect clears";
+    }
+    if (style == PcStyle::Count) {
+        if (progress.residueShown) std::snprintf(out.residue, sizeof out.residue, "%d", progress.phase);
+        else std::snprintf(out.residue, sizeof out.residue, "?");
+    }
     if (over) return out;
+    if (style == PcStyle::Count) {
+        out.status = "Keep count";
+        std::snprintf(out.detail, sizeof out.detail, "%s shows the bag residue", bagKey.c_str());
+        return out;
+    }
 
     if (!answered_) {
         out.status = "Thinking";
@@ -241,7 +275,7 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
             case ai::PcStatus::Unknown: out.status = "Can't tell"; break;
         }
     }
-    if (killed_) out.alert = killedLast_ ? "That piece killed it: undo" : "Recent piece killed it: undo";
+    out.alert = killedBy_;
 
     if (!hintWanted_) {
         std::snprintf(out.hintLine, sizeof out.hintLine, "%s for a hint", hintKey.c_str());

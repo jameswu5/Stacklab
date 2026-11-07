@@ -391,7 +391,7 @@ void Ui::results(const PlayView& view) {
     constexpr float width = 300, x = kBoardX + 190 - width / 2;
     const float height = view.pc ? 730 : finesse ? 590 : 346, top = kBoardY + 380 - height / 2;
     fill(x, top, width, height, colors.card, 24);
-    const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : "Finished";
+    const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : view.pc && view.pc->outcome ? view.pc->outcome : "Finished";
     text(FontWord, title, x + width / 2, top + 42, colors.text, Align::Center);
     char buffer[32];
     formatRank(buffer, *run.mode, rankOf(run));
@@ -424,14 +424,15 @@ void Ui::results(const PlayView& view) {
         y += 168;
     }
     if (view.pc) {
-        std::snprintf(buffer, sizeof buffer, "%d / %d", view.pc->pcs, kPcGoal);
+        std::snprintf(buffer, sizeof buffer, "%d / %d", view.pc->pcs, view.pc->goal);
         statRow(x + 24, y, width - 48, "Perfect clears", buffer);
         y += 38;
         std::snprintf(buffer, sizeof buffer, "%d", view.pc->bestPcs);
-        statRow(x + 24, y, width - 48, "Best", buffer);
+        if (view.pc->goal == 1) statRow(x + 24, y, width - 48, "Bag residue", view.pc->residue);
+        else statRow(x + 24, y, width - 48, "Best", buffer);
         y += 38;
         fill(x + 24, y, width - 48, 1, colors.line);
-        text(FontSmall, "By bag phase, over all runs", x + 24, y + 22, colors.muted);
+        text(FontSmall, "By bag residue, over all runs", x + 24, y + 22, colors.muted);
         for (int phase = 0; phase < 7; phase++) {
             std::snprintf(buffer, sizeof buffer, "%d: %d of %d", phase, view.pc->tally.successes[phase], view.pc->tally.attempts[phase]);
             text(FontSmall, buffer, x + 24 + (phase % 2) * 126, y + 44 + (phase / 2) * 20.0f, colors.text);
@@ -462,10 +463,10 @@ void Ui::sessionCard(const PlayView& view) {
     }
 }
 
-void Ui::drawMenu(int selected, std::span<const double> bests) {
+void Ui::drawMenu(int selected, std::span<const double> bests, int residue) {
     const Palette& colors = palette();
     topBar("Menu");
-    constexpr float width = 560, rowH = 76, x = (1440 - width) / 2;
+    constexpr float width = 560, rowH = 68, x = (1440 - width) / 2;
     float height = 12 + (kModeCount + 1) * rowH + 44;
     float top = kRowY + (788 - height) / 2;
     fill(x, top, width, height, colors.card, 24);
@@ -473,16 +474,23 @@ void Ui::drawMenu(int selected, std::span<const double> bests) {
         float y = top + 12 + row * rowH;
         if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
         bool isMode = row < kModeCount;
-        text(FontWord, isMode ? kModes[row].name : "Settings", x + 32, y + 34, colors.text);
-        text(FontRow, isMode ? kModes[row].blurb : "Handling, keys and display", x + 32, y + 58, colors.muted);
+        text(FontWord, isMode ? kModes[row].name : "Settings", x + 32, y + 30, colors.text);
+        text(FontRow, isMode ? kModes[row].blurb : "Handling, keys and display", x + 32, y + 54, colors.muted);
         if (isMode && bests[row] > 0) {
             char buffer[32];
             formatRank(buffer, kModes[row], bests[row]);
-            text(FontLabel, "BEST", x + width - 32, y + 31, colors.muted, Align::Right, kLabelTracking);
+            text(FontLabel, "BEST", x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
+            text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
+        }
+        if (isMode && kModes[row].pcStyle == PcStyle::Practice) {
+            char buffer[16];
+            std::snprintf(buffer, sizeof buffer, "< %d >", residue);
+            text(FontLabel, "RESIDUE", x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
             text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
         }
     }
-    text(FontSmall, "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
+    const bool practice = selected < kModeCount && kModes[selected].pcStyle == PcStyle::Practice;
+    text(FontSmall, practice ? "Up and down choose, left and right set the residue, Enter opens" : "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
 }
 
 void Ui::drawDrills(int selected, std::span<const Drill> drills, const char* error) {
@@ -521,13 +529,16 @@ void Ui::coachRows(const PcView& pc, float y, bool over) {
         y += 98;
     }
     char buffer[32];
-    std::snprintf(buffer, sizeof buffer, "%d / %d", pc.pcs, kPcGoal);
+    std::snprintf(buffer, sizeof buffer, "%d / %d", pc.pcs, pc.goal);
     statRow(x, y, width, "Perfect clears", buffer);
     y += 38;
     std::snprintf(buffer, sizeof buffer, "%d", pc.streak);
-    statRow(x, y, width, "Streak", buffer);
+    if (pc.residue[0]) statRow(x, y, width, "Bag residue", pc.residue);
+    else statRow(x, y, width, "Streak", buffer);
     y += 38;
-    if (pc.outOfReach) {
+    if (pc.nullified) {
+        text(FontSmall, "Undo used: run not saved", x, y + 18, colors.muted);
+    } else if (pc.outOfReach) {
         std::snprintf(buffer, sizeof buffer, "%d is out of reach this run", kPcGoal);
         text(FontSmall, buffer, x, y + 18, colors.muted);
     }
@@ -625,7 +636,7 @@ void Ui::drawPlay(const PlayView& view) {
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {
     const Palette& colors = palette();
     topBar("Settings");
-    constexpr float width = 560, rowH = 31, x = (1440 - width) / 2, firstRow = kRowY + 20;
+    constexpr float width = 560, rowH = 30, x = (1440 - width) / 2, firstRow = kRowY + 20;
     fill(x, kRowY, width, 788, colors.card, 24);
     for (int row = 0; row < kRowCount; row++) {
         float y = firstRow + row * rowH;

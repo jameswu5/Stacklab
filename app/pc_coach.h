@@ -13,38 +13,44 @@
 #include "ai/pc_solver.h"
 #include "app/settings.h"
 #include "core/game.h"
+#include "modes/modes.h"
 
 constexpr int kPcGoal = 10;  // in one run of 40 lines
-// 40 lines over 10 PCs is 4 each. A taller PC only works with lines banked by a shorter one.
-// ponytail: so a 6-line PC reads as "No PC" and ends the streak; raise this if that gets in the way.
+// The owner trains 4-line PCs, with 2-line ones allowed, so a 6-line PC reads as "No PC" and ends the streak.
 constexpr int kPcMaxLines = 4;
 
+// The shortest PC is 2 lines, so 10 PCs can take fewer than 40.
 inline bool pcGoalOutOfReach(int pcs, int linesLeft) { return pcs + linesLeft / 2 < kPcGoal; }
 
 // A run's progress. A plain value, so undo can put it back.
 struct PcProgress {
     int pcs = 0;
     int streak = 0;           // ends when an attempt spends more than kPcMaxLines lines
-    int phase = 0;            // pieces dealt before this attempt's first piece, modulo 7
+    int phase = 0;            // the bag residue: pieces placed before this attempt, modulo 7
     int linesInAttempt = 0;
     bool attempted = false;   // a piece has been placed in this attempt
+    bool residueShown = false;  // Bag count: the player asked to see this attempt's phase
     PcTally tally;
 
-    // dealt counts the pieces dealt so far, not counting the one now falling.
-    void note(const core::LockResult& lock, int dealt);
+    // placed counts the pieces placed so far, this one included.
+    void note(const core::LockResult& lock, int placed);
 };
 
 // What the stats card shows. A plain value, so drawing can't touch the worker's data.
 struct PcView {
     const char* status = "";
     char detail[48] = "";
-    const char* alert = nullptr;  // that a placement killed the PC
+    const char* alert = nullptr;  // that a placement or a hold killed the PC
     char hintLine[48] = "";
     bool showHint = false;  // the overlay
     core::Piece hintPiece = core::Piece::None;
     std::array<core::Cell, 4> hintCells{};
     int pcs = 0, streak = 0, bestPcs = 0;
+    int goal = kPcGoal;
+    char residue[2] = "";  // takes the streak's row: the bag residue, or ? until asked for
+    const char* outcome = nullptr;  // heads the results in place of "Finished"
     bool outOfReach = false;
+    bool nullified = false;  // undo was used, so the run won't be saved
     PcTally tally;  // saved over all runs, for the results
 };
 
@@ -70,9 +76,13 @@ public:
     PcRecord record;       // saved over all runs
     std::string path;      // where record is saved; empty saves nothing
     std::string hintKey;   // the hint key's name, to say how to ask
+    std::string bagKey;    // likewise for the residue
+    PcStyle style = PcStyle::Coach;
     std::vector<core::Piece> seen;  // every piece shown so far, in the order they came
 
-    void start(const core::Game& game);  // a new run: saves the last one
+    // A new run: saves the last one. dealtBefore lists pieces the run starts as having
+    // already dealt, the one in hold among them, for a run that starts mid-bag.
+    void start(const core::Game& game, std::span<const core::Piece> dealtBefore = {});
     void rollback(const PcProgress& saved, const core::Game& game);  // undo
     void afterTick(std::span<const core::LockResult> locks, const core::Game& game);
     void poll();  // takes the worker's latest answer, if any
@@ -85,6 +95,7 @@ public:
     bool answered() const { return answered_; }
     uint64_t askId() const { return askId_; }
     PcView view(const core::Game& game, int goalLines, bool over) const;
+    bool runDone() const;  // the badge, or practice's one attempt is spent
 
 private:
     void noteSeen(const core::Game& game);
@@ -99,7 +110,9 @@ private:
     bool askedHoldUsed_ = false;
     int lastPieces_ = -1;  // the last piece count with an answer, and that answer
     ai::PcStatus lastStatus_ = ai::PcStatus::Unknown;
-    bool killed_ = false, killedLast_ = false;  // killedLast_: by the last placement, not an earlier unanswered one
+    const char* killedBy_ = nullptr;  // what to say about the move that killed the PC
     bool hintWanted_ = false;
     bool saved_ = true;
+    bool nullified_ = false;  // undo was used in this run
+    int placedBefore_ = 0;    // pieces the run starts as having placed
 };

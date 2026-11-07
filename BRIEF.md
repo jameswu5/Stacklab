@@ -59,7 +59,7 @@ Dependencies only point downward: `app` → `modes` → `ai` → `core`.
 - **Deterministic core.** The same seed, ruleset, handling and inputs always produce the same game. Replays are those four things. Undo and instant retry are state copies. The bot and solver work on copies on a worker thread.
 - **`Ruleset`.** All rules are data: kick table, gravity, lock settings, bag type, previews, hold, garbage settings. Modes and drills select or override a ruleset.
 - **`Handling`.** Per-profile DAS, ARR, SDF, DCD and the IRS, IHS and safelock options. Values are stored in frames, as in TETR.IO, so settings can be copied across unchanged.
-- **Keybinds.** Named profiles mapping each action to several keys, stored by scancode. OS key repeat is ignored. Actions: left, right, soft drop, hard drop, rotate CW, CCW and 180, hold, retry, menu, undo, PC hint.
+- **Keybinds.** Named profiles mapping each action to several keys, stored by scancode. OS key repeat is ignored. Actions: left, right, soft drop, hard drop, rotate CW, CCW and 180, hold, retry, menu, undo, PC hint, bag residue.
 - **Player interface.** A human and a bot produce the same input stream into the same simulation.
 
 ### Timing loop
@@ -131,6 +131,7 @@ struct Mode {
     bool undo = false;               // the undo key takes back the last piece, clock included
     bool drills = false;             // the menu opens the list of drills, and a run plays the chosen one
     const char* pcFile = nullptr;    // turns on the PC coach, and holds its record under the pref path
+    PcStyle pcStyle = PcStyle::Coach;  // Coach, Practice from a chosen bag residue, or Count with no solver
 };
 ```
 
@@ -151,7 +152,7 @@ struct Mode {
 | Trainer | Function |
 |---|---|
 | Finesse | Live feedback comparing inputs against the optimal count, with fault stats per piece and orientation |
-| Perfect clear | A coach on random 7-bag queues, under 40L's rules: a "PC still possible" indicator, a solution overlay on demand, feedback on each placement, and success rates by bag phase, aimed at the badge |
+| Perfect clear | A coach on random 7-bag queues, under 40L's rules: a "PC still possible" indicator, a solution overlay on demand, feedback on each placement, and success rates by bag residue, aimed at the badge. PC practice plays one PC from a chosen residue, and Bag count is a 40L run where the player keeps count |
 | LST | A coach on random queues, built alongside the bot, since it shares the bot's search and evaluation |
 | Setups | The drill runner, for fumens the owner imports |
 
@@ -364,11 +365,19 @@ There are two questions with different costs:
 - **Fair to what was visible:** a placement isn't marked wrong because of pieces the player hadn't seen. Telling a mistake from bad luck needs the success-across-unseen-bags question above, sampled if necessary.
 - **Mistakes teach:** after a fatal placement, the player can undo and retry on the same queue, then see a solution. A new attempt gets a new queue.
 
-**PC coach.** It's the solver, so its answers are exact and tests can check them. For the badge, 10 PCs in 40 lines means no spare lines: every clear is part of a PC, PC heights are even, and a 2-line PC banks lines for a later 6-line one. Each PC starts empty at a different bag position with hold carried over, and with 10 pieces per 4-line PC there are 7 repeating starting phases, so success is measured per phase and as a streak.
+**PC coach.** It's the solver, so its answers are exact and tests can check them. For the badge, 10 PCs must fit within 40 lines, so every clear is part of a PC and PC heights are even. The owner trains 4-line PCs. A 2-line PC is allowed, so 10 PCs can take 38 lines, and that's the badge: the run ends in success at the tenth PC. A taller PC reads as "No PC".
+
+**Bag residue** is the number of pieces placed before an attempt, modulo 7. Each PC starts empty with hold carried over, and a 4-line PC takes 10 pieces, so it moves the residue by 3, and a 2-line PC takes 5, so it moves it by 5. Success is measured per residue and as a streak.
+
+**A run that used undo is nullified:** it saves no best and no tallies, and says so on the stats card. No mode has both undo and a best file, and a test holds that.
 
 When no PC is provable from the visible pieces, `PcSolver::advise` suggests a placement. It takes only a `PcQuery`, and samples futures as uniformly random bags consistent with what's been seen, from a fixed seed, so the same state gets the same answer. Each choice is scored by rollouts: the previews come into view one at a time, and each placement comes from a plan for a guessed future. Scoring by whether a clear exists once the whole future is known doesn't work: that reads about 100% for nearly every placement, and its choices did no better than a random first placement in real play. A provable PC always wins, at 100%. Show the suggested placement, not the percentage: it's the best of many choices on 8 futures, so it's noisy and tends to read high. It runs on a worker thread with a cancel flag and a time budget, and says when an answer is partial. An answer takes about a minute for each of the first two placements from an empty board, seconds for the third and about a second from the fourth, so it isn't for live use on an empty board. A precomputed table of first placements would be about 160,000 entries and weeks of machine time, so it isn't planned.
 
-The mode is 40L's rules and goal with undo on. A worker thread answers about each piece from what's visible, `maxLines` 4, and the indicator shows "Thinking" until that piece's answer arrives; a step's `hold` means press hold first. A streak ends when an attempt spends more than 4 lines, an attempt counts once its first piece is placed, and PCs, streak and tally roll back with undo. Best and tallies are saved to `pc-coach.json`.
+**PC practice** is one PC from an empty board at a residue chosen with left and right on the menu. Residues above 0 start with a random piece from those already dealt in hold, past the first bag, so `seen` and `bagLeft` are true to a mid-run state. Residue 0 starts a plain game with hold empty. The run ends on the first PC or on spending over 4 lines, retry deals a new queue at the same residue, and tallies share `pc-coach.json` with the coach.
+
+**Bag count** is 40L's rules and goal with no undo, no indicator and no hint: the solver isn't asked. The residue row reads "?" until the bag residue key (B) shows it, and it hides again at the next PC. The count isn't scored. Its best and tallies are saved to `pc-count.json`.
+
+The PC coach mode is 40L's rules and goal with undo on. A worker thread answers about each piece from what's visible, `maxLines` 4, and the indicator shows "Thinking" until that piece's answer arrives; a step's `hold` means press hold first. A streak ends when an attempt spends more than 4 lines, an attempt counts once its first piece is placed, PCs, streak and tally roll back with undo, and a callout names a placement or a hold that killed the PC. Best and tallies are saved to `pc-coach.json`.
 
 **LST coach.** No simple rule defines a "valid LST" stack, so this is a search with a hand-written evaluation, and it can give confident bad advice. No test can settle it: the owner validates it by playing. Built alongside the bot, as a bot with a different evaluation.
 

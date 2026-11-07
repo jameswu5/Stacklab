@@ -1,6 +1,7 @@
 #include "app/play.h"
 
 #include <algorithm>
+#include <random>
 #include <span>
 #include <vector>
 
@@ -25,17 +26,30 @@ double finishSeconds(const core::Game& game, std::span<const core::InputEvent> i
 
 }  // namespace
 
+std::vector<core::Piece> dealResidue(core::Game& game, int residue, uint32_t seed) {
+    if (residue == 0) return {};
+    for (int i = 0; i < 6; i++) game.deal();  // past the first bag, which no_szo reorders, with the falling piece
+    std::vector<core::Piece> dealt(residue + 1);
+    for (core::Piece& piece : dealt) piece = game.deal();
+    game.hold = dealt[std::mt19937(seed)() % dealt.size()];
+    game.respawn(game.deal());
+    return dealt;
+}
+
 void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs) {
     game = core::Game(mode->rules, handling, seed);
     if (mode->garbageRows > 0) game.fillGarbage(mode->garbageRows);
     if (drill) setUpDrill(game, *drill);
+    std::vector<core::Piece> dealt;
+    if (mode->pcStyle == PcStyle::Practice) dealt = dealResidue(game, residue, seed);
     filled = 0;
     missed = false;
     finesse.restart(game);
     faults = {};
     if (mode->pcFile) {
         if (!coach) coach = std::make_unique<PcCoach>();
-        coach->start(game);
+        coach->style = mode->pcStyle;
+        coach->start(game, dealt);
     }
     shown = game;
     inputs.clear();
@@ -147,6 +161,10 @@ void Play::stepTo(uint64_t nowNs) {
         if (drill && judgeDrill(locks, nowNs)) return;
         if (mode->pcFile) {
             coach->afterTick(locks, game);
+            if (!over && coach->runDone()) {
+                over = true;
+                endSeconds = game.seconds();
+            }
             if (over) coach->save();  // the run has ended, so file work can't disturb play
         }
         if (mode->undo && !locks.empty()) saveUndo();

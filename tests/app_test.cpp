@@ -131,6 +131,7 @@ void testSettings() {
     assert(loadSettings(path).profile().keys[BindHint].empty());
     { std::ofstream(path) << R"({"profiles": [{"keys": {"hint": [5]}}]})"; }
     assert(loadSettings(path).profile().keys[BindHint] == std::vector{SDL_SCANCODE_B});
+    assert(loadSettings(path).profile().keys[BindBag].empty());  // and the bag key's default is taken there
 
     // A damaged file reads as defaults.
     { std::ofstream(path) << "{ not json"; }
@@ -1063,6 +1064,9 @@ void testPcCoachRules() {
     assert(!pcGoalOutOfReach(3, 14));
     assert(pcGoalOutOfReach(3, 13));
     assert(!pcGoalOutOfReach(10, 0));
+    assert(!pcGoalOutOfReach(9, 2));  // a 2-line PC from 38 lines is still the badge
+    assert(pcGoalOutOfReach(9, 1));
+    for (const Mode& mode : kModes) assert(!(mode.undo && mode.bestFile));  // undo nullifies a run, so a best can't follow one
 
     // A tally's phases, and a PC that took too many lines isn't a success for the streak.
     PcProgress progress;
@@ -1202,7 +1206,7 @@ void testPcCoachRun() {
     assert(p.coach().progress.pcs == 1 && p.coach().progress.streak == 1);
     assert(p.coach().progress.tally.attempts[0] == 1 && p.coach().progress.tally.successes[0] == 1);
     const int dealtBefore = p.play.game.stats.pieces + (p.play.game.hold != core::Piece::None);
-    assert(p.coach().progress.phase == dealtBefore % 7);
+    assert(p.coach().progress.phase == p.play.game.stats.pieces % 7);  // placed, whatever's in hold
     assert(static_cast<size_t>(dealtBefore) == nextAfterFirst);
 
     // Undo takes the PC back, stats and all, and placing it again counts it again.
@@ -1256,12 +1260,24 @@ void testPcCoachRun() {
     assert(p.view().alert == nullptr);
     assert(p.coach().progress.pcs == 2);
 
-    // Retry saves the run, then starts clean on a new queue.
+    assert(p.view().nullified);
+
+    // Retry starts clean on a new queue, and a run that used undo saves nothing.
     p.play.restart({}, seed + 1, p.now);
     assert(p.coach().progress.pcs == 0 && p.coach().seen.size() == 1 + static_cast<size_t>(kCoachMode.rules.previews));
+    assert(!p.view().nullified);
+    assert(!std::filesystem::exists(path));
+
+    // The same PC with no undo is saved on retry.
+    p.play.restart({}, seed, p.now);
+    p.now = p.play.startNs;
+    p.play.stepTo(p.now);
+    for (const ai::PcStep& step : first.steps) p.place(step);
+    assert(p.coach().progress.pcs == 1);
+    p.play.restart({}, seed + 1, p.now);
     PcRecord saved = loadPcRecord(path);
-    assert(saved.best == 2);
-    assert(saved.tally.successes[0] >= 1);
+    assert(saved.best == 1);
+    assert(saved.tally.successes[0] == 1);
 
     // A run is only added to the record once.
     p.coach().save();
@@ -1275,7 +1291,172 @@ void testPcCoachRun() {
     p.coach().take(unknown);
     assert(std::string(p.view().status) == "Can't tell");
     assert(p.view().alert == nullptr);
+
+    // A hold can kill it too, and undo blames nothing.
+    p.now = p.play.startNs;
+    p.play.stepTo(p.now);
+    p.waitForAnswer();
+    p.tap(BindHold);
+    PcAnswer dead;
+    dead.id = p.coach().askId();
+    dead.status = ai::PcStatus::Impossible;
+    p.coach().take(dead);
+    assert(p.view().alert != nullptr && std::string(p.view().alert) == "That hold killed it: undo");
+    p.tap(BindHardDrop);
+    p.waitForAnswer();
+    p.play.undo(p.now);
+    assert(p.view().alert == nullptr);
+    dead.id = p.coach().askId();
+    p.coach().take(dead);
+    assert(p.view().alert == nullptr);
     std::filesystem::remove(path);
+}
+
+// Practice starts mid-bag, with everything the solver is told agreeing with a real run's.
+void testPcPractice() {
+    const Mode& practice = kModes[7];
+    assert(practice.pcStyle == PcStyle::Practice && practice.undo && practice.goalLines == 0);
+    CoachPlayer p;
+    p.play.mode = &practice;
+    for (int residue = 0; residue < 7; residue++) {
+        for (uint32_t seed = 1; seed <= 20; seed++) {
+            p.play.residue = residue;
+            p.play.restart({}, seed, p.now);
+            const core::Game& game = p.play.game;
+            assert(p.coach().progress.phase == residue);
+            assert((game.hold == core::Piece::None) == (residue == 0));
+            assert(static_cast<int>(game.queue.size()) >= game.rules.previews);
+            const std::vector<core::Piece>& seen = p.coach().seen;
+            // Bags stay whole: placed, held, falling and previews, from a new bag.
+            const size_t dealt = residue == 0 ? 0 : residue + 1;
+            assert(seen.size() == dealt + 1 + game.rules.previews);
+            assert(seen[dealt] == game.falling.piece);
+            if (residue > 0) assert(std::find(seen.begin(), seen.begin() + dealt, game.hold) != seen.begin() + dealt);
+            for (size_t bag = 0; bag + 7 <= seen.size(); bag += 7) {
+                uint8_t pieces = 0;
+                for (size_t i = bag; i < bag + 7; i++) pieces |= 1 << static_cast<int>(seen[i]);
+                assert(pieces == 0xFE);  // a bit per piece
+            }
+            // The real next piece is always one the solver was told could come.
+            ai::PcQuery query;
+            p.coach().fillQuery(game, query);
+            const uint8_t left = query.bagLeft;
+            if (left != 0) assert(left >> static_cast<int>(game.queue[game.rules.previews]) & 1);
+        }
+    }
+
+    // A real PC, from a carried hold at residue 3, ends the run through Play.
+    p.play.residue = 3;
+    bool played = false;
+    for (uint32_t seed = 1; seed < 100 && !played; seed++) {
+        p.play.restart({}, seed, p.now);
+        core::Game ahead = p.play.game;
+        std::vector<core::Piece> pieces = {ahead.falling.piece};
+        for (int i = 0; i < 11; i++) pieces.push_back(ahead.deal());
+        const ai::PcResult plan = planPc(pieces, 0, ahead.hold);
+        if (plan.status != ai::PcStatus::Found || plan.lines != 4) continue;
+        played = true;
+        p.now = p.play.startNs;
+        p.play.stepTo(p.now);
+        for (const ai::PcStep& step : plan.steps) {
+            assert(!p.play.over);
+            p.place(step);
+        }
+        assert(p.play.over && p.coach().progress.pcs == 1 && p.coach().progress.tally.successes[3] == 1);
+        assert(std::string(p.view().residue) == "3");
+    }
+    assert(played);
+
+    // A PC ends it, tallied under its residue.
+    const std::string path = (std::filesystem::temp_directory_path() / "stacklab_pc_practice.json").string();
+    std::filesystem::remove(path);
+    p.play.restart({}, 1, p.now);
+    p.coach().path = path;
+    p.coach().record = {};
+    p.now = p.play.startNs;
+    p.play.stepTo(p.now);
+    core::LockResult clear;
+    clear.lines = 4;
+    clear.perfectClear = true;
+    p.coach().progress.note(clear, 10);
+    assert(p.coach().runDone());
+    assert(std::string(p.view().outcome) == "Perfect clear" && p.view().goal == 1 && !p.view().outOfReach);
+    assert(std::string(p.view().residue) == "3");
+    p.coach().save();
+    assert(loadPcRecord(path).tally.successes[3] == 1);
+    std::filesystem::remove(path);
+
+    // Spending over 4 lines ends it.
+    p.coach().progress = {};
+    clear.perfectClear = false;
+    clear.lines = 3;
+    p.coach().progress.note(clear, 1);
+    assert(!p.coach().runDone());
+    p.coach().progress.note(clear, 2);
+    assert(p.coach().runDone());
+    assert(std::string(p.view().outcome) == "Over 4 lines");
+    p.coach().progress = {};
+}
+
+// Bag count has no solver and hides the residue until asked, and the badge ends a run early.
+void testBagCount() {
+    const Mode& count = kModes[8];
+    assert(count.pcStyle == PcStyle::Count && !count.undo && count.goalLines == 40);
+    CoachPlayer p;
+    p.play.mode = &count;
+    p.play.restart({}, 1, p.now);
+    p.coach().bagKey = "B";
+    const uint64_t asked = p.coach().askId();
+    p.now = p.play.startNs;
+    p.play.stepTo(p.now);
+    p.tap(BindHardDrop);
+    assert(p.coach().askId() == asked + 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    p.coach().poll();
+    assert(!p.coach().answered());  // the worker wasn't asked
+    PcView view = p.view();
+    assert(std::string(view.status) == "Keep count" && !view.showHint && view.hintLine[0] == 0);
+    assert(std::string(view.residue) == "?");
+    p.coach().progress.residueShown = true;
+    assert(std::string(p.view().residue) == "0");
+    core::LockResult clear;
+    clear.lines = 4;
+    clear.perfectClear = true;
+    p.coach().progress.note(clear, 10);
+    assert(!p.coach().progress.residueShown && std::string(p.view().residue) == "?");
+    p.coach().progress.residueShown = true;
+    assert(std::string(p.view().residue) == "3");
+    // 2-line PCs move it by 5.
+    clear.lines = 2;
+    p.coach().progress.note(clear, 15);
+    p.coach().progress.residueShown = true;
+    assert(std::string(p.view().residue) == "1");
+
+    // The tenth PC ends the run through Play, before the 40 lines are up.
+    bool played = false;
+    for (uint32_t seed = 1; seed < 100 && !played; seed++) {
+        const ai::PcResult plan = planPc(dealt(seed, 12), 0, core::Piece::None);
+        if (plan.status != ai::PcStatus::Found || plan.lines != 4) continue;
+        played = true;
+        p.play.restart({}, seed, p.now);
+        p.coach().progress.pcs = 9;
+        p.now = p.play.startNs;
+        p.play.stepTo(p.now);
+        for (const ai::PcStep& step : plan.steps) {
+            assert(!p.play.over);
+            p.place(step);
+        }
+        assert(p.play.over && p.play.game.stats.lines == 4 && !p.play.game.toppedOut);
+    }
+    assert(played);
+
+    // Nine at 4 lines and one at 2 is 38 lines: the badge, with lines to spare.
+    p.coach().progress.pcs = 9;
+    assert(!p.coach().runDone());
+    p.coach().progress.note(clear, 95);
+    assert(p.coach().progress.pcs == 10 && p.coach().runDone());
+    assert(std::string(p.view().outcome) == "10 perfect clears");
+    p.coach().progress = {};
 }
 
 // A mode without garbage leaves the garbage RNG alone, seen here through random rounding.
@@ -1365,6 +1546,8 @@ int main() {
     testPlayDoesNotAllocate(withEdits);
     testPcCoachRules();
     testPcCoachRun();
+    testPcPractice();
+    testBagCount();
     testPlayDoesNotAllocate(kModes[6]);
     return 0;
 }

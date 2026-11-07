@@ -22,6 +22,11 @@ constexpr uint64_t kCountdownNs = 1'000'000'000;
 // ponytail: older placements are forgotten past this; a slot costs about 1 KB.
 constexpr int kUndoDepth = 256;
 
+// Starts a game as if `residue` pieces were already placed, with one more carried in
+// hold, chosen with `seed`. Hold is empty at residue 0, which starts a plain game.
+// Returns the pieces dealt before the falling one, hold's among them.
+std::vector<core::Piece> dealResidue(core::Game& game, int residue, uint32_t seed);
+
 struct Play {
     const Mode* mode = &kModes[0];
     core::Game game{core::Ruleset{}, core::Handling{}, 1};
@@ -46,6 +51,7 @@ struct Play {
     bool missed = false;           // paused on the missed board, until retry or undo
 
     std::unique_ptr<PcCoach> coach;  // made by the first run of a mode with the coach
+    int residue = 0;                 // the bag residue PC practice starts from
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 

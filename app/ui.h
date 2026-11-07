@@ -60,7 +60,7 @@ public:
 
     // Every draw starts with beginFrame, which follows the output size.
     void beginFrame();
-    void drawMenu(int selected, std::span<const double> bests);  // one row per mode, then Settings
+    void drawMenu(int selected, std::span<const double> bests, int residue);  // one row per mode, then Settings
     void drawDrills(int selected, std::span<const Drill> drills, const char* error);  // error is null or a file that couldn't be used
     void drawPlay(const PlayView& view);
     void drawSettings(const Settings& settings, int selected, bool capturing);
