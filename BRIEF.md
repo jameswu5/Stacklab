@@ -82,6 +82,7 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 - **Cards:** radius 24, padding 20, flat with no shadows. Labels are 12, semibold, uppercase, in the muted colour.
 - **Board card:** radius 28, padding 14, holding a 10×20 board at 38 per cell, with a radius 8 board background in a faint checkerboard.
 - **Blocks:** radius 7 with a 2 gap between cells. Next previews use 44 per cell and hold uses 24, with corner radius scaled to match.
+- **Lines left:** in a mode with a lines goal and no garbage, the lines left as a number inside the top of the board (140, bold, tabular), in the muted colour at 20% opacity in light mode and 16% in dark mode, under the ghost, the stack and the piece, and hidden on the results.
 - **Ghost:** the piece colour at 42% opacity in light mode and 30% in dark mode.
 - **Toggle:** a pill with sun and moon icons, and a circular knob behind the active one.
 - **Menu:** the screen the app opens on. A centred card, 560 wide, with a row for each mode and one for Settings. Rows show the name (20, bold), a line of description and any personal best. Fixed keys: up, down and Enter.
