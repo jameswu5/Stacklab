@@ -185,42 +185,58 @@ bool Bot::choose(const core::Game& game, BotChoice& choice) {
     beam_.push_back(start);
 
     std::unordered_set<uint64_t> seen;
-    int best = -1;  // the best first move so far
-    for (bool atRoot = true; !beam_.empty(); atRoot = false) {
+    for (int depth = 0; !beam_.empty(); depth++) {
         children_.clear();
         for (const Node& node : beam_)
-            if (node.current != core::Piece::None) expand(node, game, atRoot);
+            if (node.current != core::Piece::None) expand(node, game, depth == 0);
         if (children_.empty()) break;
         std::sort(children_.begin(), children_.end(), [](const Node& a, const Node& b) { return a.score > b.score; });
         beam_.clear();
         seen.clear();
         for (const Node& child : children_) {
             if (static_cast<int>(beam_.size()) == width) break;
-            if (seen.insert(hashOf(child.rows, child.current, child.hold, child.next)).second) beam_.push_back(child);
+            if (!seen.insert(hashOf(child.rows, child.current, child.hold, child.next)).second) continue;
+            beam_.push_back(child);
+            Root& root = roots_[child.root];
+            if (root.depth < depth) {  // the beam is best first, so this is the root's best at this depth
+                root.depth = depth;
+                root.score = child.score;
+            }
         }
-        best = beam_[0].root;
     }
-    if (best < 0) return false;
 
-    const Root& root = roots_[best];
-    const core::Piece piece = root.hold ? (game.hold != core::Piece::None ? game.hold : queue_[0]) : game.falling.piece;
-    core::Board board = game.board;
-    search_.run(board, root.hold ? core::spawnFalling(piece) : game.falling, game.rules);
-    choice.hold = root.hold;
-    choice.placement = root.placement;
-    choice.cells = search_.cells(root.placement);
-    choice.moves = search_.inputs(root.placement);
-    return true;
+    // The search lets no time pass, so gravity can carry a piece off a ledge or under a kick
+    // on the way. Each plan is played on a copy first, and the next best is tried if it misses.
+    order_.resize(roots_.size());
+    for (size_t i = 0; i < order_.size(); i++) order_[i] = static_cast<int>(i);
+    std::sort(order_.begin(), order_.end(), [&](int a, int b) {
+        return roots_[a].depth != roots_[b].depth ? roots_[a].depth > roots_[b].depth : roots_[a].score > roots_[b].score;
+    });
+    for (size_t i = 0; i < order_.size() && i < 32; i++) {
+        const Root& root = roots_[order_[i]];
+        const core::Piece piece = root.hold ? (game.hold != core::Piece::None ? game.hold : queue_[0]) : game.falling.piece;
+        search_.run(game.board, root.hold ? core::spawnFalling(piece) : game.falling, game.rules);
+        choice.hold = root.hold;
+        choice.placement = root.placement;
+        choice.cells = search_.cells(root.placement);
+        choice.moves = search_.inputs(root.placement);
+        if (plan(game, choice)) return true;
+    }
+    return false;
 }
 
-std::vector<std::vector<core::InputEvent>> botInputs(const core::Game& game, const BotChoice& choice) {
+// Fills choice.inputs and plays them on a copy: true if the piece locks where it chose.
+bool Bot::plan(const core::Game& game, BotChoice& choice) {
     core::Game copy = game;
-    std::vector<std::vector<core::InputEvent>> ticks;
-    bool locked = false;
+    auto& ticks = choice.inputs;
+    ticks.clear();
+    bool locked = false, landed = false;
     auto tick = [&](std::initializer_list<core::InputEvent> inputs) {
         if (locked) return;
         ticks.emplace_back(inputs);
-        locked = !copy.tick(ticks.back()).empty() || copy.toppedOut;
+        const auto& locks = copy.tick(ticks.back());
+        locked = !locks.empty() || copy.toppedOut;
+        landed = !locks.empty() && locks[0].cells == choice.cells;
     };
     auto tap = [&](core::Action action) { tick({{action, true, 0}, {action, false, 0}}); };
     auto row = [&] { return static_cast<int>(std::floor(copy.falling.y)); };
@@ -250,13 +266,13 @@ std::vector<std::vector<core::InputEvent>> botInputs(const core::Game& game, con
                 tick({{core::Action::SoftDrop, false, 0}});
                 break;
             case Move::Down:
-                tick({{core::Action::SoftDrop, true, 0}});
-                tick({{core::Action::SoftDrop, false, 0}});
+                // ponytail: waits for gravity, since instant soft drop can't go one row; slow at low gravity
+                for (int from = row(); !locked && row() == from;) tick({});
                 break;
         }
     }
     tap(core::Action::HardDrop);
-    return ticks;
+    return landed;
 }
 
 }  // namespace ai

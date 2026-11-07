@@ -51,7 +51,7 @@ struct Player {
     // One tick, starting a new plan when the last one has finished.
     const std::vector<core::LockResult>& tick(std::span<const core::GarbageEvent> garbage) {
         if (at == plan.size()) {
-            plan = bot.choose(game, choice) ? ai::botInputs(game, choice) : std::vector<std::vector<core::InputEvent>>{{{core::Action::HardDrop, true, 0}}};
+            plan = bot.choose(game, choice) ? choice.inputs : std::vector<std::vector<core::InputEvent>>{{{core::Action::HardDrop, true, 0}}};
             at = 0;
         }
         const auto& locks = game.tick(plan[at++], garbage);

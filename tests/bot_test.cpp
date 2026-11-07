@@ -15,7 +15,7 @@ int main() {
             ai::BotChoice choice;
             assert(bot.choose(game, choice));
             bool locked = false;
-            for (const auto& tick : ai::botInputs(game, choice)) {
+            for (const auto& tick : choice.inputs) {
                 assert(!locked);
                 const auto& locks = game.tick(tick);
                 if (locks.empty()) continue;

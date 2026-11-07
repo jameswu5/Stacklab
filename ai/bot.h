@@ -1,7 +1,7 @@
 // A first bot: beam search over the move search's placements of the visible pieces,
 // scored by a hand-weighted evaluation. It sees what a player sees: the board, the
-// falling piece, hold and the previews. botInputs turns its choice into real key
-// presses for core, so it can't break the rules.
+// falling piece, hold and the previews. Its choice comes as real key presses for core,
+// so it can't break the rules.
 #pragma once
 
 #include <string>
@@ -32,6 +32,7 @@ struct BotChoice {
     Placement placement{};
     std::array<core::Cell, 4> cells{};  // where it locks, before lines clear
     std::vector<Move> moves;            // from where the piece is; a hard drop follows
+    std::vector<std::vector<core::InputEvent>> inputs;  // one tick's key events each, through the hard drop
 };
 
 class Bot {
@@ -39,7 +40,7 @@ public:
     BotWeights weights;
     int width = 48;  // states kept at each depth
 
-    // False when nothing can be placed.
+    // False when nothing can be placed, or no plan tried landed where it meant to.
     bool choose(const core::Game& game, BotChoice& choice);
 
 private:
@@ -54,21 +55,21 @@ private:
     struct Root {
         bool hold;
         Placement placement;
+        int depth = -1;  // the deepest the beam kept a state from this, and that state's score
+        float score = 0;
     };
 
     void expand(const Node& node, const core::Game& game, bool atRoot);
     void addChild(const Node& parent, const Placement& placement, core::Piece piece, core::Piece hold, core::Piece current, int next, bool atRoot, bool held);
     float evaluate(const Node& node) const;
+    bool plan(const core::Game& game, BotChoice& choice);
 
     MoveSearch search_;
     std::vector<Node> beam_, children_;
     std::vector<Root> roots_;
+    std::vector<int> order_;
     std::vector<core::Piece> queue_;
     const core::Ruleset* rules_ = nullptr;
 };
-
-// One tick's key events each, from `game` as it stands through the hard drop. They're
-// worked out on a copy of the game, which doesn't change it.
-std::vector<std::vector<core::InputEvent>> botInputs(const core::Game& game, const BotChoice& choice);
 
 }  // namespace ai
