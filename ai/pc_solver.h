@@ -82,6 +82,7 @@ struct PcAdviceOptions {
     int nodesPerSample = 20'000;
     int timeBudgetMs = 0;      // 0 for none. Stopping on time depends on the machine, so answers can then differ
     uint32_t seed = 1;         // the same state, seed and samples always give the same answer
+    bool rollouts = false;     // score futures by playing them seeing only the visible pieces
 };
 
 class PcSolver {
@@ -98,7 +99,12 @@ public:
     // The placement with the best chance. A placement solve can prove wins outright, at 100%.
     PcAdvice advise(const PcQuery& query, const std::atomic<bool>* cancel = nullptr, const PcAdviceOptions& options = {});
 
+    // The share of `samples` random futures that a rollout clears after this placement.
+    double chanceAfter(const PcQuery& query, const PcStep& step, int samples, uint32_t seed, int nodesPerSolve);
+
 private:
+    PcStatus rollout(PcQuery state, const std::vector<core::Piece>& future, size_t window, uint32_t seed, const std::atomic<bool>* cancel, int nodes);
+
     struct State {
         std::array<uint16_t, kPcMaxRows> rows{};  // a bit per column, floor first
         std::array<int8_t, core::kBoardWidth> columns{};  // cells in each column, which clears keep in step

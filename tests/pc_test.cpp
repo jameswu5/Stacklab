@@ -1092,19 +1092,21 @@ void benchAdviceStability() {
 
 }
 
-void benchAdvicePlay(int games, int samples) {
+void benchAdvicePlay(int games, int samples, int randomFirst, int offset) {
     PcSolver solver;
     MoveSearch search;
     const core::Ruleset rules = kModes[0].rules;
     std::printf("whole attempts from an empty board, %d each, %d futures an answer, 40L rules with real gravity and key presses:\n", games, samples);
     const ai::PcAdviceOptions options{.maxSamples = samples};
-    for (int randomFirst : {0, 1, 2, 3, 11}) {
+    {
         int cleared = 0, offPlan = 0, answered = 0;
         double first = 0;
         auto begin = std::chrono::steady_clock::now();
         for (int game = 0; game < games; game++) {
-            const Attempt attempt = playAttempt(solver, search, rules, 5000 + game, game % 7, randomFirst, options);
+            const Attempt attempt = playAttempt(solver, search, rules, 5000 + offset + game, (offset + game) % 7, randomFirst, options);
             cleared += attempt.cleared;
+            std::printf("    attempt %d: %s, first estimate %.0f%%, %.0f s so far\n", game, attempt.cleared ? "cleared" : attempt.offPlan ? "off plan" : "failed", 100 * attempt.firstChance, std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count());
+            std::fflush(stdout);
             offPlan += attempt.offPlan;
             if (attempt.firstChance >= 0) {
                 first += attempt.firstChance;
@@ -1117,6 +1119,34 @@ void benchAdvicePlay(int games, int samples) {
     }
 }
 
+// The first placement each way chooses, all scored on the same fresh rollouts.
+void benchCompare(int boards, int ranking, int scoring, int offset) {
+    PcSolver solver;
+    MoveSearch search;
+    const char* names[3] = {"random", "advise", "rollouts"};
+    for (int board = 0; board < boards; board++) {
+        const uint32_t seed = 7000 + offset + board;
+        const PcQuery query = visibleAfter(solver, seed, 0);
+        std::mt19937 rng(seed);
+        search.run(query.board, core::spawnFalling(query.current), query.rules);
+        const ai::Placement placement = search.placements[rng() % search.placements.size()];
+        const ai::PcStep randomStep{query.current, false, search.cells(placement), search.inputs(placement)};
+        const auto begin = std::chrono::steady_clock::now();
+        const ai::PcAdvice plain = solver.advise(query, nullptr, {.maxSamples = 4});
+        const auto middle = std::chrono::steady_clock::now();
+        const ai::PcAdvice rolled = solver.advise(query, nullptr, {.maxSamples = ranking, .nodesPerSample = 5'000, .rollouts = true});
+        const auto end = std::chrono::steady_clock::now();
+        const ai::PcStep* steps[3] = {&randomStep, &plain.step, &rolled.step};
+        std::printf("board %d:", seed);
+        for (int arm = 0; arm < 3; arm++) {
+            const double chance = solver.chanceAfter(query, *steps[arm], scoring, seed * 31, 5'000);
+            std::printf(" %s %3.0f%%", names[arm], 100 * chance);
+        }
+        std::printf("; rollouts' own estimate %.0f%%; advise %.0f s, rollouts %.0f s\n", 100 * rolled.chance, std::chrono::duration<double>(middle - begin).count(), std::chrono::duration<double>(end - middle).count());
+        std::fflush(stdout);
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1124,8 +1154,9 @@ int main(int argc, char** argv) {
         const char* part = argc > 2 ? argv[2] : "";
         const int samples = argc > 3 ? std::atoi(argv[3]) : 64;
         if (std::strcmp(part, "time") == 0) benchAdviceTime(samples);
+        if (std::strcmp(part, "compare") == 0) benchCompare(1000, samples, 48, argc > 4 ? std::atoi(argv[4]) : 0);
         if (std::strcmp(part, "stable") == 0) benchAdviceStability();
-        if (std::strcmp(part, "play") == 0) benchAdvicePlay(argc > 4 ? std::atoi(argv[4]) : 100, samples);
+        if (std::strcmp(part, "play") == 0) benchAdvicePlay(argc > 4 ? std::atoi(argv[4]) : 100, samples, argc > 5 ? std::atoi(argv[5]) : 0, argc > 6 ? std::atoi(argv[6]) : 0);
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--bench") == 0) {

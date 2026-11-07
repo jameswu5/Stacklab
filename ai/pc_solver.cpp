@@ -34,6 +34,37 @@ void lockAndClear(core::Board& board, const std::array<core::Cell, 4>& cells, co
         for (int x = 0; x < core::kBoardWidth; x++) board.at(x, write) = core::Piece::None;
 }
 
+// The rest of this bag in a random order, then whole bags.
+std::vector<core::Piece> randomBags(uint8_t bag, int length, std::mt19937& rng) {
+    std::vector<core::Piece> pieces;
+    if (!bag) bag = kFullBag;
+    while (static_cast<int>(pieces.size()) < length) {
+        std::vector<core::Piece> shuffled;
+        for (int piece = 1; piece <= 7; piece++)
+            if (bag >> piece & 1) shuffled.push_back(static_cast<core::Piece>(piece));
+        std::shuffle(shuffled.begin(), shuffled.end(), rng);
+        pieces.insert(pieces.end(), shuffled.begin(), shuffled.end());
+        bag = kFullBag;
+    }
+    return pieces;
+}
+
+// The state a step leaves. The next piece hasn't been brought out yet.
+void applyStep(PcQuery& state, const PcStep& step) {
+    if (step.hold) {
+        if (state.hold == core::Piece::None) state.queue.erase(state.queue.begin());
+        state.hold = state.current;
+    }
+    lockAndClear(state.board, step.cells, step.piece);
+    state.holdUsed = false;
+    state.current = core::Piece::None;
+}
+
+int futureLength(const PcQuery& query) {
+    const int cells = static_cast<int>(std::count_if(query.board.cells.begin(), query.board.cells.end(), [](core::Piece cell) { return cell != core::Piece::None; }));
+    return std::max((10 * std::min(query.maxLines, kPcMaxRows) - cells) / 4, 0) + 1;
+}
+
 // Every occupied row has to clear, so there can't be more of them than lines left. And each
 // column gets exactly `lines` cells before the end, whatever order rows clear in, so a piece only
 // ever sits across columns that still need cells. Columns between two full ones therefore need a
@@ -317,7 +348,7 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
         int hits = 0, samples = 0, unknown = 0;
     };
     std::vector<Choice> choices;
-    auto addChoices = [&](core::Piece piece, bool pressHold, core::Piece hold, size_t nextQueue) {
+    auto addChoices = [&](core::Piece piece, bool pressHold) {
         search_.run(query.board, core::spawnFalling(piece), query.rules);
         const std::vector<Placement> placements = search_.placements;
         std::vector<std::array<int, 4>> seen;
@@ -329,49 +360,26 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
             if (std::find(seen.begin(), seen.end(), ids) != seen.end()) continue;
             seen.push_back(ids);
 
+            PcStep step{piece, pressHold, cells, search_.inputs(placement)};
             PcQuery after = query;
-            after.hold = hold;
-            after.holdUsed = false;
-            after.queue.erase(after.queue.begin(), after.queue.begin() + nextQueue);
-            lockAndClear(after.board, cells, piece);
-
-            // The next piece comes from the queue, or isn't known yet.
-            if (!after.queue.empty()) {
-                after.current = after.queue.front();
-                after.queue.erase(after.queue.begin());
-            } else {
-                after.current = core::Piece::None;
-            }
-            choices.push_back({{piece, pressHold, cells, search_.inputs(placement)}, std::move(after)});
+            applyStep(after, step);
+            choices.push_back({std::move(step), std::move(after)});
         }
     };
-    addChoices(query.current, false, query.hold, 0);
+    addChoices(query.current, false);
     if (query.rules.allowHold && !query.holdUsed && query.hold != query.current) {
-        if (query.hold != core::Piece::None) addChoices(query.hold, true, query.current, 0);
-        else if (!query.queue.empty()) addChoices(query.queue[0], true, query.current, 1);
+        if (query.hold != core::Piece::None) addChoices(query.hold, true);
+        else if (!query.queue.empty()) addChoices(query.queue[0], true);
     }
     if (choices.empty()) return advice;
 
-    // Sample futures: the rest of this bag in a random order, then whole bags. Enough of them for
-    // any height allowed, and one over, since a piece can end the clear sitting in hold.
+    // Enough pieces for any height allowed, one over since a piece can end the clear in hold, and
+    // a rollout's previews on top.
     std::mt19937 rng(options.seed);
-    const int cells = static_cast<int>(std::count_if(query.board.cells.begin(), query.board.cells.end(), [](core::Piece cell) { return cell != core::Piece::None; }));
-    const int futureLength = (10 * std::min(query.maxLines, kPcMaxRows) - cells) / 4 + 1;
+    const int length = futureLength(query) + static_cast<int>(query.queue.size());
     std::vector<std::vector<core::Piece>> futures;
     auto future = [&](int index) -> const std::vector<core::Piece>& {
-        while (static_cast<int>(futures.size()) <= index) {
-            std::vector<core::Piece> pieces;
-            uint8_t bag = query.bagLeft ? query.bagLeft : kFullBag;
-            while (static_cast<int>(pieces.size()) < futureLength) {
-                std::vector<core::Piece> shuffled;
-                for (int piece = 1; piece <= 7; piece++)
-                    if (bag >> piece & 1) shuffled.push_back(static_cast<core::Piece>(piece));
-                std::shuffle(shuffled.begin(), shuffled.end(), rng);
-                pieces.insert(pieces.end(), shuffled.begin(), shuffled.end());
-                bag = kFullBag;
-            }
-            futures.push_back(std::move(pieces));
-        }
+        while (static_cast<int>(futures.size()) <= index) futures.push_back(randomBags(query.bagLeft, length, rng));
         return futures[index];
     };
 
@@ -394,15 +402,18 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
                     advice.partial = true;
                     break;
                 }
-                trial = choice->after;
                 const std::vector<core::Piece>& pieces = future(choice->samples);
-                trial.queue.insert(trial.queue.end(), pieces.begin(), pieces.end());
-                if (trial.current == core::Piece::None) {
+                PcResult result;
+                if (options.rollouts) {
+                    result.status = rollout(choice->after, pieces, query.queue.size(), options.seed + choice->samples, cancel, options.nodesPerSample);
+                } else {
+                    trial = choice->after;
+                    trial.queue.insert(trial.queue.end(), pieces.begin(), pieces.end());
                     trial.current = trial.queue.front();
                     trial.queue.erase(trial.queue.begin());
+                    trial.queueEnds = true;
+                    result = solve(trial, cancel, options.nodesPerSample);
                 }
-                trial.queueEnds = true;
-                const PcResult result = solve(trial, cancel, options.nodesPerSample);
                 if (result.status == PcStatus::Found) choice->hits++;
                 if (result.status == PcStatus::Unknown) {
                     if (outOfTime()) {
@@ -433,6 +444,50 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
     advice.samples = best->samples;
     advice.unknownSamples = best->unknown;
     return advice;
+}
+
+// Plays a future as a player would: the previews come into view one at a time, and each placement
+// comes from a plan for a guessed future. That's a real way to play, so its rate can be reached.
+PcStatus PcSolver::rollout(PcQuery state, const std::vector<core::Piece>& future, size_t window, uint32_t seed, const std::atomic<bool>* cancel, int nodes) {
+    std::mt19937 rng(seed);
+    size_t used = 0;
+    while (true) {
+        while (state.queue.size() < window + (state.current == core::Piece::None)) {
+            if (used == future.size()) return PcStatus::Impossible;
+            const core::Piece piece = future[used++];
+            state.queue.push_back(piece);
+            state.bagLeft = (state.bagLeft ? state.bagLeft : kFullBag) & ~(1 << static_cast<int>(piece));
+        }
+        if (state.current == core::Piece::None) {
+            state.current = state.queue.front();
+            state.queue.erase(state.queue.begin());
+        }
+        const PcStatus visible = solve(state, cancel, nodes).status;
+        if (visible != PcStatus::NeedMorePieces) return visible;
+
+        bool planned = false;
+        for (int tries = 0; tries < 3 && !planned; tries++) {
+            PcQuery guess = state;
+            const std::vector<core::Piece> pieces = randomBags(state.bagLeft, futureLength(state), rng);
+            guess.queue.insert(guess.queue.end(), pieces.begin(), pieces.end());
+            guess.queueEnds = true;
+            PcResult plan = solve(guess, cancel, nodes);
+            if (plan.status != PcStatus::Found) continue;
+            applyStep(state, plan.steps[0]);
+            planned = true;
+        }
+        if (!planned) return PcStatus::Impossible;
+    }
+}
+
+double PcSolver::chanceAfter(const PcQuery& query, const PcStep& step, int samples, uint32_t seed, int nodesPerSolve) {
+    PcQuery after = query;
+    applyStep(after, step);
+    std::mt19937 rng(seed);
+    const int length = futureLength(query) + static_cast<int>(query.queue.size());
+    int hits = 0;
+    for (int i = 0; i < samples; i++) hits += rollout(after, randomBags(query.bagLeft, length, rng), query.queue.size(), seed + i, nullptr, nodesPerSolve) == PcStatus::Found;
+    return static_cast<double>(hits) / samples;
 }
 
 PcResult PcSolver::solve(const PcQuery& query, const std::atomic<bool>* cancel, int maxNodes) { return run(query, cancel, maxNodes, false); }
