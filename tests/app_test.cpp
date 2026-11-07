@@ -1,21 +1,26 @@
 // Self-checks for input timing, saved settings and the 40L run.
 #include <cassert>
 #include <cmath>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <new>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "app/play.h"
 #include "app/settings.h"
 #include "app/timing.h"
+#include "tests/move_driver.h"
 
+// Only the thread playing: the PC coach's worker allocates on its own, as it's allowed to.
 static size_t allocations = 0;
+static thread_local bool onMainThread = false;
 
 void* operator new(size_t size) {
-    allocations++;
+    if (onMainThread) allocations++;
     if (void* memory = std::malloc(size)) return memory;
     throw std::bad_alloc();
 }
@@ -119,6 +124,13 @@ void testSettings() {
     assert(loadSettings(path).profile().keys[BindUndo] == std::vector{SDL_SCANCODE_Q});
     { std::ofstream(path) << R"({"profiles": [{"keys": {"left": [20]}}]})"; }  // Q
     assert(loadSettings(path).profile().keys[BindUndo].empty());
+    // The same goes for the hint key, and a saved one stays.
+    { std::ofstream(path) << R"({"profiles": [{"keys": {"left": [4]}}]})"; }
+    assert(loadSettings(path).profile().keys[BindHint] == std::vector{SDL_SCANCODE_H});
+    { std::ofstream(path) << R"({"profiles": [{"keys": {"hold": [11]}}]})"; }  // H
+    assert(loadSettings(path).profile().keys[BindHint].empty());
+    { std::ofstream(path) << R"({"profiles": [{"keys": {"hint": [5]}}]})"; }
+    assert(loadSettings(path).profile().keys[BindHint] == std::vector{SDL_SCANCODE_B});
 
     // A damaged file reads as defaults.
     { std::ofstream(path) << "{ not json"; }
@@ -709,15 +721,15 @@ void testDrillRun() {
         p.place(0, 0);
         assert(p.play.filled == 0 && p.play.missedUntilNs > 0 && p.play.game.falling.piece == core::Piece::I);
 
-        p = {};
-        p.play.mode = &row;
-        p.play.drill = &set.drills[0];
-        p.play.restart({}, 1, p.now);
-        p.start();
-        p.play.game.toppedOut = true;
-        p.now += kTickNs;
-        p.play.stepTo(p.now);
-        assert(!p.play.over && p.play.missedUntilNs > 0 && !p.play.game.toppedOut);
+        DrillPlayer top;
+        top.play.mode = &row;
+        top.play.drill = &set.drills[0];
+        top.play.restart({}, 1, top.now);
+        top.start();
+        top.play.game.toppedOut = true;
+        top.now += kTickNs;
+        top.play.stepTo(top.now);
+        assert(!top.play.over && top.play.missedUntilNs > 0 && !top.play.game.toppedOut);
     }
 
     // A placed piece and a saved state don't allocate, even with a long queue.
@@ -925,6 +937,321 @@ void testFinesseInPlay() {
     assert(edit.play.finesse.judged && edit.play.finesse.judged->presses == 1 && edit.play.finesse.judged->faults == 0);
 }
 
+const Mode& kCoachMode = kModes[6];
+
+// Plays a solver's steps through Play as real key presses, as tests/move_driver.h does in core.
+struct CoachPlayer {
+    Play play;
+    uint64_t now = 1'000'000'000;
+
+    PcCoach& coach() { return *play.coach; }
+    PcView view() { return coach().view(play.game, kCoachMode.goalLines, play.over); }
+
+    void advance(int ticks = 1) {
+        now += kTickNs * ticks;
+        play.stepTo(now);
+    }
+    void press(Bind bind, bool down) { play.key(bind, down, now); }
+    void tap(Bind bind) {
+        press(bind, true);
+        press(bind, false);
+        advance();
+    }
+    void waitForAnswer() {
+        for (int i = 0; i < 60000 && !coach().answered(); i++) {
+            coach().poll();
+            if (!coach().answered()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(coach().answered());
+    }
+    void move(ai::Move move) {
+        const Bind das = move == ai::Move::DasLeft ? BindLeft : BindRight;
+        switch (move) {
+            case ai::Move::Left: tap(BindLeft); break;
+            case ai::Move::Right: tap(BindRight); break;
+            case ai::Move::RotateCW: tap(BindCW); break;
+            case ai::Move::RotateCCW: tap(BindCCW); break;
+            case ai::Move::Rotate180: tap(Bind180); break;
+            case ai::Move::DasLeft:
+            case ai::Move::DasRight:
+                press(das, true);
+                advance(static_cast<int>(play.game.handling.das) + 2);
+                press(das, false);
+                advance();
+                break;
+            case ai::Move::SoftDrop:
+                press(BindSoftDrop, true);
+                advance(3);
+                press(BindSoftDrop, false);
+                advance();
+                break;
+            case ai::Move::Down:
+                press(BindSoftDrop, true);
+                advance();
+                press(BindSoftDrop, false);
+                advance();
+                break;
+        }
+    }
+    void place(const ai::PcStep& step) {
+        if (step.hold) tap(BindHold);
+        assert(play.game.falling.piece == step.piece);
+        for (ai::Move each : step.moves) move(each);
+        tap(BindHardDrop);
+    }
+};
+
+// The first pieces a seed deals in this mode.
+std::vector<core::Piece> dealt(uint32_t seed, int count) {
+    core::Game game(kCoachMode.rules, {}, seed);
+    std::vector<core::Piece> pieces;
+    const core::InputEvent drop[] = {{Action::HardDrop, true, 0}, {Action::HardDrop, false, 0}};
+    while (static_cast<int>(pieces.size()) < count) {
+        pieces.push_back(game.falling.piece);
+        game.tick(drop);
+        game.board = {};
+    }
+    return pieces;
+}
+
+// A plan for the next perfect clear from an empty board, seeing further ahead than a player can.
+ai::PcResult planPc(const std::vector<core::Piece>& pieces, size_t next, core::Piece hold) {
+    ai::PcQuery query;
+    query.current = pieces[next];
+    query.queue.assign(pieces.begin() + next + 1, pieces.begin() + next + 11);
+    query.hold = hold;
+    query.queueEnds = true;
+    query.rules = kCoachMode.rules;
+    ai::PcSolver solver;
+    return solver.solve(query, nullptr, 2'000'000);
+}
+
+void testPcCoachRules() {
+    // 40L's goal, with undo. The rules are the same constant in both rows.
+    assert(kCoachMode.goalLines == kModes[0].goalLines && kCoachMode.undo);
+
+    // Each PC takes at least 2 lines, up to the exact limit.
+    assert(!pcGoalOutOfReach(0, 40));
+    assert(!pcGoalOutOfReach(0, 20));
+    assert(pcGoalOutOfReach(0, 19));
+    assert(!pcGoalOutOfReach(3, 14));
+    assert(pcGoalOutOfReach(3, 13));
+    assert(!pcGoalOutOfReach(10, 0));
+
+    // A tally's phases, and a PC that took too many lines isn't a success for the streak.
+    PcProgress progress;
+    const auto lock = [](int lines, bool pc) {
+        core::LockResult result;
+        result.lines = lines;
+        result.perfectClear = pc;
+        return result;
+    };
+    progress.note(lock(0, false), 1);
+    progress.note(lock(0, false), 2);
+    assert(progress.tally.attempts[0] == 1);
+    progress.note(lock(4, true), 10);
+    assert(progress.pcs == 1 && progress.streak == 1 && progress.tally.successes[0] == 1);
+    assert(progress.phase == 3 && progress.linesInAttempt == 0 && !progress.attempted);
+    assert(progress.tally.attempts[3] == 0);  // no piece placed in the next attempt yet
+    progress.note(lock(2, false), 11);
+    progress.note(lock(2, false), 12);
+    assert(progress.streak == 1);
+    progress.note(lock(1, false), 13);
+    assert(progress.streak == 0);
+    progress.note(lock(1, true), 14);
+    assert(progress.pcs == 2 && progress.streak == 1);
+    assert(progress.tally.attempts[3] == 1 && progress.tally.successes[3] == 0);
+
+    // The record: a damaged or missing file reads as empty.
+    std::string path = (std::filesystem::temp_directory_path() / "stacklab_pc_rules.json").string();
+    std::filesystem::remove(path);
+    assert(loadPcRecord(path).best == 0);
+    PcRecord record;
+    record.best = 4;
+    record.tally.attempts[6] = 9;
+    record.tally.successes[6] = 2;
+    savePcRecord(record, path);
+    PcRecord read = loadPcRecord(path);
+    assert(read.best == 4 && read.tally.attempts[6] == 9 && read.tally.successes[6] == 2);
+    { std::ofstream(path) << R"({"best": 3, "attempts": [1, 2], "successes": "x"})"; }
+    read = loadPcRecord(path);
+    assert(read.best == 3 && read.tally.attempts[0] == 0);
+    std::filesystem::remove(path);
+}
+
+void testPcCoachRun() {
+    // A seed with a perfect clear in its first pieces and another straight after.
+    uint32_t seed = 0;
+    std::vector<core::Piece> pieces;
+    ai::PcResult first, second;
+    core::Piece carried = core::Piece::None;
+    size_t nextAfterFirst = 0;
+    for (uint32_t candidate = 1; candidate < 400 && !seed; candidate++) {
+        pieces = dealt(candidate, 40);
+        first = planPc(pieces, 0, core::Piece::None);
+        if (first.status != ai::PcStatus::Found || first.lines != 4) continue;
+        // Follow the plan's holds to see what's left in hold, and which piece comes next.
+        carried = core::Piece::None;
+        size_t next = 0;
+        core::Piece current = pieces[0];
+        for (const ai::PcStep& step : first.steps) {
+            if (step.hold) {
+                const core::Piece held = carried;
+                carried = current;
+                if (held == core::Piece::None) current = pieces[++next];
+                else current = held;
+            }
+            current = pieces[++next];
+        }
+        nextAfterFirst = next;
+        second = planPc(pieces, next, carried);
+        if (second.status == ai::PcStatus::Found && second.lines == 4) seed = candidate;
+    }
+    assert(seed != 0);
+
+    std::string path = (std::filesystem::temp_directory_path() / "stacklab_pc_run.json").string();
+    std::filesystem::remove(path);
+    CoachPlayer p;
+    p.play.mode = &kCoachMode;
+    p.play.restart({}, seed, p.now);
+    p.coach().path = path;
+    p.coach().hintKey = "H";
+
+    // Nothing is known until the worker has answered about this piece.
+    assert(std::string(p.view().status) == "Thinking");
+    assert(!p.view().showHint);
+    p.now = p.play.startNs;
+    p.play.stepTo(p.now);
+    p.waitForAnswer();
+    assert(std::string(p.view().status) == "Possible");
+    assert(std::string(p.view().detail) == "need more pieces");
+
+    // Only what's on show: the previews, not Game::queue, and every piece so far once.
+    ai::PcQuery query;
+    p.coach().fillQuery(p.play.game, query);
+    assert(static_cast<int>(query.queue.size()) == kCoachMode.rules.previews);
+    assert(static_cast<int>(p.coach().seen.size()) == 1 + kCoachMode.rules.previews);
+    assert(p.play.game.queue.size() > query.queue.size());
+    assert(query.bagLeft == ai::pcBagLeft(std::span(pieces).first(6)));
+
+    // A stale answer is dropped, whatever it says, whether or not this piece has one.
+    const uint64_t firstAsk = p.coach().askId();
+    PcAnswer stale;
+    stale.id = firstAsk - 1;
+    stale.status = ai::PcStatus::Impossible;
+    p.coach().take(stale);
+    assert(std::string(p.view().status) == "Possible");
+
+    bool sawReady = false;
+    for (size_t i = 0; i < first.steps.size(); i++) {
+        p.waitForAnswer();
+        if (std::string(p.view().status) == "PC ready") {
+            sawReady = true;
+            // The hint is on demand, shows this piece's placement, and says if hold comes first.
+            assert(!p.view().showHint);
+            p.coach().toggleHint();
+            assert(p.view().showHint);
+            assert(std::string(p.view().hintLine).find("place the") != std::string::npos || std::string(p.view().hintLine).find("Place the") != std::string::npos);
+            p.coach().toggleHint();
+            p.coach().toggleHint();
+        } else {
+            assert(std::string(p.view().status) == "Possible");  // never a no, on the way to a PC
+        }
+        const PcView before = p.view();
+        if (i + 1 == first.steps.size()) {
+            assert(before.pcs == 0 && p.coach().progress.tally.attempts[0] == 1);
+        }
+        p.place(first.steps[i]);
+        // Gone once the piece locks, and the question moves on with no answer yet.
+        assert(!p.view().showHint);
+        assert(std::string(p.view().status) == "Thinking");
+        stale.id = p.coach().askId() - 1;
+        p.coach().take(stale);
+        assert(std::string(p.view().status) == "Thinking");
+    }
+    assert(sawReady);
+
+    // The perfect clear.
+    assert(p.play.game.stats.lines == 4);
+    assert(p.coach().progress.pcs == 1 && p.coach().progress.streak == 1);
+    assert(p.coach().progress.tally.attempts[0] == 1 && p.coach().progress.tally.successes[0] == 1);
+    const int dealtBefore = p.play.game.stats.pieces + (p.play.game.hold != core::Piece::None);
+    assert(p.coach().progress.phase == dealtBefore % 7);
+    assert(static_cast<size_t>(dealtBefore) == nextAfterFirst);
+
+    // Undo takes the PC back, stats and all, and placing it again counts it again.
+    const size_t seenAfter = p.coach().seen.size();
+    p.play.undo(p.now);
+    assert(p.coach().progress.pcs == 0 && p.coach().progress.streak == 0);
+    assert(p.coach().progress.tally.successes[0] == 0 && p.coach().progress.tally.attempts[0] == 1);
+    assert(p.play.game.stats.lines < 4);  // an earlier piece of the plan may clear lines of its own
+    assert(p.coach().seen.size() == seenAfter - 1);
+    p.play.stepTo(p.now);
+    p.waitForAnswer();
+    p.place(first.steps.back());
+    assert(p.coach().progress.pcs == 1 && p.coach().progress.streak == 1);
+    assert(p.coach().progress.tally.successes[0] == 1);
+    assert(p.coach().seen.size() == seenAfter);
+
+    // A second in a row is a streak, tallied under its own phase.
+    const int phase = p.coach().progress.phase;
+    for (const ai::PcStep& step : second.steps) p.place(step);
+    assert(p.coach().progress.pcs == 2 && p.coach().progress.streak == 2);
+    assert(p.coach().progress.tally.attempts[phase] == (phase == 0 ? 2 : 1));
+    assert(p.play.game.stats.lines == 8);
+
+    // Stacking straight up soon rules out a PC in 4 lines, and that placement gets the blame.
+    for (int placed = 0;; placed++) {
+        p.waitForAnswer();
+        if (std::string(p.view().status) == "No PC") {
+            assert(placed > 0);
+            break;
+        }
+        assert(p.view().alert == nullptr && placed < 8);
+        p.tap(BindHardDrop);
+    }
+    assert(p.view().alert != nullptr && std::string(p.view().alert) == "That piece killed it: undo");
+    assert(std::string(p.view().detail).find("lines with these pieces") != std::string::npos);
+    assert(!p.view().showHint);
+
+    // It stays a no on the next piece, without blaming that one too.
+    p.tap(BindHardDrop);
+    p.waitForAnswer();
+    if (std::string(p.view().status) == "No PC") assert(p.view().alert == nullptr);
+
+    // Undo goes back past it, and the callout goes with it.
+    p.play.undo(p.now);
+    p.play.stepTo(p.now);
+    p.waitForAnswer();
+    p.play.undo(p.now);
+    p.play.stepTo(p.now);
+    p.waitForAnswer();
+    assert(std::string(p.view().status) != "No PC");
+    assert(p.view().alert == nullptr);
+    assert(p.coach().progress.pcs == 2);
+
+    // Retry saves the run, then starts clean on a new queue.
+    p.play.restart({}, seed + 1, p.now);
+    assert(p.coach().progress.pcs == 0 && p.coach().seen.size() == 1 + static_cast<size_t>(kCoachMode.rules.previews));
+    PcRecord saved = loadPcRecord(path);
+    assert(saved.best == 2);
+    assert(saved.tally.successes[0] >= 1);
+
+    // A run is only added to the record once.
+    p.coach().save();
+    p.coach().save();
+    assert(loadPcRecord(path).tally.successes[0] == saved.tally.successes[0]);
+
+    // Unknown is never shown as a no.
+    PcAnswer unknown;
+    unknown.id = p.coach().askId();
+    unknown.status = ai::PcStatus::Unknown;
+    p.coach().take(unknown);
+    assert(std::string(p.view().status) == "Can't tell");
+    assert(p.view().alert == nullptr);
+    std::filesystem::remove(path);
+}
+
 // A mode without garbage leaves the garbage RNG alone, seen here through random rounding.
 void testNoGarbageRowsKeepsRng() {
     auto sends = [](core::Game& game) {
@@ -988,6 +1315,7 @@ void testPlayDoesNotAllocate(const Mode& mode) {
 }  // namespace
 
 int main() {
+    onMainThread = true;
     testTickAt();
     testQueue();
     testSettings();
@@ -1009,5 +1337,8 @@ int main() {
     testPlayDoesNotAllocate(withUndo);
     const Mode withEdits = {.name = "Sandbox", .blurb = "", .rules = {}, .editable = true};
     testPlayDoesNotAllocate(withEdits);
+    testPcCoachRules();
+    testPcCoachRun();
+    testPlayDoesNotAllocate(kModes[6]);
     return 0;
 }

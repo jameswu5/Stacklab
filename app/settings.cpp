@@ -13,8 +13,8 @@ using nlohmann::json;
 
 namespace {
 
-constexpr const char* kBindKeys[kBindCount] = {"left", "right", "softDrop", "hardDrop", "cw", "ccw", "180", "hold", "retry", "menu", "undo"};
-constexpr const char* kBindNames[kBindCount] = {"Move left", "Move right", "Soft drop", "Hard drop", "Rotate CW", "Rotate CCW", "Rotate 180", "Hold", "Retry", "Menu", "Undo"};
+constexpr const char* kBindKeys[kBindCount] = {"left", "right", "softDrop", "hardDrop", "cw", "ccw", "180", "hold", "retry", "menu", "undo", "hint"};
+constexpr const char* kBindNames[kBindCount] = {"Move left", "Move right", "Soft drop", "Hard drop", "Rotate CW", "Rotate CCW", "Rotate 180", "Hold", "Retry", "Menu", "Undo", "PC hint"};
 
 // A missing or damaged file reads as null, which leaves the defaults in place.
 json readJson(const std::string& path) {
@@ -58,10 +58,13 @@ Profile profileFromJson(const json& value) {
         for (int code : get(keys, kBindKeys[bind], std::vector<int>{}))
             if (code > 0 && code < SDL_SCANCODE_COUNT) profile.keys[bind].push_back(static_cast<SDL_Scancode>(code));
     }
-    // A file from before undo existed keeps its keys: undo's default can't take one.
-    if (!keys.contains("undo"))
-        for (int bind = 0; bind < BindUndo; bind++)
-            for (SDL_Scancode key : profile.keys[bind]) std::erase(profile.keys[BindUndo], key);
+    // A file from before these existed keeps its keys: their defaults can't take one.
+    for (Bind added : {BindUndo, BindHint}) {
+        if (keys.contains(kBindKeys[added])) continue;
+        for (int bind = 0; bind < kBindCount; bind++)
+            for (SDL_Scancode key : profile.keys[bind])
+                if (bind != added) std::erase(profile.keys[added], key);
+    }
     return profile;
 }
 
@@ -119,6 +122,21 @@ void saveBest(double seconds, const std::string& path) {
 
 void saveBestScore(int score, const std::string& path) {
     writeJson({{"score", score}}, path);
+}
+
+PcRecord loadPcRecord(const std::string& path) {
+    json file = readJson(path);
+    PcRecord record;
+    record.best = get(file, "best", 0);
+    const auto attempts = get(file, "attempts", std::vector<int>{}), successes = get(file, "successes", std::vector<int>{});
+    if (attempts.size() != 7 || successes.size() != 7) return record;
+    std::ranges::copy(attempts, record.tally.attempts.begin());
+    std::ranges::copy(successes, record.tally.successes.begin());
+    return record;
+}
+
+void savePcRecord(const PcRecord& record, const std::string& path) {
+    writeJson({{"best", record.best}, {"attempts", record.tally.attempts}, {"successes", record.tally.successes}}, path);
 }
 
 std::string rowLabel(int row) {

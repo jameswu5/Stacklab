@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "ai/finesse.h"
+#include "app/pc_coach.h"
 #include "app/settings.h"
 #include "core/game.h"
 #include "modes/drill.h"
@@ -48,6 +49,7 @@ struct PlayView {
     const Drill* drill = nullptr;  // names the run, and its targets are drawn
     uint64_t filled = 0;           // a bit per target already placed
     const ai::FaultStats* faults = nullptr;  // null if the mode can't judge finesse
+    const PcView* pc = nullptr;              // null without the PC coach
 };
 
 class Ui {
@@ -103,6 +105,7 @@ private:
     void block(int x, int y, Color color, float alpha);
     void preview(core::Piece piece, float centerX, float centerY, float cell);
     void statRow(float x, float y, float w, const char* name, const char* value);
+    void coachRows(const PcView& pc, float y, bool over);
     void results(const PlayView& view);
     void sessionCard(const PlayView& view);
 

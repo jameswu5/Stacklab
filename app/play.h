@@ -3,10 +3,12 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "ai/finesse.h"
+#include "app/pc_coach.h"
 #include "app/settings.h"
 #include "app/timing.h"
 #include "core/game.h"
@@ -45,6 +47,8 @@ struct Play {
     uint64_t filled = 0;           // a bit per drill target that's been placed
     uint64_t missedUntilNs = 0;    // says so until then, since a miss resets the board at once
 
+    std::unique_ptr<PcCoach> coach;  // made by the first run of a mode with the coach
+
     uint64_t lastInputNs = 0, worstInputNs = 0;
 
     // A ring of the state each placement started from, for modes with undo.
@@ -53,6 +57,7 @@ struct Play {
         core::Game game;
         uint64_t filled;
         ai::FaultStats faults;
+        PcProgress pc;
     };
     std::vector<UndoSlot> undoSlots;
     int undoCount = 0, undoNewest = 0;
