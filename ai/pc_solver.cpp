@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
+#include <random>
 
 namespace ai {
 
@@ -16,6 +18,20 @@ void fillBoard(core::Board& board, const std::array<uint16_t, kPcMaxRows>& rows)
     for (int y = 0; y < kPcMaxRows; y++)
         for (int x = 0; x < core::kBoardWidth; x++)
             if (rows[y] >> x & 1) board.at(x, y) = core::Piece::Garbage;
+}
+
+void lockAndClear(core::Board& board, const std::array<core::Cell, 4>& cells, core::Piece piece) {
+    for (const core::Cell& cell : cells) board.at(cell.x, cell.y) = piece;
+    int write = 0;
+    for (int y = 0; y < core::kBoardHeight; y++) {
+        bool full = true;
+        for (int x = 0; x < core::kBoardWidth; x++) full = full && board.at(x, y) != core::Piece::None;
+        if (full) continue;
+        for (int x = 0; x < core::kBoardWidth; x++) board.at(x, write) = board.at(x, y);
+        write++;
+    }
+    for (; write < core::kBoardHeight; write++)
+        for (int x = 0; x < core::kBoardWidth; x++) board.at(x, write) = core::Piece::None;
 }
 
 // Every occupied row has to clear, so there can't be more of them than lines left. And each
@@ -184,17 +200,7 @@ bool PcSolver::finish(const PcQuery& query, PcResult& result) {
             break;
         }
         if (!found) return false;
-        for (const core::Cell& cell : step.cells) board.at(cell.x, cell.y) = step.piece;
-        int write = 0;
-        for (int y = 0; y < core::kBoardHeight; y++) {
-            bool full = true;
-            for (int x = 0; x < core::kBoardWidth; x++) full = full && board.at(x, y) != core::Piece::None;
-            if (full) continue;
-            for (int x = 0; x < core::kBoardWidth; x++) board.at(x, write) = board.at(x, y);
-            write++;
-        }
-        for (; write < core::kBoardHeight; write++)
-            for (int x = 0; x < core::kBoardWidth; x++) board.at(x, write) = core::Piece::None;
+        lockAndClear(board, step.cells, step.piece);
     }
     return true;
 }
@@ -208,6 +214,7 @@ PcResult PcSolver::run(const PcQuery& query, const std::atomic<bool>* cancel, in
     stopped_ = capped_ = false;
     path_.clear();
     drawn_.clear();
+    candidates_.reserve(kPcMaxRows * core::kBoardWidth / 4 + 1);  // place holds a reference while deeper calls grow this
 
     State start;
     int cells = 0, occupied = 0;
@@ -279,6 +286,145 @@ PcResult PcSolver::run(const PcQuery& query, const std::atomic<bool>* cancel, in
     }
     result.lines = maxLines;
     return answer(PcStatus::Impossible);
+}
+
+PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel, const PcAdviceOptions& options) {
+    PcAdvice advice;
+    const PcResult visible = solve(query, cancel);
+    advice.status = visible.status;
+    advice.lines = visible.lines;
+    if (visible.status == PcStatus::Found) {
+        advice.hasStep = true;
+        advice.step = visible.steps[0];
+        advice.chance = 1;
+        return advice;
+    }
+    advice.partial = cancel && cancel->load(std::memory_order_relaxed);
+    if (visible.status != PcStatus::NeedMorePieces || advice.partial) return advice;
+
+    // Every placement open to the player now, and the state each leaves.
+    struct Choice {
+        PcStep step;
+        PcQuery after;
+        int hits = 0, samples = 0, unknown = 0;
+    };
+    std::vector<Choice> choices;
+    auto addChoices = [&](core::Piece piece, bool pressHold, core::Piece hold, size_t nextQueue) {
+        search_.run(query.board, core::spawnFalling(piece), query.rules);
+        const std::vector<Placement> placements = search_.placements;
+        std::vector<std::array<int, 4>> seen;
+        for (const Placement& placement : placements) {
+            auto cells = search_.cells(placement);
+            std::array<int, 4> ids;
+            for (int i = 0; i < 4; i++) ids[i] = cells[i].y * core::kBoardWidth + cells[i].x;
+            std::sort(ids.begin(), ids.end());
+            if (std::find(seen.begin(), seen.end(), ids) != seen.end()) continue;
+            seen.push_back(ids);
+
+            PcQuery after = query;
+            after.hold = hold;
+            after.holdUsed = false;
+            after.queue.erase(after.queue.begin(), after.queue.begin() + nextQueue);
+            lockAndClear(after.board, cells, piece);
+
+            // The next piece comes from the queue, or isn't known yet.
+            if (!after.queue.empty()) {
+                after.current = after.queue.front();
+                after.queue.erase(after.queue.begin());
+            } else {
+                after.current = core::Piece::None;
+            }
+            choices.push_back({{piece, pressHold, cells, search_.inputs(placement)}, std::move(after)});
+        }
+    };
+    addChoices(query.current, false, query.hold, 0);
+    if (query.rules.allowHold && !query.holdUsed && query.hold != query.current) {
+        if (query.hold != core::Piece::None) addChoices(query.hold, true, query.current, 0);
+        else if (!query.queue.empty()) addChoices(query.queue[0], true, query.current, 1);
+    }
+    if (choices.empty()) return advice;
+
+    // Sample futures: the rest of this bag in a random order, then whole bags. Enough of them for
+    // any height allowed, and one over, since a piece can end the clear sitting in hold.
+    std::mt19937 rng(options.seed);
+    const int cells = static_cast<int>(std::count_if(query.board.cells.begin(), query.board.cells.end(), [](core::Piece cell) { return cell != core::Piece::None; }));
+    const int futureLength = (10 * std::min(query.maxLines, kPcMaxRows) - cells) / 4 + 1;
+    std::vector<std::vector<core::Piece>> futures;
+    auto future = [&](int index) -> const std::vector<core::Piece>& {
+        while (static_cast<int>(futures.size()) <= index) {
+            std::vector<core::Piece> pieces;
+            uint8_t bag = query.bagLeft ? query.bagLeft : kFullBag;
+            while (static_cast<int>(pieces.size()) < futureLength) {
+                std::vector<core::Piece> shuffled;
+                for (int piece = 1; piece <= 7; piece++)
+                    if (bag >> piece & 1) shuffled.push_back(static_cast<core::Piece>(piece));
+                std::shuffle(shuffled.begin(), shuffled.end(), rng);
+                pieces.insert(pieces.end(), shuffled.begin(), shuffled.end());
+                bag = kFullBag;
+            }
+            futures.push_back(std::move(pieces));
+        }
+        return futures[index];
+    };
+
+    const auto begin = std::chrono::steady_clock::now();
+    auto outOfTime = [&] {
+        if (cancel && cancel->load(std::memory_order_relaxed)) return true;
+        return options.timeBudgetMs > 0 && std::chrono::steady_clock::now() - begin > std::chrono::milliseconds(options.timeBudgetMs);
+    };
+
+    // Successive halving: every option on the same futures, keeping the better half each time.
+    std::vector<Choice*> alive;
+    for (Choice& choice : choices) alive.push_back(&choice);
+    auto chanceOf = [](const Choice& choice) { return choice.samples ? static_cast<double>(choice.hits) / choice.samples : -1.0; };
+    PcQuery trial;
+    int target = std::min(8, options.maxSamples);
+    while (!advice.partial) {
+        for (Choice* choice : alive) {
+            while (choice->samples < target) {
+                if (outOfTime()) {
+                    advice.partial = true;
+                    break;
+                }
+                trial = choice->after;
+                const std::vector<core::Piece>& pieces = future(choice->samples);
+                trial.queue.insert(trial.queue.end(), pieces.begin(), pieces.end());
+                if (trial.current == core::Piece::None) {
+                    trial.current = trial.queue.front();
+                    trial.queue.erase(trial.queue.begin());
+                }
+                trial.queueEnds = true;
+                const PcResult result = solve(trial, cancel, options.nodesPerSample);
+                if (result.status == PcStatus::Found) choice->hits++;
+                if (result.status == PcStatus::Unknown) {
+                    if (outOfTime()) {
+                        advice.partial = true;
+                        break;
+                    }
+                    choice->unknown++;
+                }
+                choice->samples++;
+            }
+            if (advice.partial) break;
+        }
+        if (advice.partial) break;
+        std::stable_sort(alive.begin(), alive.end(), [&](const Choice* a, const Choice* b) { return chanceOf(*a) > chanceOf(*b); });
+        if (target >= options.maxSamples) break;
+        if (alive.size() > 1) alive.resize((alive.size() + 1) / 2);
+        target = std::min(target * 2, options.maxSamples);
+    }
+
+    // Stopped partway, options rest on different counts, so go by those with the most futures behind them.
+    const Choice* best = alive[0];
+    for (const Choice* choice : alive) {
+        if (choice->samples > best->samples || (choice->samples == best->samples && chanceOf(*choice) > chanceOf(*best))) best = choice;
+    }
+    advice.hasStep = true;
+    advice.step = best->step;
+    advice.chance = std::max(chanceOf(*best), 0.0);
+    advice.samples = best->samples;
+    advice.unknownSamples = best->unknown;
+    return advice;
 }
 
 PcResult PcSolver::solve(const PcQuery& query, const std::atomic<bool>* cancel, int maxNodes) { return run(query, cancel, maxNodes, false); }

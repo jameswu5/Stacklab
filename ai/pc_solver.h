@@ -62,6 +62,28 @@ struct PcResult {
 
 constexpr int kPcDefaultNodes = 200'000;
 
+// The placement to make now, when a perfect clear can't be proven yet.
+struct PcAdvice {
+    PcStatus status = PcStatus::Unknown;  // what solve says about the visible pieces
+    bool hasStep = false;
+    PcStep step{};
+    // The share of sampled futures in which, after this placement, some way to a perfect clear
+    // exists. That lets the later placements know those futures, which a player can't, so this
+    // is a ceiling on the real chance. 1 when it's proven, and 0 when it's impossible.
+    double chance = 0;
+    int samples = 0;         // how many futures `chance` rests on; 0 when proven, or if none finished
+    int unknownSamples = 0;  // of those, how many ran out of nodes and were counted as failures
+    bool partial = false;    // stopped early by the time budget or cancel: the best so far
+    int lines = 0;
+};
+
+struct PcAdviceOptions {
+    int maxSamples = 256;      // the most futures for the placement that ends up on top
+    int nodesPerSample = 20'000;
+    int timeBudgetMs = 0;      // 0 for none. Stopping on time depends on the machine, so answers can then differ
+    uint32_t seed = 1;         // the same state, seed and samples always give the same answer
+};
+
 class PcSolver {
 public:
     // Only ever uses the known pieces. NeedMorePieces says the shape left by placing them
@@ -72,6 +94,9 @@ public:
     // pieces can't reach. Found then means some order works, and `assumed` is one: the player
     // may not get it. Impossible means no order does at that line count.
     PcResult solveWithUnseen(const PcQuery& query, const std::atomic<bool>* cancel = nullptr, int maxNodes = kPcDefaultNodes);
+
+    // The placement with the best chance. A placement solve can prove wins outright, at 100%.
+    PcAdvice advise(const PcQuery& query, const std::atomic<bool>* cancel = nullptr, const PcAdviceOptions& options = {});
 
 private:
     struct State {

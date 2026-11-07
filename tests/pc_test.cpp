@@ -2,14 +2,17 @@
 // core::Game, and "no" answers are compared with boards known to have a perfect clear and
 // with a plain search that has none of the solver's shortcuts. `pc_test --bench` prints timings.
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <random>
+#include <thread>
 #include <vector>
 
 #include "ai/pc_solver.h"
@@ -553,6 +556,12 @@ void testVisibleOnly() {
         for (const PcResult& result : {solver.solve(a), solver.solve(b)}) assert(result.status == PcStatus::NeedMorePieces && result.lines == 4 && result.steps.empty());
         const PcResult first = solver.solveWithUnseen(a, nullptr, 20'000), second = solver.solveWithUnseen(b, nullptr, 20'000);
         assert(first.status == second.status && first.nodes == second.nodes && first.assumed == second.assumed && first.steps.size() == second.steps.size());
+
+        const ai::PcAdviceOptions few{.maxSamples = 4, .nodesPerSample = 300};
+        const ai::PcAdvice adviceA = solver.advise(a, nullptr, few), adviceB = solver.advise(b, nullptr, few);
+        assert(adviceA.hasStep && adviceB.hasStep && adviceA.samples == 4);
+        assert(adviceA.step.piece == adviceB.step.piece && adviceA.step.hold == adviceB.step.hold && cellKey(adviceA.step.cells) == cellKey(adviceB.step.cells));
+        assert(adviceA.chance == adviceB.chance && adviceA.unknownSamples == adviceB.unknownSamples);
     }
 }
 
@@ -638,6 +647,139 @@ void testUnseenPieces() {
     assert(result.status == PcStatus::Impossible);
     almost.bagLeft = 1 << static_cast<int>(Piece::O);
     assert(solver.solveWithUnseen(almost, nullptr, 2'000'000).status == PcStatus::Found);
+}
+
+// Every order the unseen pieces can come in: the rest of this bag, then whole bags.
+void allFutures(uint8_t bag, int length, std::vector<Piece>& pieces, std::vector<std::vector<Piece>>& out) {
+    if (length == 0) {
+        out.push_back(pieces);
+        return;
+    }
+    const uint8_t from = bag ? bag : 0xFE;
+    for (int piece = 1; piece <= 7; piece++) {
+        if (!(from >> piece & 1)) continue;
+        pieces.push_back(static_cast<Piece>(piece));
+        allFutures(from & ~(1 << piece), length - 1, pieces, out);
+        pieces.pop_back();
+    }
+}
+
+// The exact share of futures with a perfect clear after this placement.
+double exactChance(PcSolver& solver, const PcQuery& query, Piece piece, bool pressedHold, std::array<core::Cell, 4> cells, const std::vector<std::vector<Piece>>& futures) {
+    PcQuery after = query;
+    lockCells(after.board, cells, piece);
+    after.holdUsed = false;
+    after.queueEnds = true;
+    if (pressedHold) {
+        after.hold = query.current;
+        if (query.hold == Piece::None) after.queue.erase(after.queue.begin());
+    }
+    int hits = 0;
+    for (const std::vector<Piece>& future : futures) {
+        PcQuery trial = after;
+        trial.queue.insert(trial.queue.end(), future.begin(), future.end());
+        trial.current = trial.queue.front();
+        trial.queue.erase(trial.queue.begin());
+        hits += solver.solve(trial, nullptr, 2'000'000).status == PcStatus::Found;
+    }
+    return static_cast<double>(hits) / futures.size();
+}
+
+void testAdvice() {
+    std::mt19937 rng(9);
+    PcSolver solver;
+    MoveSearch search;
+
+    // Nothing to place, or nothing to gain.
+    PcQuery odd;
+    odd.board.at(0, 0) = Piece::Garbage;
+    odd.current = Piece::T;
+    odd.rules = noGravity();
+    const ai::PcAdvice none = solver.advise(odd);
+    assert(none.status == PcStatus::Impossible && !none.hasStep && none.chance == 0 && none.samples == 0);
+
+    // Provable from what's visible: that placement, at 100%, with no sampling.
+    Solvable game;
+    while (!makeSolvable(4, rng, search, game)) {}
+    const PcQuery provable = queryFrom(game, 4, 6);
+    const PcResult proof = solver.solve(provable);
+    const ai::PcAdvice proven = solver.advise(provable);
+    assert(proof.status == PcStatus::Found);
+    assert(proven.status == PcStatus::Found && proven.hasStep && proven.chance == 1 && proven.samples == 0 && !proven.partial);
+    assert(proven.step.piece == proof.steps[0].piece && cellKey(proven.step.cells) == cellKey(proof.steps[0].cells));
+
+    // Stopped by either limit: the best so far, marked partial.
+    core::Game opening(core::Ruleset{}, core::Handling{}, 12);
+    std::vector<Piece> shown = {opening.falling.piece};
+    shown.insert(shown.end(), opening.queue.begin(), opening.queue.begin() + opening.rules.previews);
+    const PcQuery empty = visibleQuery(opening, shown);
+    const ai::PcAdvice timedOut = solver.advise(empty, nullptr, {.timeBudgetMs = 30});
+    assert(timedOut.status == PcStatus::NeedMorePieces && timedOut.hasStep && timedOut.partial);
+    std::atomic<bool> cancel{false};
+    std::thread canceller([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        cancel = true;
+    });
+    const ai::PcAdvice cancelled = solver.advise(empty, &cancel);
+    canceller.join();
+    assert(cancelled.hasStep && cancelled.partial);
+    const ai::PcAdvice stopped = solver.advise(empty, &cancel);
+    assert(!stopped.hasStep && stopped.partial);
+
+    // The same state and seed give the same answer, and a whole run isn't partial.
+    const ai::PcAdviceOptions few{.maxSamples = 4, .nodesPerSample = 300};
+    const ai::PcAdvice one = solver.advise(empty, nullptr, few), two = solver.advise(empty, nullptr, few);
+    assert(!one.partial && one.samples == 4 && one.hasStep && cellKey(one.step.cells) == cellKey(two.step.cells) && one.chance == two.chance);
+
+    // Against a count of every future, on boards small enough to count. Each stays near the truth,
+    // and what's chosen is about as good as the best choice there is.
+    int cases = 0, spread = 0;
+    double totalError = 0, totalRegret = 0, worstError = 0;
+    for (int round = 0; round < 400 && cases < 40; round++) {
+        Solvable small;
+        if (!makeSolvable(4, rng, search, small)) continue;
+        const size_t from = small.pieces.size() - 4;
+        if (small.pieces[from + 2] == small.pieces[from + 3]) continue;
+        PcQuery query = queryFrom(small, from, 2);
+        query.maxLines = 4;
+        uint8_t bag = 1 << static_cast<int>(small.pieces[from + 2]) | 1 << static_cast<int>(small.pieces[from + 3]);
+        if (round % 2 == 0) bag |= 1 << static_cast<int>(kPieces[rng() % 7]);
+        query.bagLeft = bag;
+
+        // Two unseen pieces are needed, and one more can end up in hold.
+        std::vector<std::vector<Piece>> futures;
+        std::vector<Piece> pieces;
+        allFutures(bag, 3, pieces, futures);
+
+        const ai::PcAdvice advice = solver.advise(query, nullptr, {.maxSamples = 2048, .nodesPerSample = 2'000'000});
+        if (advice.status != PcStatus::NeedMorePieces) continue;
+        assert(advice.hasStep && advice.samples == 2048 && advice.unknownSamples == 0);
+        const double exact = exactChance(solver, query, advice.step.piece, advice.step.hold, advice.step.cells, futures);
+        const double sigma = std::sqrt(exact * (1 - exact) / advice.samples);
+        const double error = std::abs(advice.chance - exact);
+        assert(error <= 5 * sigma + 1e-9);
+
+        double best = 0, worst = 1;
+        const std::pair<Piece, bool> options[] = {{query.current, false}, {query.queue[0], true}};
+        for (const auto& [piece, hold] : options) {
+            search.run(query.board, core::spawnFalling(piece), query.rules);
+            std::vector<std::array<core::Cell, 4>> placements;
+            for (const ai::Placement& placement : search.placements) placements.push_back(search.cells(placement));
+            for (const auto& cells : placements) {
+                const double chance = exactChance(solver, query, piece, hold, cells, futures);
+                best = std::max(best, chance);
+                worst = std::min(worst, chance);
+            }
+        }
+        totalError += error;
+        worstError = std::max(worstError, error);
+        totalRegret += best - exact;
+        spread += best > worst;
+        assert(exact <= best + 1e-9);
+        cases++;
+    }
+    std::printf("advice against a count of every future: %d cases, %d with choices that differ, mean error %.3f, worst %.3f, mean shortfall from the best choice %.3f\n", cases, spread, totalError / cases, worstError, totalRegret / cases);
+    assert(cases >= 20 && spread >= 15 && totalRegret / cases < 0.03);
 }
 
 // --bench
@@ -776,9 +918,214 @@ void bench() {
     stackUnseen.print("awkward stack, 7 known: solveWithUnseen");
 }
 
+// Plays a whole attempt at a perfect clear, by real key presses, seeing only what a player sees.
+struct Attempt {
+    bool cleared = false;
+    bool offPlan = false;  // a placement landed somewhere other than planned
+    double firstChance = -1;
+};
+
+// `randomFirst` placements are random; the rest take the advice. All random if it's more than 10.
+Attempt playAttempt(PcSolver& solver, MoveSearch& search, core::Ruleset rules, uint32_t seed, int phase, int randomFirst, const ai::PcAdviceOptions& options) {
+    core::Handling handling;
+    handling.sdf = 20;
+    core::Game game(rules, handling, seed);
+    std::mt19937 rng(seed);
+    std::vector<Piece> seen = {game.falling.piece};
+    seen.insert(seen.end(), game.queue.begin(), game.queue.begin() + game.rules.previews);
+    auto reveal = [&](int count) {
+        for (int i = 0; i < count; i++) seen.push_back(game.queue[game.rules.previews - count + i]);
+    };
+    // Past the first bag, which no_szo changes.
+    const core::InputEvent drop[] = {{core::Action::HardDrop, true, 0}, {core::Action::HardDrop, false, 0}};
+    for (int i = 0; i < 7 + phase; i++) {
+        game.tick(drop);
+        game.board = {};
+        reveal(1);
+    }
+
+    Attempt attempt;
+    for (int placed = 0; placed < 10; placed++) {
+        PcQuery query = visibleQuery(game, seen);
+        ai::PcStep step;
+        if (placed < randomFirst) {
+            search.run(query.board, core::spawnFalling(query.current), query.rules);
+            if (search.placements.empty()) return attempt;
+            const ai::Placement placement = search.placements[rng() % search.placements.size()];
+            step = {query.current, false, search.cells(placement), search.inputs(placement)};
+        } else {
+            const ai::PcAdvice advice = solver.advise(query, nullptr, options);
+            if (!advice.hasStep) return attempt;
+            if (attempt.firstChance < 0) attempt.firstChance = advice.chance;
+            step = advice.step;
+        }
+        core::Board expected = game.board;
+        lockCells(expected, step.cells, step.piece);
+        const bool drewFromQueue = step.hold && game.hold == Piece::None;
+        Driver driver{game};
+        if (step.hold) driver.tap(core::Action::Hold);
+        for (Move move : step.moves) driver.move(move);
+        driver.hardDrop();
+        if (!driver.locked) return attempt;
+        reveal(drewFromQueue ? 2 : 1);
+        if (game.board.cells != expected.cells) {
+            attempt.offPlan = true;
+            return attempt;
+        }
+        if (driver.perfectClear) {
+            attempt.cleared = true;
+            return attempt;
+        }
+    }
+    return attempt;
+}
+
+// The board and view of a player following the advice for a few placements.
+PcQuery visibleAfter(PcSolver& solver, uint32_t seed, int placements) {
+    core::Game game(kModes[0].rules, core::Handling{}, seed);
+    std::vector<Piece> seen = {game.falling.piece};
+    seen.insert(seen.end(), game.queue.begin(), game.queue.begin() + game.rules.previews);
+    const core::InputEvent drop[] = {{core::Action::HardDrop, true, 0}, {core::Action::HardDrop, false, 0}};
+    for (int i = 0; i < 7 + static_cast<int>(seed % 7); i++) {
+        game.tick(drop);
+        game.board = {};
+        seen.push_back(game.queue[game.rules.previews - 1]);
+    }
+    for (int i = 0; i < placements; i++) {
+        const ai::PcAdvice advice = solver.advise(visibleQuery(game, seen), nullptr, {.maxSamples = 16, .nodesPerSample = 5'000});
+        if (!advice.hasStep) break;
+        const bool drewFromQueue = advice.step.hold && game.hold == Piece::None;
+        Driver driver{game};
+        if (advice.step.hold) driver.tap(core::Action::Hold);
+        for (Move move : advice.step.moves) driver.move(move);
+        driver.hardDrop();
+        for (int k = drewFromQueue ? 2 : 1; k > 0; k--) seen.push_back(game.queue[game.rules.previews - k]);
+    }
+    return visibleQuery(game, seen);
+}
+
+void benchAdviceTime(int samples) {
+    PcSolver solver;
+    std::printf("time for one answer, %d futures at most, one thread:\n", samples);
+    for (int placements = 0; placements <= 3; placements++) {
+        std::vector<double> ms;
+        double chances = 0;
+        int unknown = 0, total = 0, proven = 0;
+        for (uint32_t seed = 1; seed <= 6; seed++) {
+            const PcQuery query = visibleAfter(solver, seed, placements);
+            auto begin = std::chrono::steady_clock::now();
+            const ai::PcAdvice advice = solver.advise(query, nullptr, {.maxSamples = samples});
+            ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count());
+            chances += advice.chance;
+            unknown += advice.unknownSamples;
+            total += advice.samples;
+            proven += advice.status == PcStatus::Found;
+        }
+        std::sort(ms.begin(), ms.end());
+        std::printf("  after %d placements: median %8.0f ms, worst %8.0f ms; mean chance %3.0f%%, %d proven of %zu, %d of %d futures out of nodes\n", placements, ms[ms.size() / 2], ms.back(), 100 * chances / ms.size(), proven, ms.size(), unknown, total);
+        std::fflush(stdout);
+    }
+
+}
+
+void benchAdviceStability() {
+    PcSolver solver;
+    std::printf("the top choice as futures grow, against 1024 futures, 8 boards each after 0 and 1 placements:\n");
+    const int counts[] = {16, 32, 64, 128, 256, 512};
+    int same[6] = {};
+    double loss[6] = {};
+    double ms[6] = {};
+    int boards = 0;
+    for (int placements = 0; placements <= 1; placements++) {
+        for (uint32_t seed = 21; seed <= 28; seed++) {
+            const PcQuery query = visibleAfter(solver, seed, placements);
+            const ai::PcAdvice top = solver.advise(query, nullptr, {.maxSamples = 1024});
+            if (!top.hasStep || top.status != PcStatus::NeedMorePieces) continue;
+            boards++;
+            // What each choice is worth, judged on other futures than it was chosen on.
+            auto worth = [&](const ai::PcStep& step) {
+                PcQuery after = query;
+                lockCells(after.board, step.cells, step.piece);
+                after.holdUsed = false;
+                if (step.hold) {
+                    after.hold = query.current;
+                    if (query.hold == Piece::None) after.queue.erase(after.queue.begin());
+                }
+                after.queueEnds = true;
+                std::mt19937 rng(777);
+                int hits = 0;
+                const int trials = 512;
+                for (int t = 0; t < trials; t++) {
+                    std::vector<Piece> future;
+                    uint8_t bag = query.bagLeft ? query.bagLeft : 0xFE;
+                    while (future.size() < 12) {
+                        std::vector<Piece> shuffled;
+                        for (int piece = 1; piece <= 7; piece++)
+                            if (bag >> piece & 1) shuffled.push_back(static_cast<Piece>(piece));
+                        std::shuffle(shuffled.begin(), shuffled.end(), rng);
+                        future.insert(future.end(), shuffled.begin(), shuffled.end());
+                        bag = 0xFE;
+                    }
+                    PcQuery trial = after;
+                    trial.queue.insert(trial.queue.end(), future.begin(), future.end());
+                    trial.current = trial.queue.front();
+                    trial.queue.erase(trial.queue.begin());
+                    hits += solver.solve(trial, nullptr, 20'000).status == PcStatus::Found;
+                }
+                return static_cast<double>(hits) / trials;
+            };
+            const double topWorth = worth(top.step);
+            for (int i = 0; i < 6; i++) {
+                auto begin = std::chrono::steady_clock::now();
+                const ai::PcAdvice advice = solver.advise(query, nullptr, {.maxSamples = counts[i]});
+                ms[i] += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+                const bool match = advice.step.piece == top.step.piece && cellKey(advice.step.cells) == cellKey(top.step.cells);
+                same[i] += match;
+                loss[i] += match ? 0 : topWorth - worth(advice.step);
+            }
+        }
+    }
+    for (int i = 0; i < 6; i++) std::printf("  %4d futures: same as 1024 on %d of %d, mean loss in worth %+.1f points, mean %.0f ms\n", counts[i], same[i], boards, 100 * loss[i] / boards, ms[i] / boards);
+    std::fflush(stdout);
+
+}
+
+void benchAdvicePlay(int games, int samples) {
+    PcSolver solver;
+    MoveSearch search;
+    const core::Ruleset rules = kModes[0].rules;
+    std::printf("whole attempts from an empty board, %d each, %d futures an answer, 40L rules with real gravity and key presses:\n", games, samples);
+    const ai::PcAdviceOptions options{.maxSamples = samples};
+    for (int randomFirst : {0, 1, 2, 3, 11}) {
+        int cleared = 0, offPlan = 0, answered = 0;
+        double first = 0;
+        auto begin = std::chrono::steady_clock::now();
+        for (int game = 0; game < games; game++) {
+            const Attempt attempt = playAttempt(solver, search, rules, 5000 + game, game % 7, randomFirst, options);
+            cleared += attempt.cleared;
+            offPlan += attempt.offPlan;
+            if (attempt.firstChance >= 0) {
+                first += attempt.firstChance;
+                answered++;
+            }
+        }
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+        std::printf("  %2d random placements first: %3d of %d cleared (%4.1f%%); mean first estimate %4.1f%%; %d off plan; %.1f s an attempt\n", randomFirst, cleared, games, 100.0 * cleared / games, answered ? 100 * first / answered : 0.0, offPlan, seconds / games);
+        std::fflush(stdout);
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--advise") == 0) {
+        const char* part = argc > 2 ? argv[2] : "";
+        const int samples = argc > 3 ? std::atoi(argv[3]) : 64;
+        if (std::strcmp(part, "time") == 0) benchAdviceTime(samples);
+        if (std::strcmp(part, "stable") == 0) benchAdviceStability();
+        if (std::strcmp(part, "play") == 0) benchAdvicePlay(argc > 4 ? std::atoi(argv[4]) : 100, samples);
+        return 0;
+    }
     if (argc > 1 && std::strcmp(argv[1], "--bench") == 0) {
         bench();
         benchPhases(argc > 2 ? std::atoi(argv[2]) : 50, argc > 3 ? std::atoi(argv[3]) : 500'000);
@@ -798,5 +1145,6 @@ int main(int argc, char** argv) {
     stage("buried", testBuriedRows);
     stage("plain", testAgainstPlainSearch);
     stage("unseen", testUnseenPieces);
+    stage("advice", testAdvice);
     return 0;
 }
