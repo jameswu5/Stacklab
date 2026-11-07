@@ -972,6 +972,15 @@ static void testGarbageQueue() {
     receive(crossing, 3, 3, 1);  // acknowledged, so nothing is left to cross
     assert(crossing.stats.garbageReceived == 5);
 
+    // Garbage arriving, crossing sends, rising and cancelling doesn't allocate.
+    const int start = allocations;
+    for (int i = 0; i < 20; i++) {
+        dropQuad(crossing);
+        receive(crossing, 10 + i, 3, 0);
+        run(crossing, 30);
+    }
+    assert(allocations == start);
+
     // Inputs on the same tick run in order around the garbage.
     Game before(rules, Handling{}, 1);
     fillExcept(before, 4, {{9, 0}, {9, 1}, {9, 2}, {9, 3}});

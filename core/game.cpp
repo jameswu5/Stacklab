@@ -181,6 +181,9 @@ Game::Game(const Ruleset& rules, const Handling& handling, uint32_t seed)
       garbageCap_(rules.garbageCap) {
     queue.reserve(rules.previews + 8);
     locks_.reserve(8);
+    // ponytail: a match past 64 unacknowledged sends or queued batches allocates; use fixed arrays if that shows up
+    incoming_.reserve(64);
+    outgoing_.reserve(64);
     if (rules.noSzo) {
         pushBag();
         const auto first = std::find_if(queue.begin(), queue.end(), [](Piece p) {
@@ -450,15 +453,15 @@ void Game::applyGarbage(const GarbageEvent& e) {
             // Sends that crossed this garbage in flight cancel against it. Anything
             // the sender had seen by then was already accounted for on its side.
             int amount = e.amount;
-            std::vector<Outgoing> kept;
+            size_t kept = 0;
             for (Outgoing out : outgoing_) {
                 if (out.iid <= e.ackIid) continue;
                 const int crossed = std::min(out.amount, amount);
                 out.amount -= crossed;
                 amount -= crossed;
-                if (out.amount > 0) kept.push_back(out);
+                if (out.amount > 0) outgoing_[kept++] = out;
             }
-            outgoing_ = std::move(kept);
+            outgoing_.resize(kept);
             if (amount > 0) incoming_.push_back({e.gameId, e.iid, amount, INT64_MAX / 2});
             break;
         }
