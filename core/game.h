@@ -113,6 +113,7 @@ struct Board {
 
 struct Cell {
     int x, y;
+    bool operator==(const Cell&) const = default;
 };
 
 struct Falling {
