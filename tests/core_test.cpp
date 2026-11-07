@@ -760,6 +760,20 @@ static void testRandomPlay() {
     assert(during == 0);
 }
 
+// A hold whose spawn is blocked ends the game and leaves the hold slot as it was.
+static void testHoldTopOut() {
+    Game g(Ruleset{}, Handling{}, 1);
+    g.hold = Piece::T;
+    g.falling.piece = Piece::I;
+    place(g, Piece::I, 0, 3, 5);
+    for (int y = 18; y < 24; y++) {
+        for (int x = 0; x < kBoardWidth; x++) g.board.at(x, y) = Piece::Garbage;
+    }
+    tap(g, Action::Hold);
+    assert(g.toppedOut);
+    assert(g.hold == Piece::T);
+}
+
 // Delivers garbage from sender 9 and confirms it on this tick.
 static void receive(Game& g, int iid, int amount, int ackIid = 0) {
     const GarbageEvent e[] = {{GarbageEvent::Arrive, 9, iid, ackIid, amount}, {GarbageEvent::Confirm, 9, iid}};
@@ -846,6 +860,24 @@ static void testGarbageQueue() {
     assert(holeIn(holes, 2) == first);
     assert(holeIn(holes, 1) == first);
     assert(holeIn(holes, 0) == second);
+
+    // Older rounds draw nothing when a cancel finishes a batch.
+    Ruleset older;
+    older.cancelMovesHole = false;
+    Rng olderRng(seed);
+    const int olderFirst = static_cast<int>(std::floor(olderRng.nextFloat() * kBoardWidth));
+    Game legacy(older, Handling{}, seed);
+    receive(legacy, 1, 1);
+    receive(legacy, 2, 1);
+    dropQuad(legacy);
+    run(legacy, 30);
+    tap(legacy, Action::HardDrop);
+    assert(garbageRows(legacy) == 0);
+    receive(legacy, 3, 1);
+    run(legacy, 30);
+    tap(legacy, Action::HardDrop);
+    assert(garbageRows(legacy) == 1);
+    assert(holeIn(legacy, 0) == olderFirst);
 
     // A copy carries the queue and the column, and plays on identically.
     Game original(rules, Handling{}, seed);
@@ -945,6 +977,7 @@ int main() {
     testFillGarbage();
     testGarbageQueue();
     testRespawn();
+    testHoldTopOut();
     testHold();
     testIrsIhs();
     testSafelock();

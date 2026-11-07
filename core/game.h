@@ -100,6 +100,7 @@ struct Ruleset {
     int openerPhase = 0;  // for this many pieces an attack cancels up to twice its value
     double messinessChange = 1;  // chance the hole moves between batches of garbage
     double messinessInner = 0;   // chance the hole moves between rows of a batch
+    bool cancelMovesHole = true;  // false before TETR.IO's 2025-05-06 change
 };
 
 struct Board {

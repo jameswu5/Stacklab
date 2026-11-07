@@ -288,6 +288,8 @@ void Game::holdPiece() {
     } else {
         nextPiece(true);
     }
+    // TETR.IO's recorded end states keep the old hold when holding ends the game.
+    if (toppedOut) hold = held;
 }
 
 void Game::rotate(int amount) {
@@ -476,7 +478,7 @@ int Game::cancelGarbage(int amount) {
     while ((send > 0 || cancel > 0) && !incoming_.empty()) {
         if (--incoming_.front().amount <= 0) {
             incoming_.erase(incoming_.begin());
-            if (garbageRng_.nextFloat() < rules.messinessChange) {
+            if (rules.cancelMovesHole && garbageRng_.nextFloat() < rules.messinessChange) {
                 rerollColumn();
                 columnChanged_ = true;
             }
