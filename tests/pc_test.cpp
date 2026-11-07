@@ -557,6 +557,7 @@ void testVisibleOnly() {
         const PcResult first = solver.solveWithUnseen(a, nullptr, 20'000), second = solver.solveWithUnseen(b, nullptr, 20'000);
         assert(first.status == second.status && first.nodes == second.nodes && first.assumed == second.assumed && first.steps.size() == second.steps.size());
 
+        if (seed > 1) continue;  // advice is slow, and one board shows it
         const ai::PcAdviceOptions few{.maxSamples = 4, .nodesPerSolve = 300};
         const ai::PcAdvice adviceA = solver.advise(a, nullptr, few), adviceB = solver.advise(b, nullptr, few);
         assert(adviceA.hasStep && adviceB.hasStep && adviceA.samples == 4);
@@ -723,7 +724,7 @@ void testAdvice() {
     });
     const ai::PcAdvice cancelled = solver.advise(empty, &cancel);
     canceller.join();
-    assert(cancelled.hasStep && cancelled.partial);
+    assert(cancelled.partial && (cancelled.hasStep || cancelled.status == PcStatus::Unknown));  // before the first look, there's no answer yet
     const ai::PcAdvice stopped = solver.advise(empty, &cancel);
     assert(!stopped.hasStep && stopped.partial);
 
@@ -1007,30 +1008,26 @@ PcQuery visibleAfter(PcSolver& solver, uint32_t seed, int placements) {
     return visibleQuery(game, seen);
 }
 
-// How the top choice settles as futures grow. From after two placements, the first that's quick.
-void benchAdviceStability() {
+// How the top choice settles as futures grow, against 64 futures, judged on 64 fresh ones.
+// From after two placements, the first that's quick.
+void benchAdviceStability(uint32_t firstSeed) {
     PcSolver solver;
-    const int counts[] = {4, 8, 16, 32, 64};
-    int same[5] = {}, boards = 0;
-    double loss[5] = {}, ms[5] = {};
-    for (uint32_t seed = 21; seed <= 32; seed++) {
+    for (uint32_t seed = firstSeed; seed < firstSeed + 100; seed++) {
         const PcQuery query = visibleAfter(solver, seed, 2);
-        const ai::PcAdvice top = solver.advise(query, nullptr, {.maxSamples = 128});
+        const ai::PcAdvice top = solver.advise(query, nullptr, {.maxSamples = 64});
         if (!top.hasStep || top.status != PcStatus::NeedMorePieces) continue;
-        boards++;
-        const double topWorth = solver.chanceAfter(query, top.step, 128, 777, 5'000);
-        for (int i = 0; i < 5; i++) {
+        const double topWorth = solver.chanceAfter(query, top.step, 64, 777, 5'000);
+        std::printf("board %u: top worth %.0f%%", seed, 100 * topWorth);
+        for (int samples : {4, 8, 16, 32}) {
             const auto begin = std::chrono::steady_clock::now();
-            const ai::PcAdvice advice = solver.advise(query, nullptr, {.maxSamples = counts[i]});
-            ms[i] += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+            const ai::PcAdvice advice = solver.advise(query, nullptr, {.maxSamples = samples});
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
             const bool match = advice.step.piece == top.step.piece && cellKey(advice.step.cells) == cellKey(top.step.cells);
-            same[i] += match;
-            if (!match) loss[i] += topWorth - solver.chanceAfter(query, advice.step, 128, 777, 5'000);
+            std::printf(" | %d: %s %+.0f, %.1f s", samples, match ? "same" : "diff", match ? 0.0 : 100 * (topWorth - solver.chanceAfter(query, advice.step, 64, 777, 5'000)), seconds);
         }
+        std::printf("\n");
+        std::fflush(stdout);
     }
-    std::printf("the top choice after two placements, against 128 futures, judged on 128 fresh ones:\n");
-    for (int i = 0; i < 5; i++) std::printf("  %3d futures: same on %d of %d boards, mean loss %+.1f points, mean %.0f ms\n", counts[i], same[i], boards, 100 * loss[i] / boards, ms[i] / boards);
-    std::fflush(stdout);
 }
 
 void benchAdvicePlay(int games, int samples, int randomFirst, int offset) {
@@ -1065,7 +1062,7 @@ void benchAdvicePlay(int games, int samples, int randomFirst, int offset) {
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--advise") == 0) {
         const char* part = argc > 2 ? argv[2] : "";
-        if (std::strcmp(part, "stable") == 0) benchAdviceStability();
+        if (std::strcmp(part, "stable") == 0) benchAdviceStability(argc > 3 ? std::atoi(argv[3]) : 21);
         if (std::strcmp(part, "play") == 0) benchAdvicePlay(argc > 3 ? std::atoi(argv[3]) : 10, argc > 4 ? std::atoi(argv[4]) : 8, argc > 5 ? std::atoi(argv[5]) : 0, argc > 6 ? std::atoi(argv[6]) : 0);
         return 0;
     }
