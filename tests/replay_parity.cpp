@@ -416,8 +416,9 @@ enum class Skip { No, GarbageStub, NeverStarted };
 // stats. League rounds also store the final game in their `end` event; solo .ttr
 // files don't, so for those the board can't be checked directly. Solo stats also
 // report 0 attack, so sends only get checked on replays with garbage on. Recorded
-// garbage arrivals are fed in directly, since they depend on the other player.
-std::optional<std::string> playReplay(const json& replay, const std::string& date, Skip& skip) {
+// garbage arrivals are fed in directly, since they depend on the other player. That
+// player's arrivals also record this player's sends, which checks attack lock by lock.
+std::optional<std::string> playReplay(const json& replay, const json* opponent, const std::string& date, Skip& skip, long& sendsCompared) {
     const json* endEvent = nullptr;
     std::vector<Input> inputs;
     std::vector<Garbage> garbage;
@@ -501,9 +502,28 @@ std::optional<std::string> playReplay(const json& replay, const std::string& dat
     std::map<std::string, int> clears;
     int topB2b = -1, topCombo = -1, finishFrame = -1;
     const int objectiveLines = options.value("objective_type", std::string()) == "lines" ? options.value("objective_count", 0) : 0;
+    std::vector<int> wantSends;
+    if (opponent) {
+        for (const json& e : (*opponent)["events"]) {
+            if (e["type"] == "ige" && e["data"]["type"] == "interaction" && e["data"].contains("data") && e["data"]["data"]["type"] == "garbage") {
+                wantSends.push_back(e["data"]["data"]["amt"]);
+            }
+        }
+    }
+    size_t nextSend = 0;
+    std::string sendMismatch;
     size_t next = 0, nextGarbage = 0;
     const auto playTick = [&](int frame) {
         for (const core::LockResult& lock : step(game, inputs, next, frame, garbage, &nextGarbage)) {
+            for (int send : lock.sent) {
+                if (send == 0) continue;
+                // Sends after the opponent's game ended never arrived.
+                if (nextSend < wantSends.size() && wantSends[nextSend] != send && sendMismatch.empty()) {
+                    sendMismatch = "  send " + std::to_string(nextSend) + " on frame " + std::to_string(frame) + ": want " +
+                                   std::to_string(wantSends[nextSend]) + " got " + std::to_string(send) + "\n";
+                }
+                nextSend++;
+            }
             topB2b = std::max(topB2b, lock.b2b);
             topCombo = std::max(topCombo, lock.combo);
             countClear(clears, lock);
@@ -526,7 +546,9 @@ std::optional<std::string> playReplay(const json& replay, const std::string& dat
         if (peek.toppedOut) playTick(endFrame);
     }
 
-    std::string diffs;
+    std::string diffs = sendMismatch;
+    if (nextSend < wantSends.size()) diffs += "  sends: want " + std::to_string(wantSends.size()) + " got " + std::to_string(nextSend) + "\n";
+    sendsCompared += std::min(nextSend, wantSends.size());
     const auto stat = [&](const std::string& name, int want, int got) {
         if (want != got) diffs += "  " + name + ": want " + std::to_string(want) + " got " + std::to_string(got) + "\n";
     };
@@ -548,6 +570,10 @@ std::optional<std::string> playReplay(const json& replay, const std::string& dat
         stat("sent", s["garbage"]["sent"], game.stats.garbageSent);
         stat("received", s["garbage"]["received"], game.stats.garbageReceived);
         stat("cleared", s["garbage"]["cleared"], game.stats.garbageCleared);
+        const std::string reason = data.value("gameoverreason", std::string());
+        if (!reason.empty() && (reason == "topout" || reason == "garbagesmash") != game.toppedOut) {
+            diffs += "  ended by " + reason + (game.toppedOut ? " but core topped out\n" : " but core is still alive\n");
+        }
     }
     if (objectiveLines > 0) stat("finish frame", endFrame, finishFrame);
 
@@ -613,6 +639,7 @@ int runReplays(const fs::path& folder) {
     std::sort(files.begin(), files.end());
 
     int passed = 0, failed = 0, skippedGarbage = 0, neverStarted = 0;
+    long sendsCompared = 0;
     for (const fs::path& path : files) {
         const std::string name = fs::relative(path, folder).string();
         const auto fail = [&](const std::string& label, const std::string& why) {
@@ -644,12 +671,18 @@ int runReplays(const fs::path& folder) {
         const json& replay = top["replay"];
 
         // .ttr holds one game in `replay`; .ttrm holds rounds of players.
-        std::vector<std::pair<std::string, const json*>> rounds;
+        struct Round {
+            std::string label;
+            const json* replay;
+            const json* opponent = nullptr;
+        };
+        std::vector<Round> rounds;
         if (replay.contains("rounds")) {
             for (size_t r = 0; r < replay["rounds"].size(); r++) {
                 const json& players = replay["rounds"][r];
                 for (size_t p = 0; p < players.size(); p++) {
-                    rounds.push_back({name + " round " + std::to_string(r) + " player " + std::to_string(p), &players[p]["replay"]});
+                    rounds.push_back({name + " round " + std::to_string(r) + " player " + std::to_string(p), &players[p]["replay"],
+                                      players.size() == 2 ? &players[1 - p]["replay"] : nullptr});
                 }
             }
         } else if (replay.contains("events")) {
@@ -659,9 +692,9 @@ int runReplays(const fs::path& folder) {
             continue;
         }
 
-        for (const auto& [label, round] : rounds) {
+        for (const auto& [label, round, opponent] : rounds) {
             Skip skip = Skip::No;
-            const auto m = playReplay(*round, top.value("ts", std::string()), skip);
+            const auto m = playReplay(*round, opponent, top.value("ts", std::string()), skip, sendsCompared);
             if (skip == Skip::GarbageStub) skippedGarbage++;
             else if (skip == Skip::NeverStarted) neverStarted++;
             else if (m) fail(label, *m);
@@ -672,7 +705,7 @@ int runReplays(const fs::path& folder) {
         }
     }
     std::cout << folder.filename().string() << " (TETR.IO recorded results): " << passed << " passed, " << failed << " failed, "
-              << skippedGarbage << " skipped for incoming garbage, " << neverStarted << " skipped as never started\n";
+              << skippedGarbage << " skipped with garbage stripped, " << neverStarted << " skipped as never started, " << sendsCompared << " sends compared\n";
     return failed ? 1 : 0;
 }
 

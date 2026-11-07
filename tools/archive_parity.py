@@ -19,7 +19,7 @@ BATCH_FILES = 60
 WORKERS = 6
 
 runner, archive, temp, output = sys.argv[1:5]
-totals = [0, 0, 0, 0]
+totals = [0, 0, 0, 0, 0]
 lock = Lock()
 slots = BoundedSemaphore(WORKERS)
 out = open(output, "w", errors="replace")
@@ -28,14 +28,14 @@ out = open(output, "w", errors="replace")
 def run(folder):
     result = subprocess.run([runner, str(folder)], capture_output=True, text=True, errors="replace")
     lines = result.stdout.splitlines()
-    summary = re.search(r": (\d+) passed, (\d+) failed, (\d+) skipped.*?, (\d+) skipped", lines[-1]) if lines else None
+    summary = re.search(r": (\d+) passed, (\d+) failed, (\d+) skipped.*?, (\d+) skipped.*?, (\d+) sends", lines[-1]) if lines else None
     with lock:
         out.write("\n".join(line for line in lines if not line.startswith("PASS")) + "\n")
         if result.returncode not in (0, 1) or not summary:
             out.write(f"CRASH {folder.name}: exit {result.returncode}\n{result.stderr[-500:]}\n")
             totals[1] += 1
         else:
-            for i in range(4):
+            for i in range(5):
                 totals[i] += int(summary.group(i + 1))
         out.flush()
     shutil.rmtree(folder)
@@ -61,4 +61,4 @@ with ThreadPoolExecutor(WORKERS) as pool, tarfile.open(archive, "r|gz") as tar:
     if batch is not None:
         pool.submit(run, batch)
 
-print(f"{count} files: {totals[0]} passed, {totals[1]} failed, {totals[2]} skipped for garbage stubs, {totals[3]} skipped as never started")
+print(f"{count} files: {totals[0]} passed, {totals[1]} failed, {totals[2]} skipped with garbage stripped, {totals[3]} skipped as never started, {totals[4]} sends compared")
