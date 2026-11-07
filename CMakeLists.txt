@@ -17,7 +17,7 @@ target_link_libraries(ai PUBLIC core)
 
 find_package(SDL3 REQUIRED)
 find_package(SDL3_ttf REQUIRED)
-add_executable(stacklab app/main.cpp app/play.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
+add_executable(stacklab app/main.cpp app/play.cpp app/pc_coach.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(stacklab PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json objc)
 add_custom_command(TARGET stacklab POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:stacklab>/assets
@@ -44,7 +44,7 @@ add_executable(pc_test tests/pc_test.cpp)
 target_link_libraries(pc_test PRIVATE ai)
 add_test(NAME pc_test COMMAND pc_test)
 
-add_executable(app_test tests/app_test.cpp app/play.cpp app/settings.cpp modes/drill.cpp)
+add_executable(app_test tests/app_test.cpp app/play.cpp app/pc_coach.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(app_test PRIVATE ai SDL3::SDL3 nlohmann_json::nlohmann_json)
 add_test(NAME app_test COMMAND app_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads data/drills
 

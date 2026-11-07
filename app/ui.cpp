@@ -388,7 +388,7 @@ void Ui::results(const PlayView& view) {
     const RunResult& run = view.history.back();
     const bool finesse = (view.mode->stats & StatFinesse) && view.faults;
     constexpr float width = 300, x = kBoardX + 190 - width / 2;
-    const float height = finesse ? 422 : 346, top = kBoardY + 380 - height / 2;
+    const float height = view.pc ? 562 : finesse ? 422 : 346, top = kBoardY + 380 - height / 2;
     fill(x, top, width, height, colors.card, 24);
     const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : "Finished";
     text(FontWord, title, x + width / 2, top + 42, colors.text, Align::Center);
@@ -411,8 +411,23 @@ void Ui::results(const PlayView& view) {
         statRow(x + 24, y, width - 48, "Most faults", buffer);
         y += 38;
     }
-    formatRank(buffer, *view.mode, view.best);
-    statRow(x + 24, y, width - 48, "Best", view.best > 0 ? buffer : "-");
+    if (view.pc) {
+        std::snprintf(buffer, sizeof buffer, "%d / %d", view.pc->pcs, kPcGoal);
+        statRow(x + 24, y, width - 48, "Perfect clears", buffer);
+        y += 38;
+        std::snprintf(buffer, sizeof buffer, "%d", view.pc->bestPcs);
+        statRow(x + 24, y, width - 48, "Best", buffer);
+        y += 38;
+        fill(x + 24, y, width - 48, 1, colors.line);
+        text(FontSmall, "By bag phase, over all runs", x + 24, y + 22, colors.muted);
+        for (int phase = 0; phase < 7; phase++) {
+            std::snprintf(buffer, sizeof buffer, "%d: %d of %d", phase, view.pc->tally.successes[phase], view.pc->tally.attempts[phase]);
+            text(FontSmall, buffer, x + 24 + (phase % 2) * 126, y + 44 + (phase / 2) * 20.0f, colors.text);
+        }
+    } else {
+        formatRank(buffer, *view.mode, view.best);
+        statRow(x + 24, y, width - 48, "Best", view.best > 0 ? buffer : "-");
+    }
     text(FontSmall, view.hint, x + width / 2, top + height - 16, colors.muted, Align::Center);
 }
 
@@ -478,6 +493,34 @@ void Ui::drawDrills(int selected, std::span<const Drill> drills, const char* err
     text(FontSmall, error ? error : "Up and down choose, Enter starts, Esc goes back", 720, top + height - 17, colors.muted, Align::Center);
 }
 
+// Always the same lines, so the card doesn't jump as the answers change.
+void Ui::coachRows(const PcView& pc, float y, bool over) {
+    const Palette& colors = palette();
+    const float x = kLeftX + 20, width = kColumnW - 40;
+    if (!over) {
+        fill(x, y, width, 1, colors.line);
+        text(FontValue, pc.status, x, y + 24, colors.text);
+        text(FontSmall, pc.detail, x, y + 42, colors.muted);
+        if (pc.alert) {
+            fill(kLeftX + 10, y + 49, kColumnW - 20, 22, colors.pieces[static_cast<int>(core::Piece::Z)], 8, 0.22f);
+            text(FontSmall, pc.alert, x, y + 64, colors.text);
+        }
+        text(FontSmall, pc.hintLine, x, y + 86, colors.muted);
+        y += 98;
+    }
+    char buffer[32];
+    std::snprintf(buffer, sizeof buffer, "%d / %d", pc.pcs, kPcGoal);
+    statRow(x, y, width, "Perfect clears", buffer);
+    y += 38;
+    std::snprintf(buffer, sizeof buffer, "%d", pc.streak);
+    statRow(x, y, width, "Streak", buffer);
+    y += 38;
+    if (pc.outOfReach) {
+        std::snprintf(buffer, sizeof buffer, "%d is out of reach this run", kPcGoal);
+        text(FontSmall, buffer, x, y + 18, colors.muted);
+    }
+}
+
 void Ui::drawPlay(const PlayView& view) {
     const Palette& colors = palette();
     const core::Game& game = *view.game;
@@ -488,7 +531,8 @@ void Ui::drawPlay(const PlayView& view) {
 
     int statCount = 0;
     for (const auto& row : kStatRows) statCount += (view.mode->stats & row.stat) != 0;
-    card(kLeftX, 215, kColumnW, 131 + statCount * 38.0f, "TIME");
+    const float coachHeight = !view.pc ? 0 : view.over ? 106 : 204;
+    card(kLeftX, 215, kColumnW, 131 + statCount * 38.0f + coachHeight, "TIME");
     char buffer[32];
     formatTime(buffer, view.seconds);
     text(FontTime, buffer, kLeftX + 20, 303, colors.text, Align::Left, kTimeTracking);
@@ -504,6 +548,7 @@ void Ui::drawPlay(const PlayView& view) {
         statRow(kLeftX + 20, rowY, kColumnW - 40, row.name, buffer);
         rowY += 38;
     }
+    if (view.pc) coachRows(*view.pc, rowY, view.over);
 
     fill(kBoardCardX, kRowY, 408, 788, colors.card, 28);
     fill(kBoardX, kBoardY, 380, 760, colors.boardBackground, 8);
@@ -541,6 +586,9 @@ void Ui::drawPlay(const PlayView& view) {
             for (const core::Cell& c : target.cells) block(c.x, c.y, colors.pieces[static_cast<int>(target.piece)], colors.ghostAlpha * 0.5f);
         }
     }
+    if (view.pc && view.pc->showHint) {
+        for (const core::Cell& c : view.pc->hintCells) block(c.x, c.y, colors.pieces[static_cast<int>(view.pc->hintPiece)], colors.ghostAlpha);
+    }
     if (!view.over && game.falling.piece != core::Piece::None) {
         Color color = colors.pieces[static_cast<int>(game.falling.piece)];
         for (const core::Cell& c : game.ghost().cells()) block(c.x, c.y, color, colors.ghostAlpha);
@@ -564,14 +612,14 @@ void Ui::drawPlay(const PlayView& view) {
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {
     const Palette& colors = palette();
     topBar("Settings");
-    constexpr float width = 560, rowH = 32, x = (1440 - width) / 2, firstRow = kRowY + 20;
+    constexpr float width = 560, rowH = 31, x = (1440 - width) / 2, firstRow = kRowY + 20;
     fill(x, kRowY, width, 788, colors.card, 24);
     for (int row = 0; row < kRowCount; row++) {
         float y = firstRow + row * rowH;
         if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 12);
-        text(FontRow, rowLabel(row).c_str(), x + 24, y + 21.5f, colors.muted);
+        text(FontRow, rowLabel(row).c_str(), x + 24, y + 21, colors.muted);
         std::string value = capturing && row == selected ? "Press a key" : rowValue(settings, row);
-        text(FontValue, value.c_str(), x + width - 24, y + 21.5f, colors.text, Align::Right);
+        text(FontValue, value.c_str(), x + width - 24, y + 21, colors.text, Align::Right);
     }
     const char* hint = selected >= RowBindFirst && selected < RowVsync ? "Enter adds a key, Backspace clears, Esc goes back"
                        : selected == RowProfile                       ? "Left and right switch, Enter copies to a new profile, Esc goes back"

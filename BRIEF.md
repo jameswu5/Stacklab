@@ -59,7 +59,7 @@ Dependencies only point downward: `app` → `modes` → `ai` → `core`.
 - **Deterministic core.** The same seed, ruleset, handling and inputs always produce the same game. Replays are those four things. Undo and instant retry are state copies. The bot and solver work on copies on a worker thread.
 - **`Ruleset`.** All rules are data: kick table, gravity, lock settings, bag type, previews, hold, garbage settings. Modes and drills select or override a ruleset.
 - **`Handling`.** Per-profile DAS, ARR, SDF, DCD and the IRS, IHS and safelock options. Values are stored in frames, as in TETR.IO, so settings can be copied across unchanged.
-- **Keybinds.** Named profiles mapping each action to several keys, stored by scancode. OS key repeat is ignored. Actions: left, right, soft drop, hard drop, rotate CW, CCW and 180, hold, retry, undo.
+- **Keybinds.** Named profiles mapping each action to several keys, stored by scancode. OS key repeat is ignored. Actions: left, right, soft drop, hard drop, rotate CW, CCW and 180, hold, retry, menu, undo, PC hint.
 - **Player interface.** A human and a bot produce the same input stream into the same simulation.
 
 ### Timing loop
@@ -131,6 +131,7 @@ struct Mode {
     bool editable = false;           // the mouse edits the board, hold and queue, and topping out clears the board
     bool undo = false;               // the undo key takes back the last piece, clock included
     bool drills = false;             // the menu opens the list of drills, and a run plays the chosen one
+    const char* pcFile = nullptr;    // turns on the PC coach, and holds its record under the pref path
 };
 ```
 
@@ -365,6 +366,8 @@ There are two questions with different costs:
 - **Mistakes teach:** after a fatal placement, the player can undo and retry on the same queue, then see a solution. A new attempt gets a new queue.
 
 **PC coach.** It's the solver, so its answers are exact and tests can check them. For the badge, 10 PCs in 40 lines means no spare lines: every clear is part of a PC, PC heights are even, and a 2-line PC banks lines for a later 6-line one. Each PC starts empty at a different bag position with hold carried over, and with 10 pieces per 4-line PC there are 7 repeating starting phases, so success is measured per phase and as a streak.
+
+The mode is 40L's rules and goal with undo on. A worker thread answers about each piece from what's visible, `maxLines` 4, and the indicator shows "Thinking" until that piece's answer arrives; a step's `hold` means press hold first. A streak ends when an attempt spends more than 4 lines, an attempt counts once its first piece is placed, and PCs, streak and tally roll back with undo. Best and tallies are saved to `pc-coach.json`.
 
 **LST coach.** No simple rule defines a "valid LST" stack, so this is a search with a hand-written evaluation, and it can give confident bad advice. No test can settle it: the owner validates it by playing. Built alongside the bot, as a bot with a different evaluation.
 

@@ -33,6 +33,10 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     missedUntilNs = 0;
     finesse.restart(game);
     faults = {};
+    if (mode->pcFile) {
+        if (!coach) coach = std::make_unique<PcCoach>();
+        coach->start(game);
+    }
     shown = game;
     inputs.clear();
     startNs = runStartNs;
@@ -41,7 +45,7 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     if (mode->undo) {
         if (undoSlots.empty()) {
             undoSlots.reserve(kUndoDepth);
-            for (int i = 0; i < kUndoDepth; i++) undoSlots.push_back({core::Game(core::Ruleset{}, core::Handling{}, 1), 0, {}});
+            for (int i = 0; i < kUndoDepth; i++) undoSlots.push_back({core::Game(core::Ruleset{}, core::Handling{}, 1), 0, {}, {}});
         }
         for (UndoSlot& slot : undoSlots) slot.game.queue.reserve(game.queue.capacity());  // a drill's queue can be long
         undoCount = 0;
@@ -54,6 +58,7 @@ void Play::saveUndo() {
     undoSlots[undoNewest].game = game;
     undoSlots[undoNewest].filled = filled;
     undoSlots[undoNewest].faults = faults;
+    if (mode->pcFile) undoSlots[undoNewest].pc = coach->progress;
     undoCount = std::min(undoCount + 1, kUndoDepth);
 }
 
@@ -69,6 +74,7 @@ void Play::undo(uint64_t timeNs) {
     // Later inputs in the tick that saved the slot may have moved the piece.
     game.respawn(game.falling.piece);
     finesse.restart(game);
+    if (mode->pcFile) coach->rollback(undoSlots[undoNewest].pc, game);
     startNs = timeNs - (game.frame * 1'000'000'000 + core::kTicksPerSecond - 1) / core::kTicksPerSecond;
     // The slot remembers the keys held back then. At subframe 0 these release
     // them before a charged move can act.
@@ -99,6 +105,7 @@ void Play::key(Bind action, bool down, uint64_t timeNs) {
 
 void Play::stepTo(uint64_t nowNs) {
     if (!started && nowNs >= startNs) begin();
+    if (mode->pcFile) coach->poll();
     uint64_t target = tickAt(nowNs > startNs ? nowNs - startNs : 0).tick;
     while (!over && game.frame < target) {
         auto due = inputs.due(game.frame);
@@ -120,7 +127,7 @@ void Play::stepTo(uint64_t nowNs) {
         if (mode->goalLines > 0 && mode->goalProgress(game.stats) >= mode->goalLines) {
             over = true;
             endSeconds = finishSeconds(game, due, locks, progressBefore, *mode);
-            if (best == 0 || endSeconds < best) {
+            if (mode->bestFile && (best == 0 || endSeconds < best)) {
                 best = endSeconds;
                 saveBest(best, bestPath);
             }
@@ -136,6 +143,10 @@ void Play::stepTo(uint64_t nowNs) {
         inputs.consume(due.size());
         // A new attempt has its own clock, so the next call picks it up.
         if (drill && judgeDrill(locks, nowNs)) return;
+        if (mode->pcFile) {
+            coach->afterTick(locks, game);
+            if (over) coach->save();  // the run has ended, so file work can't disturb play
+        }
         if (mode->undo && !locks.empty()) saveUndo();
     }
 }

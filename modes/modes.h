@@ -25,15 +25,18 @@ struct Mode {
     bool editable = false;  // the mouse edits the board, hold and queue, and topping out clears the board
     bool undo = false;      // the undo key takes back the last piece, clock included
     bool drills = false;    // the menu opens the list of drills, and a run plays the chosen one
+    const char* pcFile = nullptr;  // turns on the PC coach, and holds its record under the pref path
 
     int goalProgress(const core::Stats& stats) const { return garbageRows > 0 ? stats.garbageCleared : stats.lines; }
     bool bestIsScore() const { return timeLimitSeconds > 0; }
 };
 
+// The owner's 40L replays only differ from core's defaults in noSzo. They pass
+// tests/replay_parity with these rules, so re-check there if they change.
+inline constexpr core::Ruleset k40LRules{.noSzo = true};
+
 inline const Mode kModes[] = {
-    // The owner's 40L replays only differ from core's defaults in noSzo. They pass
-    // tests/replay_parity with these rules, so re-check there if they change.
-    {"40 Lines", "Clear 40 lines as fast as you can", {.noSzo = true}, 40, "best-40l.json"},
+    {"40 Lines", "Clear 40 lines as fast as you can", k40LRules, 40, "best-40l.json"},
     // The owner's Blitz replays pass tests/replay_parity with these rules, score included.
     {.name = "Blitz",
      .blurb = "Score as much as you can in 2 minutes",
@@ -68,5 +71,11 @@ inline const Mode kModes[] = {
      .rules = {},
      .undo = true,
      .drills = true},
+    {.name = "PC coach",
+     .blurb = "40 Lines with a solver beside you, for 10 perfect clears in a run",
+     .rules = k40LRules,
+     .goalLines = 40,
+     .undo = true,
+     .pcFile = "pc-coach.json"},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));
