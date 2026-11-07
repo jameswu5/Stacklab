@@ -99,6 +99,14 @@ bool PcSolver::place(const State& state, int lines, int placementsLeft, size_t n
         if (std::none_of(candidates.begin(), candidates.end(), [&](const Candidate& seen) { return seen.id == candidate.id; })) candidates.push_back(candidate);
     }
 
+    // Low placements first: a perfect clear fills from the bottom, so this finds one sooner.
+    auto height = [](const Candidate& candidate) {
+        int sum = 0;
+        for (const core::Cell& cell : candidate.cells) sum += cell.y;
+        return sum;
+    };
+    std::stable_sort(candidates.begin(), candidates.end(), [&](const Candidate& a, const Candidate& b) { return height(a) < height(b); });
+
     for (const Candidate& candidate : candidates) {
         State after = state;
         bool fits = true;

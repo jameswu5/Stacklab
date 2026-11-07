@@ -1020,6 +1020,8 @@ void benchAdviceTime(int samples) {
             unknown += advice.unknownSamples;
             total += advice.samples;
             proven += advice.status == PcStatus::Found;
+            std::printf("    seed %u: %.0f ms, %.0f%%, %d futures\n", seed, ms.back(), 100 * advice.chance, advice.samples);
+            std::fflush(stdout);
         }
         std::sort(ms.begin(), ms.end());
         std::printf("  after %d placements: median %8.0f ms, worst %8.0f ms; mean chance %3.0f%%, %d proven of %zu, %d of %d futures out of nodes\n", placements, ms[ms.size() / 2], ms.back(), 100 * chances / ms.size(), proven, ms.size(), unknown, total);
