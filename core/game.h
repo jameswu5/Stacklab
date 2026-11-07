@@ -210,6 +210,9 @@ struct Game {
     // leaving holdUsed alone. Tops out again if the spawn is still blocked.
     void respawn(Piece piece);
 
+    // Takes the next piece off the queue, keeping the previews full.
+    Piece deal();
+
     // Where the falling piece would land.
     Falling ghost() const;
 

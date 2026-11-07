@@ -9,6 +9,13 @@
 // Which rows a mode's stats card shows, as flags.
 enum Stat { StatLines = 1, StatPieces = 2, StatPPS = 4, StatKPP = 8, StatAPM = 16, StatAPP = 32, StatFinesse = 64, StatScore = 128, StatLevel = 256, StatGarbage = 512 };
 
+// What a mode with pcFile does with it.
+enum class PcStyle {
+    Coach,     // a whole run with the solver beside you
+    Practice,  // one PC from a chosen bag residue
+    Count,     // a whole run with no solver: the player keeps count of the bag
+};
+
 struct Mode {
     const char* name;   // on the menu and in the top bar
     const char* blurb;  // under the name on the menu
@@ -26,6 +33,7 @@ struct Mode {
     bool undo = false;      // the undo key takes back the last piece, clock included
     bool drills = false;    // the menu opens the list of drills, and a run plays the chosen one
     const char* pcFile = nullptr;  // turns on the PC coach, and holds its record under the pref path
+    PcStyle pcStyle = PcStyle::Coach;
 
     int goalProgress(const core::Stats& stats) const { return garbageRows > 0 ? stats.garbageCleared : stats.lines; }
     bool bestIsScore() const { return timeLimitSeconds > 0; }
@@ -77,5 +85,17 @@ inline const Mode kModes[] = {
      .goalLines = 40,
      .undo = true,
      .pcFile = "pc-coach.json"},
+    {.name = "PC practice",
+     .blurb = "One PC from the bag residue you pick",
+     .rules = k40LRules,
+     .undo = true,
+     .pcFile = "pc-coach.json",
+     .pcStyle = PcStyle::Practice},
+    {.name = "Bag count",
+     .blurb = "40 Lines with no solver, for 10 perfect clears: keep count of the bag",
+     .rules = k40LRules,
+     .goalLines = 40,
+     .pcFile = "pc-count.json",
+     .pcStyle = PcStyle::Count},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));

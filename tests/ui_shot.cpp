@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         ui.beginFrame();
         const std::array<double, kModeCount> bests{60.824};
-        ui.drawMenu(0, bests);
+        ui.drawMenu(dark ? 7 : 0, bests, 3);
         SDL_FlushRenderer(renderer);
         SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-dark.png" : "/menu-light.png")).c_str());
@@ -235,6 +235,25 @@ int main(int argc, char** argv) {
         shot(killed, false, "killed", dark);
         shot(thinking, false, "possible", dark);
         shot(finished, true, "results", dark);
+    }
+    // PC practice mid-run and its results, then Bag count, then a run that used undo.
+    PcView practice = thinking;
+    practice.goal = 1;
+    practice.residue[0] = '3';
+    practice.pcs = 1;
+    practice.outcome = "Perfect clear";
+    PcView bagCount;
+    bagCount.status = "Keep count";
+    std::snprintf(bagCount.detail, sizeof bagCount.detail, "B shows the bag residue");
+    bagCount.residue[0] = '?';
+    bagCount.pcs = 4;
+    PcView undone = killed;
+    undone.nullified = true;
+    for (bool dark : {false, true}) {
+        shot(practice, false, "practice", dark);
+        shot(practice, true, "practice-results", dark);
+        shot(bagCount, false, "count", dark);
+        shot(undone, false, "undone", dark);
     }
 
     // A drill with one target placed, with the list of drills, in both themes.

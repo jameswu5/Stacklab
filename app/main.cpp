@@ -82,6 +82,7 @@ void startRun(App& app, const Drill* drill, uint64_t timeNs) {
         app.play.coach->path = app.prefPath + mode.pcFile;
         app.play.coach->record = loadPcRecord(app.play.coach->path);
         app.play.coach->hintKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindHint);
+        app.play.coach->bagKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindBag);
     }
 }
 
@@ -91,6 +92,10 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
     switch (key.scancode) {
         case SDL_SCANCODE_UP: app.menuRow = (app.menuRow + rows - 1) % rows; break;
         case SDL_SCANCODE_DOWN: app.menuRow = (app.menuRow + 1) % rows; break;
+        case SDL_SCANCODE_LEFT:
+        case SDL_SCANCODE_RIGHT:
+            if (app.menuRow < kModeCount && kModes[app.menuRow].pcStyle == PcStyle::Practice) app.play.residue = (app.play.residue + (key.scancode == SDL_SCANCODE_LEFT ? 6 : 1)) % 7;
+            break;
         case SDL_SCANCODE_RETURN:
             if (key.repeat) break;
             if (app.menuRow == kModeCount) {
@@ -142,6 +147,8 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
         if (key.down) app.play.undo(key.timestamp);
     } else if (bind == BindHint) {
         if (key.down && app.play.mode->pcFile) app.play.coach->toggleHint();
+    } else if (bind == BindBag) {
+        if (key.down && app.play.mode->pcFile) app.play.coach->progress.residueShown = true;
     } else {
         app.play.key(static_cast<Bind>(bind), key.down, key.timestamp);
     }
@@ -209,7 +216,7 @@ void drawFrame(App& app, Ui& ui) {
     ui.dark = app.settings.dark;
     ui.beginFrame();
     if (app.screen == Screen::Menu) {
-        ui.drawMenu(app.menuRow, app.bests);
+        ui.drawMenu(app.menuRow, app.bests, app.play.residue);
     } else if (app.screen == Screen::Drills) {
         ui.drawDrills(app.drillRow, app.drillSet.drills, app.drillError.empty() ? nullptr : app.drillError.c_str());
     } else if (app.screen == Screen::Settings) {

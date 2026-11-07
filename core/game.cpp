@@ -229,11 +229,15 @@ void Game::pushBag() {
     queue.insert(queue.end(), bag, bag + 7);
 }
 
-void Game::nextPiece(bool isHold) {
+Piece Game::deal() {
     while (static_cast<int>(queue.size()) <= rules.previews) pushBag();
     const Piece piece = queue.front();
     queue.erase(queue.begin());
-    spawn(piece, isHold);
+    return piece;
+}
+
+void Game::nextPiece(bool isHold) {
+    spawn(deal(), isHold);
 }
 
 // Without ARE a piece is never asleep, so IRS and IHS only act in hold mode.
