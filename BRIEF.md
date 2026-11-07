@@ -255,9 +255,18 @@ Larger clears add 1 per line, or 2 per line with a spin.
 
 **Perfect clear.** Appends `round(pcGarbage * multiplier)` after the normal attack.
 
-**Cancelling.** Each attack cancels the oldest incoming garbage first, and any remainder is sent. During the opener phase (`pieces + 1 <= openerPhase`, while incoming is at least the amount sent so far), an attack can cancel up to twice its value. The first portion reduces what's sent as normal; the extra portion only removes incoming garbage. Replays from before 2025-02-16 use an opener limit one lower, so fixtures should be newer than that.
+**Cancelling.** Each attack cancels the oldest incoming garbage first, and any remainder is sent. During the opener phase (`pieces + 1 <= openerPhase`, while incoming is at least the amount sent so far), an attack can cancel up to twice its value. The first portion reduces what's sent as normal; the extra portion only removes incoming garbage. Replays from before 2025-02-16 use an opener limit one lower; none of ours are that old, so core doesn't implement it.
 
-**Garbage columns.** Hole position rerolls using `messiness_change` and `messiness_inner`, consuming RNG in a fixed order. Port this path carefully, since RNG drift breaks every later row. Also port rounding, cap, delay and blocking behaviour.
+**Garbage columns.** Hole position rerolls using `messiness_change` and `messiness_inner`, consuming RNG in a fixed order, since RNG drift breaks every later row. Before 2025-05-06 15:00 UTC-4, a cancel that finishes a batch draws nothing; 85.6% of older rounds fail without this.
+
+**Where TETR.IO differs from Triangle.** Each of these comes from recorded TETR.IO results, and core follows TETR.IO:
+
+- Garbage rises in arrival order. Triangle sorts by confirm frame, which gives rows the wrong holes when confirms come out of order.
+- A successful shift or a hold clears spin status. Triangle keeps it, which counts false minis and T-spin singles.
+- A hold that tops out leaves the hold slot as it was.
+- TETR.IO's `received` stat counts what's left of a batch when it's confirmed, risen or not.
+
+The `end` event records `garbagemultiplier` as it stood at the end of the round, so the runner backs out the starting value.
 
 **Spins.** Default is `all-mini+`: the higher of normal T-spin detection and all-spin detection, where an all-spin counts as a mini. Rotation uses the SRS+ kick data, including the 180 kicks.
 
@@ -272,27 +281,34 @@ What each source can check:
 | Source | Compared | Agrees with | Can't check |
 |---|---|---|---|
 | Solo `.ttr` | Pieces, lines, every clear type, B2B, combo, level, score, and the 40L finish frame | TETR.IO | Boards, because none is recorded; attack, because it's recorded as 0 |
-| League `.ttrm`, the owner's and Triangle's archive | Final board, hold, next 5, falling piece, stats, score and total attack, from the `end` event | TETR.IO | Rounds with incoming garbage, which are skipped until phase 6; attack per lock, because only the total is recorded; where a mismatch began |
+| League `.ttrm` and `.ttrmx`, the owner's and Triangle's archive | Final board, hold, next 5, falling piece, stats, score, attack, sent, received, garbage cleared and cause of death from the `end` event, plus every send against the opponent's recorded arrivals | TETR.IO | Boards mid-round; garbage that's still queued at the end; sends after the opponent's game ended |
 | `.ttrm` rounds replayed through Triangle (`gen_fixtures.mjs --replay`, stays local) | Every lock: piece, lines, spin, perfect clear, each send, B2B, combo, board | Triangle only | Anything Triangle gets wrong; `no_szo`; levels |
 | `tests/fixtures/*.json` from `gen_fixtures.mjs` | Every lock, the end state, and each tick's piece position where traced | Triangle only | Same as above |
 | Hand-derived fixtures | Every lock | Our reading of Triangle's source | Anything about TETR.IO |
 
-The archive isn't part of `ctest`, so run it by hand: `tools/unpack_archive.mjs`, then `replay_parity replay-archive/unpacked`.
+The archive isn't part of `ctest`, so run it by hand: `tools/archive_parity.py <replay_parity> replay-archive/replays.tar.gz <temp folder> <output file>`. It streams the tarball through the runner in batches, so about 300 MB is on disk at a time, and it doesn't run any of Triangle's code. `replay-archive/unpacked` has its garbage rounds stripped, so it only checks the 1,053 rounds without garbage.
 
 A skipped round is not a pass. Results, using Triangle `@haelp/teto@4.2.8`:
 
 | Set | Checked | Passed | Failed | Skipped |
 |---|---|---|---|---|
-| The owner's replays against TETR.IO | 7 | 7 | 0 | 77 for garbage |
-| Archive against TETR.IO, 5,220 files | 1,053 | 1,053 | 0 | 109,648 for garbage, 61 never started |
-| The same 1,053 rounds per lock against Triangle, 36,390 locks | 1,053 | 1,053 | 0 | None |
+| The owner's replays against TETR.IO, 1,717 sends | 84 | 84 | 0 | None |
+| Archive against TETR.IO, 5,220 files, 2,497,056 sends | 110,701 | 110,693 | 8 | 61 never started |
+| The 1,053 garbage-free archive rounds per lock against Triangle, 36,390 locks | 1,053 | 1,053 | 0 | None |
 | Generated fixtures against Triangle | 787 | 787 | 0 | None |
+
+**The 8 exceptions.** All are on the final tick of a round, and in all 8 every send up to there matches. The cause of each isn't established, and no rule was fitted to them:
+
+- **4 score only**, by 1 to 18 points, with the same board. These look like drop points on a tick TETR.IO stopped partway through.
+- **3 garbage smash deaths where core stays alive.** On the lock that killed the player, TETR.IO has more rows on the board than core: in the clearest case, 13 rows rise where the cap of 8 should hold 5 of them back. Core has no garbage smash rule beyond a blocked spawn. It gets the other 49,225 smash deaths right.
+- **1 garbage smash death with the same row count** but different holes in one older block of rows, and 6 extra drop points.
 
 Still unchecked:
 
-- **Incoming garbage:** cancelling, garbage columns, blocking and the opener phase. Only about 1% of archive rounds can be checked, and they're short, one-sided games averaging 12 seconds.
-- **Against TETR.IO:** mini quad and spin quad, score or attack; RNG rounding; special bonus; multiplier growth. The last three agree with Triangle only.
+- **Options no replay uses:** `core` has no support for garbage hole size, absolute cap, `messiness_timeout`, `messiness_nosame`, `messiness_center`, or passthrough other than `zero`, and `unsupported()` rejects replays that use them. The cap never grows and `messiness_inner` is always 0 in these replays, so those paths have only a hand-worked check or none.
+- **Against TETR.IO:** mini quad and spin quad, score or attack; RNG rounding.
 - **Against anything:** a spin quad. `tests/fixtures/` has no I-piece spin and no mini double, though the archive replays contain 173 mini doubles.
+- **More than two players:** garbage targets one opponent, and sends are only compared in two-player rounds.
 
 Files live in `replays/` and `replay-archive/`, which are gitignored because they include usernames or players' inputs.
 

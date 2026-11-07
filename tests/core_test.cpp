@@ -760,6 +760,226 @@ static void testRandomPlay() {
     assert(during == 0);
 }
 
+// A hold whose spawn is blocked ends the game and leaves the hold slot as it was.
+static void testHoldTopOut() {
+    Game g(Ruleset{}, Handling{}, 1);
+    g.hold = Piece::T;
+    g.falling.piece = Piece::I;
+    place(g, Piece::I, 0, 3, 5);
+    for (int y = 18; y < 24; y++) {
+        for (int x = 0; x < kBoardWidth; x++) g.board.at(x, y) = Piece::Garbage;
+    }
+    tap(g, Action::Hold);
+    assert(g.toppedOut);
+    assert(g.hold == Piece::T);
+}
+
+// Delivers garbage from sender 9 and confirms it on this tick.
+static void receive(Game& g, int iid, int amount, int ackIid = 0) {
+    const GarbageEvent e[] = {{GarbageEvent::Arrive, 9, iid, ackIid, amount}, {GarbageEvent::Confirm, 9, iid}};
+    g.tick({}, e);
+}
+
+static int holeIn(const Game& g, int y) {
+    int hole = -1;
+    for (int x = 0; x < kBoardWidth; x++) {
+        if (g.board.at(x, y) == Piece::Garbage) continue;
+        assert(hole == -1);
+        hole = x;
+    }
+    return hole;
+}
+
+static int garbageRows(const Game& g) {
+    int rows = 0;
+    while (g.board.at(0, rows) == Piece::Garbage || g.board.at(1, rows) == Piece::Garbage) rows++;
+    return rows;
+}
+
+// Sets up a quad, which attacks for 4 when it locks.
+static void dropQuad(Game& g) {
+    fillExcept(g, 4, {{9, 0}, {9, 1}, {9, 2}, {9, 3}});
+    place(g, Piece::I, 1, 7, 3);
+    tap(g, Action::HardDrop);
+}
+
+static void testGarbageQueue() {
+    const auto locksClean = [](Game& g) { tap(g, Action::HardDrop); };
+    Ruleset rules;
+
+    // Rises 20 frames after its confirm on a hard drop, one later on a natural lock.
+    Game early(rules, Handling{}, 1);
+    receive(early, 1, 3);
+    run(early, 18);
+    assert(early.frame == 19);
+    locksClean(early);
+    assert(garbageRows(early) == 0);
+    Game ontime(rules, Handling{}, 1);
+    receive(ontime, 1, 3);
+    run(ontime, 19);
+    assert(ontime.frame == 20);
+    locksClean(ontime);
+    assert(garbageRows(ontime) == 3);
+    assert(ontime.stats.garbageReceived == 3);
+
+    // The cap holds the rest for the next lock, which needs no new delay.
+    Ruleset capped;
+    capped.garbageCap = 2;
+    Game cap(capped, Handling{}, 1);
+    receive(cap, 1, 3);
+    run(cap, 19);
+    locksClean(cap);
+    assert(garbageRows(cap) == 2);
+    locksClean(cap);
+    assert(garbageRows(cap) == 3);
+
+    // Without a confirm it stays in the queue however long it waits.
+    Game waiting(rules, Handling{}, 1);
+    const GarbageEvent arrive[] = {{GarbageEvent::Arrive, 9, 1, 0, 3}};
+    waiting.tick({}, arrive);
+    run(waiting, 100);
+    locksClean(waiting);
+    assert(garbageRows(waiting) == 0);
+    assert(waiting.stats.garbageReceived == 0);
+
+    // Holes use the garbage RNG in this order: the first roll, a within-batch draw for
+    // each later row, then a draw and a reroll between batches.
+    const uint32_t seed = 12345;
+    Rng rng(seed);
+    const auto roll = [&] { return static_cast<int>(std::floor(rng.nextFloat() * kBoardWidth)); };
+    const int first = roll();
+    rng.next();  // second row of the first batch
+    rng.next();  // batch finished, and messinessChange is 1
+    const int second = roll();
+    Game holes(rules, Handling{}, seed);
+    receive(holes, 1, 2);
+    receive(holes, 2, 1);
+    run(holes, 19);
+    locksClean(holes);
+    assert(garbageRows(holes) == 3);
+    assert(holeIn(holes, 2) == first);
+    assert(holeIn(holes, 1) == first);
+    assert(holeIn(holes, 0) == second);
+
+    // Garbage rises in arrival order, even if the later batch was confirmed first:
+    // the first batch still travelling holds it back.
+    Game order(rules, Handling{}, 1);
+    const GarbageEvent both[] = {{GarbageEvent::Arrive, 9, 1, 0, 1}, {GarbageEvent::Arrive, 9, 2, 0, 1}, {GarbageEvent::Confirm, 9, 2}};
+    order.tick({}, both);
+    run(order, 30);
+    locksClean(order);
+    assert(garbageRows(order) == 0);
+    const GarbageEvent confirmFirst[] = {{GarbageEvent::Confirm, 9, 1}};
+    order.tick({}, confirmFirst);
+    run(order, 19);
+    locksClean(order);
+    assert(garbageRows(order) == 2);
+
+    // Older rounds draw nothing when a cancel finishes a batch.
+    Ruleset older;
+    older.cancelMovesHole = false;
+    Rng olderRng(seed);
+    const int olderFirst = static_cast<int>(std::floor(olderRng.nextFloat() * kBoardWidth));
+    Game legacy(older, Handling{}, seed);
+    receive(legacy, 1, 1);
+    receive(legacy, 2, 1);
+    dropQuad(legacy);
+    run(legacy, 30);
+    tap(legacy, Action::HardDrop);
+    assert(garbageRows(legacy) == 0);
+    receive(legacy, 3, 1);
+    run(legacy, 30);
+    tap(legacy, Action::HardDrop);
+    assert(garbageRows(legacy) == 1);
+    assert(holeIn(legacy, 0) == olderFirst);
+
+    // A copy carries the queue and the column, and plays on identically.
+    Game original(rules, Handling{}, seed);
+    receive(original, 1, 2);
+    run(original, 19);
+    Game copy = original;
+    locksClean(original);
+    locksClean(copy);
+    assert(original.board.cells == copy.board.cells);
+    assert(holeIn(copy, 0) == holeIn(original, 0));
+
+    // A clear cancels the oldest first, sends the rest and raises nothing.
+    Game cancel(rules, Handling{}, 1);
+    receive(cancel, 1, 1);
+    receive(cancel, 2, 2);
+    run(cancel, 30);
+    dropQuad(cancel);
+    assert(cancel.stats.attack == 4);
+    assert(cancel.stats.garbageSent == 1);
+    Game sentCheck(rules, Handling{}, 1);
+    receive(sentCheck, 1, 3);
+    fillExcept(sentCheck, 4, {{9, 0}, {9, 1}, {9, 2}, {9, 3}});
+    place(sentCheck, Piece::I, 1, 7, 3);
+    const LockResult sentLock = tap(sentCheck, Action::HardDrop)[0];
+    assert(sentLock.sends[3] == 4);
+    assert(sentLock.sent[3] == 1);
+    assert(garbageRows(cancel) == 0);
+    locksClean(cancel);
+    assert(garbageRows(cancel) == 0);
+
+    // Partly cancelled, so the newest two rows are left, and a clear still raises nothing.
+    Game partial(rules, Handling{}, 1);
+    receive(partial, 1, 1);
+    receive(partial, 2, 5);
+    run(partial, 30);
+    dropQuad(partial);
+    assert(partial.stats.garbageSent == 0);
+    assert(garbageRows(partial) == 0);
+    locksClean(partial);
+    assert(garbageRows(partial) == 2);
+    assert(partial.stats.garbageReceived == 6);
+
+    // In the opener an attack cancels up to twice its value, sending nothing extra.
+    Ruleset opener;
+    opener.openerPhase = 14;
+    Game open(opener, Handling{}, 1);
+    receive(open, 1, 6);
+    run(open, 30);
+    dropQuad(open);
+    assert(open.stats.garbageSent == 0);
+    locksClean(open);
+    assert(garbageRows(open) == 0);
+    Game late(opener, Handling{}, 1);
+    late.stats.pieces = 14;
+    receive(late, 1, 6);
+    run(late, 30);
+    dropQuad(late);
+    locksClean(late);
+    assert(garbageRows(late) == 2);
+
+    // Passthrough: sends the sender hadn't seen cancel against what it sent back.
+    Game crossing(rules, Handling{}, 1);
+    const GarbageEvent target[] = {{GarbageEvent::Target, 9}};
+    crossing.tick({}, target);
+    dropQuad(crossing);
+    assert(crossing.stats.garbageSent == 4);
+    receive(crossing, 1, 3);  // crosses 3 of the 4 sent
+    receive(crossing, 2, 3);  // crosses the last, so 2 are left
+    assert(crossing.stats.garbageReceived == 2);
+    receive(crossing, 3, 3, 1);  // acknowledged, so nothing is left to cross
+    assert(crossing.stats.garbageReceived == 5);
+
+    // Inputs on the same tick run in order around the garbage.
+    Game before(rules, Handling{}, 1);
+    fillExcept(before, 4, {{9, 0}, {9, 1}, {9, 2}, {9, 3}});
+    place(before, Piece::I, 1, 7, 3);
+    const InputEvent drop[] = {{Action::HardDrop, true, 0}};
+    const GarbageEvent atStart[] = {{GarbageEvent::Arrive, 9, 1, 0, 3, 0}};
+    before.tick(drop, atStart);
+    assert(before.stats.garbageSent == 1);
+    Game after(rules, Handling{}, 1);
+    fillExcept(after, 4, {{9, 0}, {9, 1}, {9, 2}, {9, 3}});
+    place(after, Piece::I, 1, 7, 3);
+    const GarbageEvent atEnd[] = {{GarbageEvent::Arrive, 9, 1, 0, 3, 1}};
+    after.tick(drop, atEnd);
+    assert(after.stats.garbageSent == 4);
+}
+
 int main() {
     testRng();
     testPieceOrder();
@@ -776,7 +996,9 @@ int main() {
     testLevels();
     testScore();
     testFillGarbage();
+    testGarbageQueue();
     testRespawn();
+    testHoldTopOut();
     testHold();
     testIrsIhs();
     testSafelock();

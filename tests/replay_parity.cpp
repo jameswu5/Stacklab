@@ -1,15 +1,17 @@
 // Compares core::Game against recorded results. BRIEF.md section 5.4.
 //
 //   replay_parity <fixture.json>  every lock, against hand-derived or Triangle.js values
-//   replay_parity <folder>        each .ttr and .ttrm under it, against TETR.IO's own end state
+//   replay_parity <folder>        each .ttr, .ttrm and .ttrmx under it, against TETR.IO's own end state
 //
 // Only the second proves we match TETR.IO. Replays hold no mid-game state, so a
 // divergence on any lock only shows up at the end of the round. Exits 77 if the
 // folder has no replays.
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -18,6 +20,7 @@
 #include <vector>
 
 #include "core/game.h"
+#include "tests/ttrmx.h"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -92,6 +95,14 @@ core::Ruleset rulesFrom(const json& o) {
     r.garbageMargin = o.value("garbagemargin", r.garbageMargin);
     r.garbageSpecialBonus = o.value("garbagespecialbonus", r.garbageSpecialBonus);
     r.roundDown = o.value("roundmode", std::string("down")) != "rng";
+    r.garbageSpeed = o.value("garbagespeed", r.garbageSpeed);
+    r.garbageCap = o.value("garbagecap", r.garbageCap);
+    r.garbageCapIncrease = o.value("garbagecapincrease", r.garbageCapIncrease);
+    r.garbageCapMargin = o.value("garbagecapmargin", r.garbageCapMargin);
+    r.garbageCapMax = o.value("garbagecapmax", r.garbageCapMax);
+    r.openerPhase = o.value("openerphase", r.openerPhase);
+    r.messinessChange = o.value("messiness_change", r.messinessChange);
+    r.messinessInner = o.value("messiness_inner", r.messinessInner);
     return r;
 }
 
@@ -128,6 +139,20 @@ std::string unsupported(const json& o) {
     require("are", 0);
     require("lineclear_are", 0);
     require("nolockout", true);
+    require("garbageblocking", "combo blocking");
+    require("passthrough", "zero");
+    require("garbageholesize", 1);
+    require("garbageabsolutecap", 0);
+    require("garbageentry", "instant");
+    require("garbagequeue", false);
+    require("garbagephase", 0);
+    require("garbageattackcap", 0);
+    require("garbagefavor", 0);
+    require("garbagetargetbonus", "none");
+    require("messiness_nosame", false);
+    require("messiness_center", false);
+    require("messiness_timeout", 0);
+    require("usebombs", false);
     const std::string spins = o.value("spinbonuses", std::string("T-spins"));
     if (spins != "all-mini+" && spins != "T-spins" && spins != "none") out += "spinbonuses=" + spins + " ";
     return out;
@@ -212,11 +237,23 @@ std::string recentInputs(const std::vector<Input>& inputs, int frame) {
     return out;
 }
 
-// Feeds inputs for one tick, advancing `next` through the frame-sorted list.
-const std::vector<core::LockResult>& step(core::Game& game, const std::vector<Input>& inputs, size_t& next, int frame) {
+struct Garbage {
+    int frame;
+    core::GarbageEvent event;
+};
+
+// Feeds inputs and garbage for one tick, advancing through the frame-sorted lists.
+const std::vector<core::LockResult>& step(core::Game& game, const std::vector<Input>& inputs, size_t& next, int frame,
+                                          const std::vector<Garbage>& garbage = {}, size_t* nextGarbage = nullptr) {
     std::vector<core::InputEvent> events;
     for (; next < inputs.size() && inputs[next].frame == frame; next++) events.push_back(inputs[next].event);
-    return game.tick(events);
+    std::vector<core::GarbageEvent> incoming;
+    if (nextGarbage) {
+        for (; *nextGarbage < garbage.size() && garbage[*nextGarbage].frame == frame; ++*nextGarbage) {
+            incoming.push_back(garbage[*nextGarbage].event);
+        }
+    }
+    return game.tick(events, incoming);
 }
 
 // Returns the first mismatch; its first line is the summary.
@@ -373,21 +410,52 @@ void countClear(std::map<std::string, int>& clears, const core::LockResult& lock
     if (lock.perfectClear) clears["allclear"]++;
 }
 
-enum class Skip { No, Garbage, NeverStarted };
+enum class Skip { No, GarbageStub, NeverStarted };
 
 // Plays one player's round against what TETR.IO recorded. Every replay has final
 // stats. League rounds also store the final game in their `end` event; solo .ttr
 // files don't, so for those the board can't be checked directly. Solo stats also
-// report 0 attack, so sends only get checked on replays with garbage on.
-std::optional<std::string> playReplay(const json& replay, Skip& skip) {
+// report 0 attack, so sends only get checked on replays with garbage on. Recorded
+// garbage arrivals are fed in directly, since they depend on the other player. That
+// player's arrivals also record this player's sends, which checks attack lock by lock.
+std::optional<std::string> playReplay(const json& replay, const json* opponent, const std::string& date, Skip& skip, long& sendsCompared) {
     const json* endEvent = nullptr;
     std::vector<Input> inputs;
+    std::vector<Garbage> garbage;
+    int inputFrame = -1;
+    size_t inputsThisFrame = 0;
     for (const json& e : replay["events"]) {
         const std::string type = e["type"];
-        // Incoming garbage is phase 6.
-        if (type == "ige" && e["data"]["type"] == "interaction") {
-            skip = Skip::Garbage;
-            return std::nullopt;
+        if (e["frame"] != inputFrame) {
+            inputFrame = e["frame"];
+            inputsThisFrame = 0;
+        }
+        if (type == "ige") {
+            // tools/unpack_archive.mjs reduces rounds with garbage to a bare marker.
+            if (!e["data"].contains("data")) {
+                skip = Skip::GarbageStub;
+                return std::nullopt;
+            }
+            const std::string kind = e["data"]["type"];
+            const json& d = e["data"]["data"];
+            core::GarbageEvent event{};
+            event.beforeInput = inputsThisFrame;
+            if (kind == "target") {
+                if (d["targets"].size() > 1) return "more than one target\n";
+                if (d["targets"].empty()) continue;
+                event.type = core::GarbageEvent::Target;
+                event.gameId = d["targets"][0];
+            } else if ((kind == "interaction" || kind == "interaction_confirm") && d["type"] == "garbage") {
+                event.type = kind == "interaction" ? core::GarbageEvent::Arrive : core::GarbageEvent::Confirm;
+                event.gameId = d["gameid"];
+                event.iid = d["iid"];
+                event.ackIid = d["ackiid"];
+                event.amount = d["amt"];
+            } else {
+                continue;
+            }
+            garbage.push_back({e["frame"], event});
+            continue;
         }
         if (type == "end") endEvent = &e;
         if (type != "keydown" && type != "keyup") continue;
@@ -398,6 +466,7 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
         const bool hoisted = e["data"].value("hoisted", false);
         if (hoisted && (e["frame"] != 0 || type != "keydown")) std::cout << "note: hoisted " << type << " on frame " << e["frame"] << "\n";
         inputs.push_back({e["frame"], key, {action->second, type == "keydown", e["data"]["subframe"], hoisted}});
+        inputsThisFrame++;
     }
     if (!endEvent) return "no end event\n";
     const json& data = (*endEvent)["data"];
@@ -410,7 +479,19 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
     const json& options = data.contains("options") ? data["options"] : replay["options"];
     if (const std::string bad = unsupported(options); !bad.empty()) return "unsupported options: " + bad + "\n";
 
-    core::Game game(rulesFrom(options), handlingFrom(options), options["seed"].get<uint32_t>());
+    core::Ruleset rules = rulesFrom(options);
+    // `end` records the multiplier as it stood when the round finished, not as it began.
+    if (endFrame > rules.garbageMargin && data.contains("options")) {
+        rules.garbageMultiplier -= (endFrame - rules.garbageMargin) * rules.garbageIncrease / 60;
+        rules.garbageMultiplier = std::round(rules.garbageMultiplier * 1e6) / 1e6;
+    }
+    // Triangle's cutoff, 15:00 at UTC-4. It keeps a whole second queue for older rounds, which
+    // only draws differently from this one with messiness_inner set or a fractional cap.
+    rules.cancelMovesHole = date >= "2025-05-06T19:00:00";
+    if (!rules.cancelMovesHole && (rules.messinessInner != 0 || rules.garbageCapIncrease != 0)) {
+        return "unsupported options: older garbage queue with messiness_inner or garbagecapincrease\n";
+    }
+    core::Game game(rules, handlingFrom(options), options["seed"].get<uint32_t>());
 
     // The final press lands on the end frame itself, in which case the falling
     // piece isn't comparable: TETR.IO stopped mid-tick and we run the whole tick.
@@ -421,9 +502,28 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
     std::map<std::string, int> clears;
     int topB2b = -1, topCombo = -1, finishFrame = -1;
     const int objectiveLines = options.value("objective_type", std::string()) == "lines" ? options.value("objective_count", 0) : 0;
-    size_t next = 0;
+    std::vector<int> wantSends;
+    if (opponent) {
+        for (const json& e : (*opponent)["events"]) {
+            if (e["type"] == "ige" && e["data"]["type"] == "interaction" && e["data"].contains("data") && e["data"]["data"]["type"] == "garbage") {
+                wantSends.push_back(e["data"]["data"]["amt"]);
+            }
+        }
+    }
+    size_t nextSend = 0;
+    std::string sendMismatch;
+    size_t next = 0, nextGarbage = 0;
     const auto playTick = [&](int frame) {
-        for (const core::LockResult& lock : step(game, inputs, next, frame)) {
+        for (const core::LockResult& lock : step(game, inputs, next, frame, garbage, &nextGarbage)) {
+            for (int send : lock.sent) {
+                if (send == 0) continue;
+                // Sends after the opponent's game ended never arrived.
+                if (nextSend < wantSends.size() && wantSends[nextSend] != send && sendMismatch.empty()) {
+                    sendMismatch = "  send " + std::to_string(nextSend) + " on frame " + std::to_string(frame) + ": want " +
+                                   std::to_string(wantSends[nextSend]) + " got " + std::to_string(send) + "\n";
+                }
+                nextSend++;
+            }
             topB2b = std::max(topB2b, lock.b2b);
             topCombo = std::max(topCombo, lock.combo);
             countClear(clears, lock);
@@ -446,7 +546,9 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
         if (peek.toppedOut) playTick(endFrame);
     }
 
-    std::string diffs;
+    std::string diffs = sendMismatch;
+    if (nextSend < wantSends.size()) diffs += "  sends: want " + std::to_string(wantSends.size()) + " got " + std::to_string(nextSend) + "\n";
+    sendsCompared += std::min(nextSend, wantSends.size());
     const auto stat = [&](const std::string& name, int want, int got) {
         if (want != got) diffs += "  " + name + ": want " + std::to_string(want) + " got " + std::to_string(got) + "\n";
     };
@@ -463,7 +565,16 @@ std::optional<std::string> playReplay(const json& replay, Skip& skip) {
     stat("score", s["score"], game.stats.score);
     stat("level_lines", s["level_lines"], game.stats.levelLines);
     for (const auto& [name, want] : s["clears"].items()) stat("clears." + name, want, clears[name]);
-    if (options.value("hasgarbage", false)) stat("attack", s["garbage"]["attack"], game.stats.attack);
+    if (options.value("hasgarbage", false)) {
+        stat("attack", s["garbage"]["attack"], game.stats.attack);
+        stat("sent", s["garbage"]["sent"], game.stats.garbageSent);
+        stat("received", s["garbage"]["received"], game.stats.garbageReceived);
+        stat("cleared", s["garbage"]["cleared"], game.stats.garbageCleared);
+        const std::string reason = data.value("gameoverreason", std::string());
+        if (!reason.empty() && (reason == "topout" || reason == "garbagesmash") != game.toppedOut) {
+            diffs += "  ended by " + reason + (game.toppedOut ? " but core topped out\n" : " but core is still alive\n");
+        }
+    }
     if (objectiveLines > 0) stat("finish frame", endFrame, finishFrame);
 
     std::string boardReport;
@@ -518,27 +629,40 @@ int runReplays(const fs::path& folder) {
     if (fs::is_directory(folder)) {
         for (const auto& entry : fs::recursive_directory_iterator(folder)) {
             const std::string ext = entry.path().extension().string();
-            if (ext == ".ttr" || ext == ".ttrm") files.push_back(entry.path());
+            if (ext == ".ttr" || ext == ".ttrm" || ext == ".ttrmx") files.push_back(entry.path());
         }
     }
     if (files.empty()) {
-        std::cout << "SKIPPED: no .ttr or .ttrm replays in " << folder.string() << "\n";
+        std::cout << "SKIPPED: no .ttr, .ttrm or .ttrmx replays in " << folder.string() << "\n";
         return kExitSkipped;
     }
     std::sort(files.begin(), files.end());
 
     int passed = 0, failed = 0, skippedGarbage = 0, neverStarted = 0;
+    long sendsCompared = 0;
     for (const fs::path& path : files) {
         const std::string name = fs::relative(path, folder).string();
         const auto fail = [&](const std::string& label, const std::string& why) {
             failed++;
             std::cout << "FAIL " << label << ": " << why << "\n";
         };
-        std::ifstream file(path);
-        const json top = json::parse(file, nullptr, false);
-        if (top.is_discarded()) {
-            fail(name, "not JSON");
-            continue;
+        json top;
+        if (path.extension() == ".ttrmx") {
+            std::ifstream file(path, std::ios::binary);
+            const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), {});
+            try {
+                top = TtrmxReader(bytes).read()["replay"];
+            } catch (const std::exception& e) {
+                fail(name, e.what());
+                continue;
+            }
+        } else {
+            std::ifstream file(path);
+            top = json::parse(file, nullptr, false);
+            if (top.is_discarded()) {
+                fail(name, "not JSON");
+                continue;
+            }
         }
         if (!top.contains("replay") || !top["replay"].is_object()) {
             fail(name, "unknown format, top-level keys: " + [&] { std::string k; for (const auto& [key, v] : top.items()) k += key + " "; return k; }());
@@ -547,12 +671,18 @@ int runReplays(const fs::path& folder) {
         const json& replay = top["replay"];
 
         // .ttr holds one game in `replay`; .ttrm holds rounds of players.
-        std::vector<std::pair<std::string, const json*>> rounds;
+        struct Round {
+            std::string label;
+            const json* replay;
+            const json* opponent = nullptr;
+        };
+        std::vector<Round> rounds;
         if (replay.contains("rounds")) {
             for (size_t r = 0; r < replay["rounds"].size(); r++) {
                 const json& players = replay["rounds"][r];
                 for (size_t p = 0; p < players.size(); p++) {
-                    rounds.push_back({name + " round " + std::to_string(r) + " player " + std::to_string(p), &players[p]["replay"]});
+                    rounds.push_back({name + " round " + std::to_string(r) + " player " + std::to_string(p), &players[p]["replay"],
+                                      players.size() == 2 ? &players[1 - p]["replay"] : nullptr});
                 }
             }
         } else if (replay.contains("events")) {
@@ -562,10 +692,10 @@ int runReplays(const fs::path& folder) {
             continue;
         }
 
-        for (const auto& [label, round] : rounds) {
+        for (const auto& [label, round, opponent] : rounds) {
             Skip skip = Skip::No;
-            const auto m = playReplay(*round, skip);
-            if (skip == Skip::Garbage) skippedGarbage++;
+            const auto m = playReplay(*round, opponent, top.value("ts", std::string()), skip, sendsCompared);
+            if (skip == Skip::GarbageStub) skippedGarbage++;
             else if (skip == Skip::NeverStarted) neverStarted++;
             else if (m) fail(label, *m);
             else {
@@ -575,7 +705,7 @@ int runReplays(const fs::path& folder) {
         }
     }
     std::cout << folder.filename().string() << " (TETR.IO recorded results): " << passed << " passed, " << failed << " failed, "
-              << skippedGarbage << " skipped for incoming garbage, " << neverStarted << " skipped as never started\n";
+              << skippedGarbage << " skipped with garbage stripped, " << neverStarted << " skipped as never started, " << sendsCompared << " sends compared\n";
     return failed ? 1 : 0;
 }
 
