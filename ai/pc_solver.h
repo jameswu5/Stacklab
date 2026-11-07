@@ -67,9 +67,9 @@ struct PcAdvice {
     PcStatus status = PcStatus::Unknown;  // what solve says about the visible pieces
     bool hasStep = false;
     PcStep step{};
-    // The share of sampled futures in which, after this placement, some way to a perfect clear
-    // exists. That lets the later placements know those futures, which a player can't, so this
-    // is a ceiling on the real chance. 1 when it's proven, and 0 when it's impossible.
+    // The share of sampled futures that a rollout clears after this placement, seeing only what a
+    // player would. It's the best of many choices on few samples, so it reads high: rank by it,
+    // but don't show it as a measured rate. 1 when it's proven, and 0 when it's impossible.
     double chance = 0;
     int samples = 0;         // how many futures `chance` rests on; 0 when proven, or if none finished
     int unknownSamples = 0;  // of those, how many ran out of nodes and were counted as failures
@@ -78,11 +78,10 @@ struct PcAdvice {
 };
 
 struct PcAdviceOptions {
-    int maxSamples = 256;      // the most futures for the placement that ends up on top
-    int nodesPerSample = 20'000;
+    int maxSamples = 8;        // the most futures for the placement that ends up on top
+    int nodesPerSolve = 5'000;
     int timeBudgetMs = 0;      // 0 for none. Stopping on time depends on the machine, so answers can then differ
     uint32_t seed = 1;         // the same state, seed and samples always give the same answer
-    bool rollouts = false;     // score futures by playing them seeing only the visible pieces
 };
 
 class PcSolver {

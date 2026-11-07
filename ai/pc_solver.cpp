@@ -389,11 +389,10 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
         return options.timeBudgetMs > 0 && std::chrono::steady_clock::now() - begin > std::chrono::milliseconds(options.timeBudgetMs);
     };
 
-    // Successive halving: every option on the same futures, keeping the better half each time.
+    // Successive halving: every choice on the same futures, keeping the better half each time.
     std::vector<Choice*> alive;
     for (Choice& choice : choices) alive.push_back(&choice);
     auto chanceOf = [](const Choice& choice) { return choice.samples ? static_cast<double>(choice.hits) / choice.samples : -1.0; };
-    PcQuery trial;
     int target = std::min(8, options.maxSamples);
     while (!advice.partial) {
         for (Choice* choice : alive) {
@@ -402,20 +401,9 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
                     advice.partial = true;
                     break;
                 }
-                const std::vector<core::Piece>& pieces = future(choice->samples);
-                PcResult result;
-                if (options.rollouts) {
-                    result.status = rollout(choice->after, pieces, query.queue.size(), options.seed + choice->samples, cancel, options.nodesPerSample);
-                } else {
-                    trial = choice->after;
-                    trial.queue.insert(trial.queue.end(), pieces.begin(), pieces.end());
-                    trial.current = trial.queue.front();
-                    trial.queue.erase(trial.queue.begin());
-                    trial.queueEnds = true;
-                    result = solve(trial, cancel, options.nodesPerSample);
-                }
-                if (result.status == PcStatus::Found) choice->hits++;
-                if (result.status == PcStatus::Unknown) {
+                const PcStatus status = rollout(choice->after, future(choice->samples), query.queue.size(), options.seed + choice->samples, cancel, options.nodesPerSolve);
+                if (status == PcStatus::Found) choice->hits++;
+                if (status == PcStatus::Unknown) {
                     if (outOfTime()) {
                         advice.partial = true;
                         break;
@@ -433,7 +421,7 @@ PcAdvice PcSolver::advise(const PcQuery& query, const std::atomic<bool>* cancel,
         target = std::min(target * 2, options.maxSamples);
     }
 
-    // Stopped partway, options rest on different counts, so go by those with the most futures behind them.
+    // Stopped partway, choices rest on different counts, so go by those with the most futures behind them.
     const Choice* best = alive[0];
     for (const Choice* choice : alive) {
         if (choice->samples > best->samples || (choice->samples == best->samples && chanceOf(*choice) > chanceOf(*best))) best = choice;
@@ -466,17 +454,19 @@ PcStatus PcSolver::rollout(PcQuery state, const std::vector<core::Piece>& future
         if (visible != PcStatus::NeedMorePieces) return visible;
 
         bool planned = false;
+        PcStatus last = PcStatus::Impossible;
         for (int tries = 0; tries < 3 && !planned; tries++) {
             PcQuery guess = state;
             const std::vector<core::Piece> pieces = randomBags(state.bagLeft, futureLength(state), rng);
             guess.queue.insert(guess.queue.end(), pieces.begin(), pieces.end());
             guess.queueEnds = true;
             PcResult plan = solve(guess, cancel, nodes);
+            last = plan.status;
             if (plan.status != PcStatus::Found) continue;
             applyStep(state, plan.steps[0]);
             planned = true;
         }
-        if (!planned) return PcStatus::Impossible;
+        if (!planned) return last;
     }
 }
 
