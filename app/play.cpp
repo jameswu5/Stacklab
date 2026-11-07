@@ -27,10 +27,10 @@ double finishSeconds(const core::Game& game, std::span<const core::InputEvent> i
 
 void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs) {
     game = core::Game(mode->rules, handling, seed);
-    if (mode->garbageRows > 0) game.fillGarbage(mode->garbageRows, mode->messiness);
+    if (mode->garbageRows > 0) game.fillGarbage(mode->garbageRows);
     if (drill) setUpDrill(game, *drill);
     filled = 0;
-    missedUntilNs = 0;
+    missed = false;
     finesse.restart(game);
     faults = {};
     if (mode->pcFile) {
@@ -64,13 +64,15 @@ void Play::saveUndo() {
 
 void Play::undo(uint64_t timeNs) {
     if (!mode->undo || !started || over) return;
-    if (undoCount > 1) {
+    // A miss saved no slot, so the newest is where the missed piece started.
+    if (undoCount > 1 && !missed) {
         undoNewest = (undoNewest + kUndoDepth - 1) % kUndoDepth;
         undoCount--;
     }
     game = undoSlots[undoNewest].game;
     filled = undoSlots[undoNewest].filled;
     faults = undoSlots[undoNewest].faults;
+    missed = false;
     // Later inputs in the tick that saved the slot may have moved the piece.
     game.respawn(game.falling.piece);
     finesse.restart(game);
@@ -100,14 +102,14 @@ void Play::key(Bind action, bool down, uint64_t timeNs) {
     int& count = held[action];
     if (down ? count++ > 0 : count == 0 || --count > 0) return;
     if (down && (action == BindLeft || action == BindRight)) lastMove = action;
-    if (started && !over) inputs.push(static_cast<core::Action>(action), down, timeNs, startNs, game.frame);
+    if (started && !over && !missed) inputs.push(static_cast<core::Action>(action), down, timeNs, startNs, game.frame);
 }
 
 void Play::stepTo(uint64_t nowNs) {
     if (!started && nowNs >= startNs) begin();
     if (mode->pcFile) coach->poll();
     uint64_t target = tickAt(nowNs > startNs ? nowNs - startNs : 0).tick;
-    while (!over && game.frame < target) {
+    while (!over && !missed && game.frame < target) {
         auto due = inputs.due(game.frame);
         int progressBefore = mode->goalProgress(game.stats);
         // ponytail: finesse is off with levels, since the move search doesn't let time pass and
@@ -141,7 +143,7 @@ void Play::stepTo(uint64_t nowNs) {
             }
         }
         inputs.consume(due.size());
-        // A new attempt has its own clock, so the next call picks it up.
+        // A new attempt has its own clock, so the next call picks it up. A miss waits for a key.
         if (drill && judgeDrill(locks, nowNs)) return;
         if (mode->pcFile) {
             coach->afterTick(locks, game);
@@ -156,7 +158,7 @@ void Play::stepTo(uint64_t nowNs) {
 // ponytail: a target's y assumes the listed order when an earlier piece clears lines; other orders miss there.
 bool Play::judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs) {
     const uint64_t all = (uint64_t{1} << drill->targets.size()) - 1;
-    bool missed = false;
+    bool wrong = false;
     for (const core::LockResult& lock : locks) {
         if (filled == all) break;
         bool hit = false;
@@ -165,9 +167,9 @@ bool Play::judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs) {
             hit = !(filled >> i & 1) && target.piece == lock.piece && std::is_permutation(target.cells.begin(), target.cells.end(), lock.cells.begin(), [](const core::Cell& a, const core::Cell& b) { return a.x == b.x && a.y == b.y; });
             if (hit) filled |= uint64_t{1} << i;
         }
-        missed = missed || !hit;
+        wrong = wrong || !hit;
     }
-    if (!missed && filled == all) {
+    if (!wrong && filled == all) {
         if (drill->next) {
             drill = drill->next;
             restart(game.handling, 1, nowNs + kCountdownNs);
@@ -178,9 +180,9 @@ bool Play::judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs) {
         return true;
     }
     // Out of queue: a held piece still gets its turn.
-    if (!missed && !game.toppedOut && game.falling.piece == core::Piece::None) {
+    if (!wrong && !game.toppedOut && game.falling.piece == core::Piece::None) {
         if (game.hold == core::Piece::None) {
-            missed = true;
+            wrong = true;
         } else {
             const core::Piece last = game.hold;
             game.hold = core::Piece::None;
@@ -188,9 +190,8 @@ bool Play::judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs) {
             finesse.restart(game);
         }
     }
-    if (!missed && !game.toppedOut) return false;
-    restart(game.handling, 1, nowNs);
-    missedUntilNs = nowNs + kMissBannerNs;
+    if (!wrong && !game.toppedOut) return false;
+    missed = true;
     return true;
 }
 
@@ -216,7 +217,7 @@ void Play::cycleHold() {
 // again on the real game once complete, so this doesn't affect the result.
 void Play::stepShown(uint64_t nowNs) {
     shown = game;
-    if (over || !started) return;
+    if (over || !started || missed) return;
     auto due = inputs.due(game.frame);
     shown.tick(due);
 

@@ -84,10 +84,11 @@ void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double 
     }
 }
 
+constexpr const char* kPieceNames[] = {"", "I", "J", "L", "O", "S", "T", "Z"};
+constexpr const char* kRotations[] = {"spawn", "CW", "180", "CCW"};
+
 // The piece and orientation to work on, such as "T CCW x3".
 void formatWorstFaults(char (&buffer)[32], const ai::FaultStats& faults) {
-    constexpr const char* kPieceNames[] = {"", "I", "J", "L", "O", "S", "T", "Z"};
-    constexpr const char* kRotations[] = {"spawn", "CW", "180", "CCW"};
     int worst = 0, piece = 0, rot = 0;
     for (int p = 1; p < 8; p++)
         for (int r = 0; r < 4; r++)
@@ -388,7 +389,7 @@ void Ui::results(const PlayView& view) {
     const RunResult& run = view.history.back();
     const bool finesse = (view.mode->stats & StatFinesse) && view.faults;
     constexpr float width = 300, x = kBoardX + 190 - width / 2;
-    const float height = view.pc ? 562 : finesse ? 422 : 346, top = kBoardY + 380 - height / 2;
+    const float height = view.pc ? 730 : finesse ? 590 : 346, top = kBoardY + 380 - height / 2;
     fill(x, top, width, height, colors.card, 24);
     const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : "Finished";
     text(FontWord, title, x + width / 2, top + 42, colors.text, Align::Center);
@@ -410,6 +411,17 @@ void Ui::results(const PlayView& view) {
         formatWorstFaults(buffer, *view.faults);
         statRow(x + 24, y, width - 48, "Most faults", buffer);
         y += 38;
+        fill(x + 24, y, width - 48, 1, colors.line);
+        for (int r = 0; r < 4; r++) text(FontSmall, kRotations[r], x + 120 + r * 52.0f, y + 22, colors.muted, Align::Right);
+        for (int p = 1; p < 8; p++) {
+            text(FontSmall, kPieceNames[p], x + 24, y + 22 + p * 20.0f, colors.muted);
+            for (int r = 0; r < 4; r++) {
+                const int count = view.faults->byPiece[p][r];
+                std::snprintf(buffer, sizeof buffer, "%d", count);
+                text(FontSmall, count > 0 ? buffer : "-", x + 120 + r * 52.0f, y + 22 + p * 20.0f, count > 0 ? colors.text : colors.muted, Align::Right);
+            }
+        }
+        y += 168;
     }
     if (view.pc) {
         std::snprintf(buffer, sizeof buffer, "%d / %d", view.pc->pcs, kPcGoal);
@@ -607,6 +619,7 @@ void Ui::drawPlay(const PlayView& view) {
     for (int i = 0; i < 5 && i < static_cast<int>(game.queue.size()); i++) preview(game.queue[i], kRightX + kColumnW / 2, kRowY + 120 + kNextSlot * i, kNextCell);
 
     if (view.banner) text(FontTime, view.banner, kBoardX + 190, kBoardY + 396, colors.text, Align::Center);
+    if (view.banner) text(FontRow, view.hint, kBoardX + 190, kBoardY + 428, colors.muted, Align::Center);
 }
 
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {

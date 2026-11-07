@@ -94,6 +94,9 @@ int main(int argc, char** argv) {
     faults.total = 12;
     faults.last = 2;
     faults.byPiece[static_cast<int>(core::Piece::T)][3] = 5;
+    faults.byPiece[static_cast<int>(core::Piece::T)][0] = 2;
+    faults.byPiece[static_cast<int>(core::Piece::I)][1] = 3;
+    faults.byPiece[static_cast<int>(core::Piece::L)][2] = 2;
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
@@ -253,7 +256,7 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&kModes[5], &drillGame, 2.5, false, dark ? "Missed" : nullptr, "", 0, {}, &drills[0], 1, dark ? &afterMiss : &faults});
+        ui.drawPlay({&kModes[5], &drillGame, 2.5, false, dark ? "Missed" : nullptr, dark ? "R to retry, Q to undo" : "", 0, {}, &drills[0], 1, dark ? &afterMiss : &faults});
         SDL_FlushRenderer(renderer);
         SDL_Surface* drillPixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(drillPixels, (std::string(argv[1]) + (dark ? "/drill-dark.png" : "/drill-light.png")).c_str());

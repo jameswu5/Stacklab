@@ -380,7 +380,7 @@ void testBlitzEnd() {
 void testDigGoal() {
     std::string path = (std::filesystem::temp_directory_path() / "stacklab_best_dig.json").string();
     std::filesystem::remove(path);
-    const Mode row = {.name = "Dig", .blurb = "", .rules = {}, .goalLines = 3, .bestFile = "", .garbageRows = 3, .messiness = 1};
+    const Mode row = {.name = "Dig", .blurb = "", .rules = {}, .goalLines = 3, .bestFile = "", .garbageRows = 3};
     Play play;
     play.mode = &row;
     play.bestPath = path;
@@ -650,7 +650,7 @@ void testDrillRun() {
         assert(p.play.over && p.play.seconds() > 0);
     }
 
-    // A wrong placement resets the attempt at once, and the clock starts over without a countdown.
+    // A wrong placement pauses on the missed board, clock and keys included, until retry or undo.
     {
         DrillPlayer p;
         p.play.mode = &row;
@@ -660,14 +660,34 @@ void testDrillRun() {
         p.place(0, 0);
         assert(p.play.filled == 1 && p.play.game.stats.pieces == 1);
         p.place(0, 0);  // O on the I
-        assert(p.play.filled == 0 && p.play.game.stats.pieces == 0 && !p.play.over);
+        assert(p.play.missed && p.play.filled == 1 && p.play.game.stats.pieces == 2 && !p.play.over);
         assert(p.play.drill == &set.drills[0]);
-        assert(p.play.game.board.cells == core::Board{}.cells);
-        assert(p.play.missedUntilNs > p.now - kTickNs);
-        assert(p.play.game.frame == 0);
-        p.now += kTickNs;
+        const uint64_t pausedAt = p.play.game.frame;
+        const core::Board missedBoard = p.play.game.board;
+        p.tap(BindLeft);
+        p.tap(BindHardDrop);
+        p.now += kTickNs * 60;
         p.play.stepTo(p.now);
-        assert(p.play.started && p.play.game.frame == 1);
+        p.play.stepShown(p.now);
+        assert(p.play.game.frame == pausedAt && p.play.game.board.cells == missedBoard.cells);
+        assert(p.play.shown.board.cells == missedBoard.cells && p.play.missed);
+
+        // Undo takes back only the missed piece, and the clock goes on from there.
+        p.play.undo(p.now);
+        assert(!p.play.missed && p.play.filled == 1 && p.play.game.stats.pieces == 1);
+        assert(p.play.game.falling.piece == core::Piece::O);
+        assert(p.play.game.frame <= pausedAt);
+        p.place(0, 4);
+        assert(!p.play.missed && p.play.filled == 3);
+
+        // Retry starts the attempt over, with a countdown.
+        p.place(0, 0);
+        assert(p.play.missed);
+        p.play.restart({}, 1, p.now + kCountdownNs);
+        assert(!p.play.missed && !p.play.started && p.play.filled == 0 && p.play.game.stats.pieces == 0);
+        assert(p.play.game.board.cells == core::Board{}.cells);
+        p.start();
+        assert(p.play.started);
     }
 
     // Undo gives back a target, and a filled one can't be filled twice.
@@ -704,9 +724,9 @@ void testDrillRun() {
         p.play.key(BindHardDrop, false, p.now + 5);
         p.now += kTickNs;
         p.play.stepTo(p.now);
-        assert(p.play.game.stats.pieces == (wrongSecond ? 0 : 2));
-        assert(p.play.filled == (wrongSecond ? 0u : 3u));
-        assert((p.play.missedUntilNs > 0) == wrongSecond);
+        assert(p.play.game.stats.pieces == 2);
+        assert(p.play.filled == (wrongSecond ? 1u : 3u));
+        assert(p.play.missed == wrongSecond);
     }
 
     // Running out of queue with targets left is a miss, as is topping out.
@@ -719,7 +739,9 @@ void testDrillRun() {
         p.play.restart({}, 1, p.now);
         p.start();
         p.place(0, 0);
-        assert(p.play.filled == 0 && p.play.missedUntilNs > 0 && p.play.game.falling.piece == core::Piece::I);
+        assert(p.play.missed && p.play.filled == 1 && p.play.game.falling.piece == core::Piece::None);
+        p.play.undo(p.now);  // takes back the piece that ran the queue out
+        assert(!p.play.missed && p.play.filled == 0 && p.play.game.falling.piece == core::Piece::I);
 
         DrillPlayer top;
         top.play.mode = &row;
@@ -729,7 +751,9 @@ void testDrillRun() {
         top.play.game.toppedOut = true;
         top.now += kTickNs;
         top.play.stepTo(top.now);
-        assert(!top.play.over && top.play.missedUntilNs > 0 && !top.play.game.toppedOut);
+        assert(!top.play.over && top.play.missed);
+        top.play.undo(top.now);
+        assert(!top.play.missed && !top.play.game.toppedOut);
     }
 
     // A placed piece and a saved state don't allocate, even with a long queue.
@@ -797,9 +821,11 @@ void testFumenDrill() {
     assert(p.play.finesse.judged && p.play.finesse.judged->presses == 5 && p.play.finesse.judged->minimum == 1);
     assert(p.play.faults.total == 4 && p.play.faults.last == 4);
 
-    // A miss starts the attempt over, and its faults with it.
+    // Retrying a miss starts the attempt over, and its faults with it.
     p.place(0, 0);  // O on the I
-    assert(p.play.filled == 0 && p.play.game.stats.pieces == 0 && p.play.missedUntilNs > 0);
+    assert(p.play.missed && p.play.game.stats.pieces == 2);
+    p.play.restart({}, 1, p.now + kCountdownNs);
+    assert(p.play.filled == 0 && p.play.game.stats.pieces == 0 && !p.play.missed);
     assert(p.play.faults.total == 0 && p.play.faults.last == 0);
     p.start();
 
@@ -1271,7 +1297,7 @@ void testNoGarbageRowsKeepsRng() {
         }
         return out;
     };
-    const Mode row = {.name = "None", .blurb = "", .rules = {.roundDown = false}, .messiness = 1};
+    const Mode row = {.name = "None", .blurb = "", .rules = {.roundDown = false}};
     Play play;
     play.mode = &row;
     play.restart({}, 1, 0);

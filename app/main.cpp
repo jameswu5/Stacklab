@@ -219,7 +219,10 @@ void drawFrame(App& app, Ui& ui) {
         std::string hint;
         auto keyName = [&](Bind bind) { return rowValue(app.settings, static_cast<int>(RowBindFirst) + bind); };
         if (play.over) hint = keyName(BindRetry) + " to retry, " + keyName(BindMenu) + " for the menu";
-        else if (SDL_GetTicksNS() < play.missedUntilNs) banner = "Missed";
+        else if (play.missed) {
+            banner = "Missed";
+            hint = keyName(BindRetry) + " to retry, " + keyName(BindUndo) + " to undo";
+        }
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
         PcView pcView;
         const PcView* pc = nullptr;

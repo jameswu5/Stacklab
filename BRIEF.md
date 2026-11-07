@@ -88,7 +88,7 @@ The owner chose the "Cloud" design: soft rounded cards around the board. All siz
 - **Ghost:** the piece colour at 42% opacity in light mode and 30% in dark mode.
 - **Toggle:** a pill with sun and moon icons, and a circular knob behind the active one.
 - **Menu:** the screen the app opens on. A centred card, 560 wide, with a row for each mode and one for Settings. Rows show the name (20, bold), a line of description and any personal best. Fixed keys: up, down and Enter.
-- **Results:** when a run ends, a card over the board (300 wide) shows the outcome, the time, PPS, KPP, APM, APP, the best and, where the mode lists it, finesse faults with the piece and orientation that had the most. Retry works from it directly. The Next card becomes a Session card, listing this mode's ended runs this session, newest first. Retried or abandoned runs aren't listed, and history isn't saved.
+- **Results:** when a run ends, a card over the board (300 wide) shows the outcome, the time, PPS, KPP, APM, APP, the best and, where the mode lists it, finesse faults with the piece and orientation that had the most, and a table of faults for each piece and orientation. Retry works from it directly. The Next card becomes a Session card, listing this mode's ended runs this session, newest first. Retried or abandoned runs aren't listed, and history isn't saved.
 
 | Colour | Light | Dark |
 |---|---|---|
@@ -126,8 +126,7 @@ struct Mode {
     const char* bestFile = nullptr;  // holds the personal best, under the pref path; null keeps none
     int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
     int timeLimitSeconds = 0;        // reaching this ends the run, and the best is then the highest score
-    int garbageRows = 0;             // on the starting board; only lines that held garbage then count toward the goal
-    double messiness = 0;            // the chance a row's hole moves from the row below's
+    int garbageRows = 0;             // on the starting board, with a new hole every row; only lines that held garbage then count toward the goal
     bool editable = false;           // the mouse edits the board, hold and queue, and topping out clears the board
     bool undo = false;               // the undo key takes back the last piece, clock included
     bool drills = false;             // the menu opens the list of drills, and a run plays the chosen one
@@ -143,7 +142,7 @@ struct Mode {
 |---|---|
 | 40L | Sprint with personal bests |
 | Blitz | 2-minute score attack |
-| Dig | Clear N garbage lines, with configurable messiness |
+| Dig | Clear N garbage lines. Each row's hole is random among the 9 columns other than the row below's |
 | Sandbox | Editable board and queue, no end condition |
 | Versus | Against the bot (section 8) |
 
@@ -200,7 +199,7 @@ A drill is a JSON file in `data/drills/`, or under the pref path in `drills/` fo
 
 - Every locked piece must fill a target still open, compared by cells, so a rotation that fills the same cells counts. Hold can change the order. Anything else is a miss, as are topping out and running out of pieces with targets left.
 - A target's coordinates are on the board as it stands when that piece locks, after earlier clears. If an earlier piece clears lines, placing out of the listed order misses.
-- A miss says so and resets the drill at once, with no countdown. Retry starts it again with one. Undo gives back the last piece and its target.
+- A miss pauses on the missed board, clock included, and says so. Retry starts the drill again with a countdown, and undo takes back the missed piece. Otherwise, undo gives back the last piece and its target.
 - When the queue runs out, a held piece comes back to be placed.
 - Success goes to `next`, with a countdown, or shows the results. Only the last drill of a chain is listed in the session.
 

@@ -22,8 +22,6 @@ constexpr uint64_t kCountdownNs = 1'000'000'000;
 // ponytail: older placements are forgotten past this; a slot costs about 1 KB.
 constexpr int kUndoDepth = 256;
 
-constexpr uint64_t kMissBannerNs = 600'000'000;
-
 struct Play {
     const Mode* mode = &kModes[0];
     core::Game game{core::Ruleset{}, core::Handling{}, 1};
@@ -45,7 +43,7 @@ struct Play {
 
     const Drill* drill = nullptr;  // the one being played, if the mode has drills
     uint64_t filled = 0;           // a bit per drill target that's been placed
-    uint64_t missedUntilNs = 0;    // says so until then, since a miss resets the board at once
+    bool missed = false;           // paused on the missed board, until retry or undo
 
     std::unique_ptr<PcCoach> coach;  // made by the first run of a mode with the coach
 

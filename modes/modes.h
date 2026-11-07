@@ -17,11 +17,10 @@ struct Mode {
     const char* bestFile = nullptr;  // holds the personal best, under the pref path; null keeps none
     int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
     int timeLimitSeconds = 0;        // reaching this ends the run, and the best is then the highest score
-    // Rows of garbage on the starting board. With these, only lines that held
-    // garbage count toward the goal. Messiness is the chance a row's hole moves
-    // from the row below's, for this trainer only: it isn't TETR.IO's garbage path.
+    // Rows of garbage on the starting board, with a new hole every row. With these,
+    // only lines that held garbage count toward the goal. This trainer's own garbage
+    // isn't TETR.IO's path.
     int garbageRows = 0;
-    double messiness = 0;
     bool editable = false;  // the mouse edits the board, hold and queue, and topping out clears the board
     bool undo = false;      // the undo key takes back the last piece, clock included
     bool drills = false;    // the menu opens the list of drills, and a run plays the chosen one
@@ -44,23 +43,20 @@ inline const Mode kModes[] = {
      .bestFile = "best-blitz.json",
      .stats = StatScore | StatLevel | StatLines | StatPieces | StatPPS | StatKPP | StatAPM | StatAPP,
      .timeLimitSeconds = 120},
-    // ponytail: messiness 0.5 is a guess; tune it once the owner has dug on it
     {.name = "Dig 10",
      .blurb = "Clear 10 rows of garbage as fast as you can",
      .rules = {.noSzo = true},
      .goalLines = 10,
      .bestFile = "best-dig-10.json",
      .stats = StatGarbage | StatPieces | StatPPS | StatKPP | StatFinesse,
-     .garbageRows = 10,
-     .messiness = 0.5},
+     .garbageRows = 10},
     {.name = "Dig 18",
      .blurb = "Clear 18 rows of garbage as fast as you can",
      .rules = {.noSzo = true},
      .goalLines = 18,
      .bestFile = "best-dig-18.json",
      .stats = StatGarbage | StatPieces | StatPPS | StatKPP | StatFinesse,
-     .garbageRows = 18,
-     .messiness = 0.5},
+     .garbageRows = 18},
     {.name = "Sandbox",
      .blurb = "Mouse paints the board; click hold or the queue to change them",
      .rules = {.noSzo = true},
