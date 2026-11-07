@@ -213,7 +213,7 @@ void drawFrame(App& app, Ui& ui) {
         if (play.over) hint = keyName(BindRetry) + " to retry, " + keyName(BindMenu) + " for the menu";
         else if (SDL_GetTicksNS() < play.missedUntilNs) banner = "Missed";
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
-        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history, play.drill, play.filled});
+        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];

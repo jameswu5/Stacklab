@@ -24,7 +24,7 @@ struct InputEvent {
     Action action;
     bool pressed;
     double subframe;
-    bool hoisted = false;  // left/right held since before the game: starts charged
+    bool hoisted = false;  // held since before the game: left/right starts charged
 };
 
 // Stored in frames, as in TETR.IO. sdf == 41 means instant soft drop.

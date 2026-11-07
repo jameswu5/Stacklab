@@ -339,6 +339,10 @@ void testHandCases() {
     search.run(cave.board, cave.falling, rules);
     assert(has({{{2, 5}, {3, 5}, {4, 5}, {5, 5}}}, Spin::None) > 0);
 
+    // No piece, as when a drill's queue runs out: nowhere to place, and after a real search too.
+    search.run(core::Board{}, core::Falling{}, rules);
+    assert(search.placements.empty());
+
     // No 180 means no 180 in any path.
     core::Ruleset no180;
     no180.allow180 = false;
@@ -514,6 +518,13 @@ void testHoldRestartsTheCount() {
     judged = player.drop();
     assert(judged && judged->piece == Piece::T);
     checkJudged(judged, 0, 0, 0);
+
+    // A key held since before the run isn't a press for this piece.
+    Player carried(core::Board{}, Piece::T, rules);
+    carried.press({{Action::Left, true, 0, true}});
+    carried.press({{Action::Left, false, 0}});
+    auto carriedJudged = carried.drop();
+    assert(carriedJudged && carriedJudged->presses == 0 && carriedJudged->faults == 0);
 
     core::Ruleset noHold = rules;
     noHold.allowHold = false;

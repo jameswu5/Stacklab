@@ -1,9 +1,11 @@
 // Judges each placement by comparing the keys pressed for it with the move search's
 // minimum. A placement costs one per press of move, rotate or soft drop, held or not.
+// A key held since before the run costs nothing, since the player didn't press it for this piece.
 // Hard drop is on neither side. Hold is a choice of piece rather than a way to place
 // one, so it never costs anything: the count starts again for the piece it brings out.
 #pragma once
 
+#include <array>
 #include <optional>
 #include <span>
 #include <vector>
@@ -20,7 +22,21 @@ struct Judgement {
     int faults;  // presses beyond the minimum, never below 0
 };
 
-// Reusable: after the first pieces, ticks don't allocate.
+// A run's faults, as undo restores them and the stats card shows them.
+struct FaultStats {
+    int total = 0;
+    int last = 0;  // the last lock's, or 0 if it couldn't be judged
+    std::array<std::array<int, 4>, 8> byPiece{};  // indexed by core::Piece, then rotation
+
+    void note(const std::optional<Judgement>& judged) {
+        last = judged ? judged->faults : 0;
+        if (!judged) return;
+        total += judged->faults;
+        byPiece[static_cast<int>(judged->piece)][judged->rot] += judged->faults;
+    }
+};
+
+// Reusable: ticks don't allocate, so long as restart has seen a queue as long as any to come.
 // ponytail: the search doesn't let time pass, so at gravity high enough to pull a piece
 // down between presses a minimum can be out of reach and a fault invented. Skip judging
 // or search from the floor if finesse is shown in a mode that gets that fast.

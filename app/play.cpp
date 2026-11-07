@@ -31,6 +31,8 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     if (drill) setUpDrill(game, *drill);
     filled = 0;
     missedUntilNs = 0;
+    finesse.restart(game);
+    faults = {};
     shown = game;
     inputs.clear();
     startNs = runStartNs;
@@ -39,7 +41,7 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     if (mode->undo) {
         if (undoSlots.empty()) {
             undoSlots.reserve(kUndoDepth);
-            for (int i = 0; i < kUndoDepth; i++) undoSlots.push_back({core::Game(core::Ruleset{}, core::Handling{}, 1), 0});
+            for (int i = 0; i < kUndoDepth; i++) undoSlots.push_back({core::Game(core::Ruleset{}, core::Handling{}, 1), 0, {}});
         }
         for (UndoSlot& slot : undoSlots) slot.game.queue.reserve(game.queue.capacity());  // a drill's queue can be long
         undoCount = 0;
@@ -51,6 +53,7 @@ void Play::saveUndo() {
     undoNewest = (undoNewest + 1) % kUndoDepth;
     undoSlots[undoNewest].game = game;
     undoSlots[undoNewest].filled = filled;
+    undoSlots[undoNewest].faults = faults;
     undoCount = std::min(undoCount + 1, kUndoDepth);
 }
 
@@ -62,8 +65,10 @@ void Play::undo(uint64_t timeNs) {
     }
     game = undoSlots[undoNewest].game;
     filled = undoSlots[undoNewest].filled;
+    faults = undoSlots[undoNewest].faults;
     // Later inputs in the tick that saved the slot may have moved the piece.
     game.respawn(game.falling.piece);
+    finesse.restart(game);
     startNs = timeNs - (game.frame * 1'000'000'000 + core::kTicksPerSecond - 1) / core::kTicksPerSecond;
     // The slot remembers the keys held back then. At subframe 0 these release
     // them before a charged move can act.
@@ -76,8 +81,9 @@ void Play::begin() {
     started = true;
     // Keys held when the run starts carry over, with the most recently pressed move
     // last so it sets direction. Replays show hoisted hold, 180 and moves, in that
-    // order. CW and CCW are assumed to match 180, and soft drop to carry unhoisted.
-    if (held[BindSoftDrop] > 0) inputs.push(core::Action::SoftDrop, true, startNs, startNs, 0);
+    // order. CW and CCW are assumed to match 180. Soft drop goes first, and being
+    // hoisted only tells finesse that it wasn't pressed for this piece.
+    if (held[BindSoftDrop] > 0) inputs.push(core::Action::SoftDrop, true, startNs, startNs, 0, true);
     Bind firstMove = lastMove == BindLeft ? BindRight : BindLeft;
     for (Bind bind : {BindHold, BindCW, BindCCW, Bind180, firstMove, lastMove})
         if (held[bind] > 0) inputs.push(static_cast<core::Action>(bind), true, startNs, startNs, 0, true);
@@ -97,11 +103,15 @@ void Play::stepTo(uint64_t nowNs) {
     while (!over && game.frame < target) {
         auto due = inputs.due(game.frame);
         int progressBefore = mode->goalProgress(game.stats);
-        const auto& locks = game.tick(due);
+        // ponytail: finesse is off with levels, since the move search doesn't let time pass and
+        // late levels fall fast enough for that to invent faults. Search from the floor to turn it on.
+        const auto& locks = mode->rules.levels ? game.tick(due) : finesse.tick(game, due);
+        if (!locks.empty()) faults.note(finesse.judged);
 
         if (game.toppedOut && mode->editable) {
             game.board = core::Board{};
             game.respawn(game.falling.piece);
+            finesse.restart(game);
         } else if (game.toppedOut && !drill) {
             over = true;
             endSeconds = game.seconds();
@@ -164,6 +174,7 @@ bool Play::judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs) {
             const core::Piece last = game.hold;
             game.hold = core::Piece::None;
             game.respawn(last);
+            finesse.restart(game);
         }
     }
     if (!missed && !game.toppedOut) return false;
@@ -176,6 +187,7 @@ void Play::paint(int x, int y, core::Piece piece) {
     for (const core::Cell& cell : game.falling.cells())
         if (cell.x == x && cell.y == y) return;
     game.board.at(x, y) = piece;
+    finesse.restart(game);
 }
 
 void Play::cycleQueue(int slot) {
