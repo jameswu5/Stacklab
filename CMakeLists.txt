@@ -51,6 +51,10 @@ add_test(NAME app_test COMMAND app_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  
 add_executable(ui_shot tests/ui_shot.cpp app/ui.cpp app/settings.cpp)
 target_link_libraries(ui_shot PRIVATE core SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)
 
+# Not a test: prints frame times in the PC coach with the solver busy.
+add_executable(frame_bench tests/frame_bench.cpp app/play.cpp app/pc_coach.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
+target_link_libraries(frame_bench PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)
+
 add_executable(replay_parity tests/replay_parity.cpp)
 target_link_libraries(replay_parity PRIVATE core nlohmann_json::nlohmann_json)
 

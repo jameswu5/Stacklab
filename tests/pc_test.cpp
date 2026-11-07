@@ -1,6 +1,6 @@
 // Self-checks for the perfect clear solver. Every answer it gives is played through
 // core::Game, and "no" answers are compared with boards known to have a perfect clear and
-// with a plain search that has none of the solver's shortcuts. `pc_test --bench` prints timings.
+// with a plain search that has none of the solver's shortcuts. `pc_test --bench` prints timings, and `pc_test --sweep` checks the indicator against a brute force.
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -11,8 +11,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <string>
 #include <random>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "ai/pc_solver.h"
@@ -1162,6 +1165,195 @@ void benchAdvicePlay(int games, int samples, int randomFirst, int offset) {
     }
 }
 
+
+// --sweep: the indicator's answers on states from simulated coach play under 40L rules, against a
+// brute force that shares only the move search with the solver: no pruning but rows a clear can't reach.
+struct Brute {
+    MoveSearch search;
+    core::Ruleset rules;
+    std::unordered_set<uint64_t> failed;
+    int lines = 0;
+
+    static uint64_t bits(const core::Board& board) {
+        uint64_t out = 0;
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 10; x++) out |= uint64_t{board.at(x, y) != Piece::None} << (y * 10 + x);
+        return out;
+    }
+
+    // `left` placements to go; stream[next] is the next piece to come.
+    bool turn(const core::Board& board, int cleared, int left, Piece current, Piece hold, bool canHold, std::span<const Piece> stream, size_t next) {
+        const uint64_t key = bits(board) | uint64_t{next} << 40 | uint64_t(current) << 45 | uint64_t(hold) << 49 | uint64_t{canHold} << 53 | uint64_t(left) << 54;
+        if (failed.count(key)) return false;
+        const Piece drawn = next < stream.size() ? stream[next] : Piece::None;
+        bool ok = current != Piece::None && place(board, cleared, left, current, hold, stream, next);
+        if (!ok && canHold && hold == Piece::None && drawn != Piece::None) ok = place(board, cleared, left, drawn, current, stream, next + 1);
+        if (!ok && canHold && hold != Piece::None && hold != current) ok = place(board, cleared, left, hold, current, stream, next);
+        if (!ok) failed.insert(key);
+        return ok;
+    }
+
+    // Boards stay under row 4, so a board's 40 bits and the piece decide the placements.
+    std::unordered_map<uint64_t, std::vector<std::array<core::Cell, 4>>> placements;
+
+    bool place(const core::Board& board, int cleared, int left, Piece piece, Piece hold, std::span<const Piece> stream, size_t next) {
+        const uint64_t key = bits(board) | uint64_t(piece) << 40;
+        auto found = placements.find(key);
+        if (found == placements.end()) {
+            if (placements.size() > 2'000'000) placements.clear();
+            search.run(board, core::spawnFalling(piece), rules);
+            std::vector<std::array<core::Cell, 4>> cells;
+            for (const ai::Placement& placement : search.placements) cells.push_back(search.cells(placement));
+            found = placements.emplace(key, std::move(cells)).first;
+        }
+        const std::vector<std::array<core::Cell, 4>> options = found->second;  // a copy, since deeper calls can rehash
+        const int before = cellCount(board);
+        for (const auto& cells : options) {
+            if (std::any_of(cells.begin(), cells.end(), [&](const core::Cell& cell) { return cell.y >= lines - cleared; })) continue;
+            core::Board after = board;
+            if (lockCells(after, cells, piece)) return true;
+            if (left == 1) continue;
+            const int nowCleared = cleared + (before + 4 - cellCount(after)) / 10;
+            if (turn(after, nowCleared, left - 1, next < stream.size() ? stream[next] : Piece::None, hold, true, stream, next + 1)) return true;
+        }
+        return false;
+    }
+
+    // A perfect clear in `lines` lines from these pieces, current first.
+    bool clears(const PcQuery& query, int lines_, int placements, std::span<const Piece> stream) {
+        lines = lines_;
+        failed.clear();
+        return turn(query.board, 0, placements, stream[0], query.hold, !query.holdUsed && query.rules.allowHold, stream, 1);
+    }
+};
+
+void sweepIndicator(int states, uint32_t seed) {
+    PcSolver solver;
+    MoveSearch search;
+    Brute brute;
+    const core::Ruleset rules = kModes[0].rules;
+    brute.rules = rules;
+    core::Handling handling;
+    handling.sdf = 20;
+    core::Game game(rules, handling, seed);
+    std::mt19937 rng(seed);
+    std::vector<Piece> seen = {game.falling.piece};
+    seen.insert(seen.end(), game.queue.begin(), game.queue.begin() + game.rules.previews);
+    auto reveal = [&](int count) {
+        for (int i = 0; i < count; i++) seen.push_back(game.queue[game.rules.previews - count + i]);
+    };
+    std::map<std::string, int> tally;
+    double bruteSeconds = 0;
+    int attemptLines = 0;
+    for (int state = 0; state < states; state++) {
+        if (!game.holdUsed && rng() % 6 == 0) {  // the coach asks again after a hold
+            const bool drew = game.hold == Piece::None;
+            Driver{game}.tap(core::Action::Hold);
+            reveal(drew);
+        }
+        PcQuery query = visibleQuery(game, seen);
+        const PcResult result = solver.solve(query);
+
+        const auto begin = std::chrono::steady_clock::now();
+        const int cells = cellCount(query.board);
+        const int known = 1 + static_cast<int>(query.queue.size()) + (query.hold != Piece::None);
+        std::vector<Piece> visible = {query.current};
+        visible.insert(visible.end(), query.queue.begin(), query.queue.end());
+        bool anyFound = false, anyPossible = false, allDecided = true, claimDecided = false, claimPossible = false;
+        for (int lines = 1; lines <= query.maxLines; lines++) {
+            const int spare = 10 * lines - cells;
+            if (spare <= 0 || spare % 4 != 0) continue;
+            bool tooTall = false;
+            for (int x = 0; x < 10; x++) tooTall = tooTall || query.board.at(x, lines) != Piece::None;
+            if (tooTall) continue;
+            const int placements = spare / 4, unseen = placements + 1 - known;
+            const bool found = placements <= known && brute.clears(query, lines, placements, visible);
+            bool possible = found, decided = true;
+            if (!found && unseen > 0 && unseen <= 2) {
+                std::vector<Piece> pieces;
+                std::vector<std::vector<Piece>> futures;
+                allFutures(query.bagLeft, unseen, pieces, futures);
+                for (const auto& future : futures) {
+                    std::vector<Piece> stream = visible;
+                    stream.insert(stream.end(), future.begin(), future.end());
+                    if ((possible = brute.clears(query, lines, placements, stream))) break;
+                }
+            } else if (!found && unseen > 2) {
+                decided = false;
+            }
+            anyFound = anyFound || found;
+            anyPossible = anyPossible || possible;
+            allDecided = allDecided && decided;
+            if (lines == result.lines) {
+                claimDecided = decided;
+                claimPossible = possible;
+            }
+        }
+        bruteSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
+
+        switch (result.status) {
+            case PcStatus::Found: {
+                core::Board board = query.board;
+                bool empty = false;
+                for (const ai::PcStep& step : result.steps) empty = lockCells(board, step.cells, step.piece);
+                tally[empty && anyFound ? "PC ready: right" : "PC ready: WRONG"]++;
+                break;
+            }
+            case PcStatus::NeedMorePieces:
+                if (anyFound) tally["Possible: WRONG, a PC was ready"]++;
+                else if (!claimDecided) tally["Possible: unchecked, 3+ unseen pieces"]++;
+                else if (claimPossible) tally["Possible: right"]++;
+                else tally[result.piecesNeeded < known ? "Possible: WRONG, exact case" : "Possible: none exists (allowed, fewer known than needed)"]++;
+                break;
+            case PcStatus::Impossible:
+                if (anyPossible) tally["No PC: WRONG"]++;
+                else tally[allDecided ? "No PC: right" : "No PC: right where checked"]++;
+                break;
+            case PcStatus::Unknown: tally["Can't tell"]++; break;
+        }
+        if (anyFound && result.status != PcStatus::Found && result.status != PcStatus::Unknown) std::printf("MISMATCH state %d: %s\n", state, "a PC was ready");
+
+        // The next placement: usually the solver's plan, guessing unseen pieces if it must, so most
+        // states are live attempts; else a random one under row 4.
+        ai::PcStep step;
+        const PcResult plan = result.status == PcStatus::NeedMorePieces ? solver.solveWithUnseen(query) : result;
+        if (plan.status == PcStatus::Found && rng() % 10 < 8) {
+            step = plan.steps[0];
+        } else {
+            const bool hold = !game.holdUsed && rng() % 4 == 0;
+            const Piece piece = hold ? (game.hold != Piece::None ? game.hold : game.queue[0]) : game.falling.piece;
+            search.run(game.board, core::spawnFalling(piece), rules);
+            std::vector<ai::Placement> low;
+            for (const ai::Placement& placement : search.placements) {
+                const auto cells = search.cells(placement);
+                if (std::all_of(cells.begin(), cells.end(), [](const core::Cell& cell) { return cell.y < 4; })) low.push_back(placement);
+            }
+            if (low.empty()) {
+                game.board = {};
+                attemptLines = 0;
+                continue;
+            }
+            const ai::Placement placement = low[rng() % low.size()];
+            step = {piece, hold, search.cells(placement), search.inputs(placement)};
+        }
+        const bool drewFromQueue = step.hold && game.hold == Piece::None;
+        const int linesBefore = game.stats.lines;
+        Driver driver{game};
+        if (step.hold) driver.tap(core::Action::Hold);
+        for (Move move : step.moves) driver.move(move);
+        driver.hardDrop();
+        reveal(drewFromQueue ? 2 : 1);
+        attemptLines += game.stats.lines - linesBefore;
+        bool high = false;
+        for (int x = 0; x < 10; x++) high = high || game.board.at(x, 4) != Piece::None;
+        if (driver.perfectClear || high || attemptLines >= 4 || (result.status == PcStatus::Impossible && rng() % 2)) {  // a dead attempt, half the time undone
+            game.board = {};
+            attemptLines = 0;
+        }
+    }
+    std::printf("indicator sweep, seed %u, %d states, brute force %.0f s:\n", seed, states, bruteSeconds);
+    for (const auto& [name, count] : tally) std::printf("  %s: %d\n", name.c_str(), count);
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1169,6 +1361,10 @@ int main(int argc, char** argv) {
         const char* part = argc > 2 ? argv[2] : "";
         if (std::strcmp(part, "stable") == 0) benchAdviceStability(argc > 3 ? std::atoi(argv[3]) : 21);
         if (std::strcmp(part, "play") == 0) benchAdvicePlay(argc > 3 ? std::atoi(argv[3]) : 10, argc > 4 ? std::atoi(argv[4]) : 8, argc > 5 ? std::atoi(argv[5]) : 0, argc > 6 ? std::atoi(argv[6]) : 0);
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--sweep") == 0) {
+        sweepIndicator(argc > 2 ? std::atoi(argv[2]) : 1000, argc > 3 ? std::atoi(argv[3]) : 1);
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--bench") == 0) {
