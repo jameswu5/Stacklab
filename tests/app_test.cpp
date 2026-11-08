@@ -1811,11 +1811,11 @@ int main() {
     testPcCoachRun();
     testPcPractice();
     testBagCount();
+    testBotPresets();  // first of the versus tests, which index the presets
     testPlayDoesNotAllocate(kModes[6]);
     testVersusRound();
     testReplayRoundTrip();
     testVersusOptions();
-    testBotPresets();
     testVersusReplay();
     return 0;
 }

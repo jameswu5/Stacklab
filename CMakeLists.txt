@@ -21,6 +21,7 @@ add_executable(stacklab app/main.cpp app/play.cpp app/pc_coach.cpp app/versus.cp
 target_link_libraries(stacklab PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json objc)
 add_custom_command(TARGET stacklab POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:stacklab>/assets
+  COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:stacklab>/data  # so files deleted from data/ go too
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:stacklab>/data)
 
 include(FetchContent)
