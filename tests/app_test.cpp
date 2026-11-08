@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cmath>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include "app/play.h"
 #include "app/settings.h"
 #include "app/timing.h"
+#include "ai/bot.h"
 #include "tests/move_driver.h"
 
 // Only the thread playing: the PC coach's worker allocates on its own, as it's allowed to.
@@ -1521,6 +1523,70 @@ void testPlayDoesNotAllocate(const Mode& mode) {
 
 }  // namespace
 
+// A whole versus round through Play: this side is a bot pressing keys at about 5 pieces a
+// second, against the app's bot on its worker. Garbage goes both ways until one tops out,
+// then the round card, and the next round keeps the score. Playing doesn't allocate.
+void testVersusRound() {
+    const Mode* mode = nullptr;
+    for (const Mode& m : kModes)
+        if (m.versus) mode = &m;
+    assert(mode && mode->rules.b2bCharging && mode->rules.openerPhase == 14 && !mode->undo && !mode->bestFile);
+    Play play;
+    play.mode = mode;
+    play.botPps = 1.5;
+    play.restart(core::Handling{}, 11, 0);
+    assert(play.versus->bot.queue == play.game.queue);  // one seed for both, as in League
+    ai::Bot me;
+    ai::BotChoice choice;
+    uint64_t now = 0, nextPiece = 0;
+    int plannedFor = -1;
+    size_t playAllocations = 0;
+    while (!play.versus->roundOver && play.game.frame < 60 * 600) {
+        const uint64_t frame = play.game.frame;
+        if (play.started && plannedFor != play.game.stats.pieces && frame >= nextPiece) {
+            onMainThread = false;
+            const bool ok = me.choose(play.game, choice);
+            onMainThread = true;
+            plannedFor = play.game.stats.pieces;
+            nextPiece = frame + 12;
+            for (size_t t = 0; ok && t < choice.inputs.size(); t++)
+                for (const core::InputEvent& e : choice.inputs[t]) play.key(static_cast<Bind>(e.action), e.pressed, (frame + t) * kTickNs);
+            if (!ok) {
+                play.key(BindHardDrop, true, frame * kTickNs);
+                play.key(BindHardDrop, false, frame * kTickNs);
+            }
+        }
+        now += kTickNs;
+        const size_t before = allocations;
+        play.stepTo(now);
+        playAllocations += allocations - before;
+        std::this_thread::sleep_for(std::chrono::microseconds(200));  // time for the app's bot to answer
+    }
+    const core::Game& bot = play.versus->bot;
+    std::printf("versus round: %llu frames, you %d pieces %d attack %d received, bot %d pieces %d attack %d received, %s topped out\n", static_cast<unsigned long long>(play.game.frame), play.game.stats.pieces, play.game.stats.attack,
+                play.game.stats.garbageReceived, bot.stats.pieces, bot.stats.attack, bot.stats.garbageReceived, play.game.toppedOut ? "you" : "the bot");
+    assert(play.versus->roundOver && (play.game.toppedOut || bot.toppedOut));
+    assert(bot.stats.pieces > 20 && play.game.stats.attack > 0 && bot.stats.garbageReceived > 0);
+    assert(playAllocations == 0);
+    const Match match = play.versus->match;
+    assert(match.rounds == 1 && match.wins[0] + match.wins[1] <= 1 && !play.over);
+
+    // The round card, then a new round on a new seed that keeps the score.
+    play.stepTo(now + kRoundCardNs / 2);
+    assert(play.versus->roundOver);
+    play.stepTo(now + kRoundCardNs);
+    assert(!play.versus->roundOver && !play.started && play.game.stats.pieces == 0 && play.versus->match.wins == match.wins);
+    play.stepTo(now + kRoundCardNs + kCountdownNs + 10 * kTickNs);
+    assert(play.started && play.game.frame > 0 && play.versus->bot.frame == play.game.frame);
+
+    // Seven rounds end the match.
+    play.versus->match.wins = {6, 0};
+    play.versus->bot.toppedOut = true;
+    play.key(BindHardDrop, true, play.startNs + play.game.frame * kTickNs);
+    play.stepTo(play.startNs + (play.game.frame + 1) * kTickNs);
+    assert(play.over && play.versus->match.wins[0] == 7);
+}
+
 int main() {
     onMainThread = true;
     testTickAt();
@@ -1549,5 +1615,6 @@ int main() {
     testPcPractice();
     testBagCount();
     testPlayDoesNotAllocate(kModes[6]);
+    testVersusRound();
     return 0;
 }

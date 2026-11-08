@@ -12,28 +12,11 @@
 #include <vector>
 
 #include "ai/bot.h"
+#include "modes/modes.h"
 
 namespace {
 
 constexpr uint64_t kMaxFrames = 10 * 60 * core::kTicksPerSecond;
-
-// TETRA LEAGUE's options from a real replay; anything it leaves out keeps core's fallback.
-core::Ruleset leagueRules() {
-    core::Ruleset r;
-    r.gravityIncrease = 0.0035;
-    r.gravityMargin = 7200;
-    r.garbageMargin = 10800;
-    r.garbageIncrease = 0.008;
-    r.openerPhase = 14;
-    r.spinBonuses = core::SpinBonuses::AllMiniPlus;
-    r.b2bCharging = true;
-    r.b2bChaining = false;
-    r.b2bChargeBase = 3;
-    r.pcGarbage = 5;
-    r.pcB2b = 1;
-    r.garbageSpecialBonus = true;
-    return r;
-}
 
 struct Player {
     core::Game game;
@@ -70,7 +53,7 @@ struct Result {
 };
 
 Result versus(uint32_t seed, const ai::BotWeights& a, const ai::BotWeights& b) {
-    const core::Ruleset rules = leagueRules();
+    const core::Ruleset rules = kVersusRules;
     // ponytail: different seeds per side, since two equal bots on one queue mirror each other
     Player players[2] = {{rules, seed * 2 + 1, a}, {rules, seed * 2 + 2, b}};
     std::vector<core::GarbageEvent> inbox[2] = {{{core::GarbageEvent::Target, 1}}, {{core::GarbageEvent::Target, 0}}};
@@ -106,7 +89,7 @@ Result versus(uint32_t seed, const ai::BotWeights& a, const ai::BotWeights& b) {
 
 // Sprint without `apm`, survival with it: `apm` lines a minute arrive, 4 at a time.
 Result solo(uint32_t seed, const ai::BotWeights& weights, int apm) {
-    const core::Ruleset rules = apm ? leagueRules() : core::Ruleset{};
+    const core::Ruleset rules = apm ? kVersusRules : core::Ruleset{};
     Player p(rules, seed, weights);
     const uint64_t every = apm ? 4 * 60 * core::kTicksPerSecond / apm : 0;
     int iid = 0;

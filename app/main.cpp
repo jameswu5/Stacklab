@@ -95,6 +95,7 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
         case SDL_SCANCODE_LEFT:
         case SDL_SCANCODE_RIGHT:
             if (app.menuRow < kModeCount && kModes[app.menuRow].pcStyle == PcStyle::Practice) app.play.residue = (app.play.residue + (key.scancode == SDL_SCANCODE_LEFT ? 6 : 1)) % 7;
+            if (app.menuRow < kModeCount && kModes[app.menuRow].versus) app.play.botPps = std::clamp(app.play.botPps + (key.scancode == SDL_SCANCODE_LEFT ? -0.5 : 0.5), 0.5, 3.0);
             break;
         case SDL_SCANCODE_RETURN:
             if (key.repeat) break;
@@ -208,6 +209,7 @@ void recordRun(App& app) {
     const Play& play = app.play;
     double& best = app.bests[app.menuRow];
     app.history.push_back({play.mode, play.endSeconds, play.game.stats, play.game.toppedOut, play.best != best});
+    if (play.mode->versus) app.history.back().rounds = play.versus->match.wins;
     best = play.best;
 }
 
@@ -216,7 +218,7 @@ void drawFrame(App& app, Ui& ui) {
     ui.dark = app.settings.dark;
     ui.beginFrame();
     if (app.screen == Screen::Menu) {
-        ui.drawMenu(app.menuRow, app.bests, app.play.residue);
+        ui.drawMenu(app.menuRow, app.bests, app.play.residue, app.play.botPps);
     } else if (app.screen == Screen::Drills) {
         ui.drawDrills(app.drillRow, app.drillSet.drills, app.drillError.empty() ? nullptr : app.drillError.c_str());
     } else if (app.screen == Screen::Settings) {
@@ -231,13 +233,17 @@ void drawFrame(App& app, Ui& ui) {
             hint = keyName(BindRetry) + " to retry, " + keyName(BindUndo) + " to undo";
         }
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
-        PcView pcView;
-        const PcView* pc = nullptr;
-        if (play.mode->pcFile) {
-            pcView = play.coach->view(play.shown, play.mode->goalLines, play.over);
-            pc = &pcView;
+        if (play.mode->versus) {
+            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), app.history});
+        } else {
+            PcView pcView;
+            const PcView* pc = nullptr;
+            if (play.mode->pcFile) {
+                pcView = play.coach->view(play.shown, play.mode->goalLines, play.over);
+                pc = &pcView;
+            }
+            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc});
         }
-        ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc});
     }
     if (app.settings.overlay) {
         char frameLine[64], inputLine[64];
