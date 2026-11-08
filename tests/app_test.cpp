@@ -1540,6 +1540,7 @@ void testVersusRound() {
     play.mode = mode;
     play.botPps = 1.5;
     play.restart(core::Handling{}, 11, 0);
+    play.versus->waitForBot = true;
     assert(play.versus->bot.queue == play.game.queue);  // one seed for both, as in League
     ai::Bot me;
     ai::BotChoice choice;
@@ -1565,7 +1566,6 @@ void testVersusRound() {
         const size_t before = allocations;
         play.stepTo(now);
         playAllocations += allocations - before;
-        std::this_thread::sleep_for(std::chrono::microseconds(200));  // time for the app's bot to answer
     }
     const core::Game& bot = play.versus->bot;
     std::printf("versus round: %llu frames, you %d pieces %d attack %d received, bot %d pieces %d attack %d received, %s topped out\n", static_cast<unsigned long long>(play.game.frame), play.game.stats.pieces, play.game.stats.attack,
@@ -1642,11 +1642,11 @@ void testVersusOptions() {
     Versus versus;
     versus.options = quiet;
     versus.pps = 3;
+    versus.waitForBot = true;
     versus.startRound(5);
     for (int f = 0; f < 60 * 60 && versus.bot.stats.attack == 0 && !versus.bot.toppedOut; f++) {
         versus.afterYourTick({}, f);
         assert(versus.toYou.empty());
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
     }
     assert(versus.bot.stats.attack > 0);
 }

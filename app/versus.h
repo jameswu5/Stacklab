@@ -47,6 +47,7 @@ public:
     core::Game bot{kVersusRules, core::Handling{}, 1};
     double pps = 1;  // the most pieces a second the bot starts
     VersusOptions options;
+    bool waitForBot = false;  // tests: wait for each plan, so a round plays out the same at any load
     Match match;
     bool roundOver = false;
     uint64_t roundEndNs = 0;
