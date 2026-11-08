@@ -1,8 +1,11 @@
 // Headless bot games on core, deterministic from a seed. Games run in parallel.
 //
-//   bot_match versus <games> <seed> <weights A> [weights B]   two bots with League's garbage
-//   bot_match sprint <games> <seed> <weights>                 40 lines, timed
-//   bot_match survival <games> <seed> <weights> [apm]         garbage at a steady rate until top out
+//   bot_match versus <games> <seed> <bot A> [bot B]   two bots with League's garbage
+//   bot_match sprint <games> <seed> <bot>             40 lines, timed
+//   bot_match survival <games> <seed> <bot> [apm]     garbage at a steady rate until top out
+//
+// A bot is a settings file for ai::loadBot, such as data/bot/default.txt. In versus,
+// games come in pairs on the same seeds with the sides swapped, so queue luck cancels.
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -27,8 +30,8 @@ struct Player {
     int misplaced = 0;  // locks that didn't land where the bot chose
     int sends = 0;      // this player's sends so far, numbered as core numbers them
 
-    Player(const core::Ruleset& rules, uint32_t seed, const ai::BotWeights& weights) : game(rules, core::Handling{}, seed) {
-        bot.weights = weights;
+    Player(const core::Ruleset& rules, uint32_t seed, const ai::Bot& bot) : game(rules, core::Handling{}, seed), bot(bot) {
+        this->bot.rng = core::Rng(seed);
     }
 
     // One tick, starting a new plan when the last one has finished.
@@ -52,10 +55,11 @@ struct Result {
     int pieces = 0, attack = 0, misplaced = 0;
 };
 
-Result versus(uint32_t seed, const ai::BotWeights& a, const ai::BotWeights& b) {
+// Bot A's result. With `swapped`, A plays the second side's queue.
+Result versus(uint32_t seed, const ai::Bot& a, const ai::Bot& b, bool swapped) {
     const core::Ruleset rules = kVersusRules;
     // ponytail: different seeds per side, since two equal bots on one queue mirror each other
-    Player players[2] = {{rules, seed * 2 + 1, a}, {rules, seed * 2 + 2, b}};
+    Player players[2] = {{rules, seed * 2 + 1, swapped ? b : a}, {rules, seed * 2 + 2, swapped ? a : b}};
     std::vector<core::GarbageEvent> inbox[2] = {{{core::GarbageEvent::Target, 1}}, {{core::GarbageEvent::Target, 0}}};
     int received[2] = {0, 0};  // the last of the other's sends each has been given
     std::vector<core::GarbageEvent> mail;
@@ -76,10 +80,11 @@ Result versus(uint32_t seed, const ai::BotWeights& a, const ai::BotWeights& b) {
             mail.clear();
         }
     }
-    const core::Game& g = players[0].game;
+    const core::Game& g = players[swapped].game;
+    const core::Game& other = players[!swapped].game;
     Result r;
-    r.draw = g.toppedOut == players[1].game.toppedOut;
-    r.won = !g.toppedOut && players[1].game.toppedOut;
+    r.draw = g.toppedOut == other.toppedOut;
+    r.won = !g.toppedOut && other.toppedOut;
     r.seconds = g.seconds();
     r.pieces = g.stats.pieces;
     r.attack = g.stats.attack;
@@ -88,9 +93,9 @@ Result versus(uint32_t seed, const ai::BotWeights& a, const ai::BotWeights& b) {
 }
 
 // Sprint without `apm`, survival with it: `apm` lines a minute arrive, 4 at a time.
-Result solo(uint32_t seed, const ai::BotWeights& weights, int apm) {
-    const core::Ruleset rules = apm ? kVersusRules : core::Ruleset{};
-    Player p(rules, seed, weights);
+Result solo(uint32_t seed, const ai::Bot& bot, int apm) {
+    const core::Ruleset rules = apm ? kVersusRules : k40LRules;
+    Player p(rules, seed, bot);
     const uint64_t every = apm ? 4 * 60 * core::kTicksPerSecond / apm : 0;
     int iid = 0;
     while (!p.game.toppedOut && p.game.frame < kMaxFrames && (apm || p.game.stats.lines < 40)) {
@@ -110,36 +115,38 @@ Result solo(uint32_t seed, const ai::BotWeights& weights, int apm) {
     return r;
 }
 
-ai::BotWeights load(const char* path) {
-    ai::BotWeights w;
-    if (!ai::loadBotWeights(path, w)) {
-        std::fprintf(stderr, "can't read weights from %s\n", path);
+ai::Bot load(const char* path) {
+    ai::Bot bot;
+    if (!ai::loadBot(path, bot)) {
+        std::fprintf(stderr, "can't read a bot from %s\n", path);
         std::exit(1);
     }
-    return w;
+    return bot;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 5) {
-        std::fprintf(stderr, "usage: bot_match versus|sprint|survival <games> <seed> <weights> [weights B | apm]\n");
+        std::fprintf(stderr, "usage: bot_match versus|sprint|survival <games> <seed> <bot> [bot B | apm]\n");
         return 1;
     }
     const std::string mode = argv[1];
     const int games = std::atoi(argv[2]);
     const uint32_t seed = static_cast<uint32_t>(std::strtoul(argv[3], nullptr, 10));
-    const ai::BotWeights a = load(argv[4]);
-    const ai::BotWeights b = mode == "versus" && argc > 5 ? load(argv[5]) : a;
+    const ai::Bot a = load(argv[4]);
+    const ai::Bot b = mode == "versus" && argc > 5 ? load(argv[5]) : a;
     const int apm = mode == "survival" ? (argc > 5 ? std::atoi(argv[5]) : 60) : 0;
     if (mode != "versus" && mode != "sprint" && mode != "survival") return 1;
 
     std::vector<Result> results(games);
     std::atomic<int> nextGame = 0;
     std::vector<std::thread> threads;
-    for (unsigned t = 0; t < std::max(1u, std::thread::hardware_concurrency()); t++) {
+    // Threads from BOT_THREADS, 3 by default to share the machine.
+    const int threadCount = std::getenv("BOT_THREADS") ? std::max(1, std::atoi(std::getenv("BOT_THREADS"))) : 3;
+    for (int t = 0; t < threadCount; t++) {
         threads.emplace_back([&] {
-            for (int i; (i = nextGame++) < games;) results[i] = mode == "versus" ? versus(seed + i, a, b) : solo(seed + i, a, apm);
+            for (int i; (i = nextGame++) < games;) results[i] = mode == "versus" ? versus(seed + i / 2, a, b, i % 2) : solo(seed + i, a, apm);
         });
     }
     for (auto& t : threads) t.join();
