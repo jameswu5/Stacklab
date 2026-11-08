@@ -36,6 +36,7 @@ struct BotChoice {
 
 class Bot {
 public:
+    std::string name;  // for menus
     BotWeights weights;
     int width = 48;       // states kept at each depth
     int depth = 0;        // pieces looked ahead, the falling one included; 0 for all that are visible
@@ -77,8 +78,9 @@ private:
     int lastTicks_ = 0;  // the last plan's length, without its wait
 };
 
-// A data file of `name value` lines, `#` starting a comment: BotWeights' names, and width,
-// depth, pps and mistakes. False if it can't be read, a name isn't known or a value is out of range.
+// A data file of `key value` lines, `#` starting a comment: `name` and the rest of its line,
+// BotWeights' names, width, depth, pps and mistakes. False if it can't be read, a key isn't
+// known or a value is out of range.
 bool loadBot(const std::string& path, Bot& bot);
 // The weights alone, for app/versus.cpp until it takes the whole bot.
 bool loadBotWeights(const std::string& path, BotWeights& weights);

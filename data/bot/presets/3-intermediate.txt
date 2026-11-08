@@ -1,0 +1,18 @@
+name Intermediate
+# Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
+#   40L: mean 69.01 s, best 64.67 s, 16 of 16 finished, PPS 1.58
+#   versus against 3 PPS: won 0 of 24, PPS 1.61, APP 0.507, APM 49.0
+#   survival, mean time alive of 600 s: 353.1 s at 40 APM incoming, 23.5 s at 120 APM
+holes -5.476
+height -0.2213
+danger -1.578
+bumpiness -0.5498
+well 0.4845
+tSlot 2.761
+attack 1.789
+b2b 2.548
+wasted -2.169
+pps 1.6
+width 12
+depth 3
+mistakes 0.04

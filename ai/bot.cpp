@@ -47,6 +47,10 @@ bool loadBot(const std::string& path, Bot& bot) {
         std::string name;
         double value;
         if (!(in >> name)) continue;
+        if (name == "name") {
+            std::getline(in >> std::ws, bot.name);
+            continue;
+        }
         if (!(in >> value)) return false;
         const auto weight = std::find_if(std::begin(weights), std::end(weights), [&](const auto& n) { return name == n.first; });
         const auto count = std::find_if(std::begin(counts), std::end(counts), [&](const auto& n) { return name == n.first; });
@@ -197,13 +201,13 @@ void Bot::expand(const Node& node, const core::Game& game, bool atRoot) {
 }
 
 bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bool>* cancel) {
-    // The PPS cap waits before moving, as long as the piece is in the air. The wait is
-    // judged from the last plan's length, so placements come about 1/pps apart.
+    // The PPS cap waits before moving, in the air or for up to half the lock delay on the
+    // ground. The wait is judged from the last plan's length, so placements come about 1/pps apart.
     core::Game now = game;
     int waited = 0;
     if (pps > 0) {
         const int wait = static_cast<int>(std::lround(core::kTicksPerSecond / pps)) - lastTicks_;
-        for (; waited < wait && std::floor(now.falling.y) > now.ghost().y; waited++) now.tick({});
+        for (; waited < wait && now.falling.locking + 1 < now.rules.lockTime / 2; waited++) now.tick({});
     }
 
     rules_ = &now.rules;
