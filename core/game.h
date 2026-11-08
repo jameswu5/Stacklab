@@ -218,6 +218,7 @@ struct Game {
     Falling ghost() const;
 
     double seconds() const { return static_cast<double>(frame) / kTicksPerSecond; }
+    int incomingLines() const;  // garbage on its way, for a meter
 
 private:
     struct Shift {

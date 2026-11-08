@@ -33,6 +33,7 @@ struct Mode {
     bool drills = false;    // the menu opens the list of drills, and a run plays the chosen one
     const char* pcFile = nullptr;  // turns on the PC coach, and holds its record under the pref path
     PcStyle pcStyle = PcStyle::Coach;
+    bool versus = false;  // you against the bot, first to kVersusRounds rounds
 
     int goalProgress(const core::Stats& stats) const { return garbageRows > 0 ? stats.garbageCleared : stats.lines; }
     bool bestIsScore() const { return timeLimitSeconds > 0; }
@@ -41,6 +42,24 @@ struct Mode {
 // The owner's 40L replays only differ from core's defaults in noSzo. They pass
 // tests/replay_parity with these rules, so re-check there if they change.
 inline constexpr core::Ruleset k40LRules{.noSzo = true};
+
+// versus-standard: TETRA LEAGUE's options, from the most recent of the owner's three League
+// replays. The other two agree on every rule; they differ only in display, countdown and timing
+// fields core has no setting for. All three share one seed per round between the two players.
+inline constexpr core::Ruleset kVersusRules{
+    .gravityIncrease = 0.0035,
+    .gravityMargin = 7200,
+    .spinBonuses = core::SpinBonuses::AllMiniPlus,
+    .b2bChaining = false,
+    .b2bCharging = true,
+    .b2bChargeBase = 3,
+    .pcGarbage = 5,
+    .pcB2b = 1,
+    .garbageIncrease = 0.008,
+    .garbageMargin = 10800,
+    .garbageSpecialBonus = true,
+    .openerPhase = 14,
+};
 
 inline const Mode kModes[] = {
     {"40 Lines", "Clear 40 lines as fast as you can", k40LRules, 40, "best-40l.json"},
@@ -93,5 +112,10 @@ inline const Mode kModes[] = {
      .goalLines = 40,
      .pcFile = "pc-count.json",
      .pcStyle = PcStyle::Count},
+    {.name = "Versus",
+     .blurb = "You against the bot, first to 7, with League's rules",
+     .rules = kVersusRules,
+     .stats = 0,
+     .versus = true},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));

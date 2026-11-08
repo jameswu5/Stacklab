@@ -279,7 +279,7 @@ float Ui::textWidth(FontId id, const char* string, float tracking) {
     return width;
 }
 
-void Ui::text(FontId id, const char* string, float x, float baseline, Color color, Align align, float tracking) {
+void Ui::text(FontId id, const char* string, float x, float baseline, Color color, Align align, float tracking, float alpha) {
     Font& font = fonts_[id];
     float pen = originX_ + x * scale_;
     if (align != Align::Left) {
@@ -288,6 +288,7 @@ void Ui::text(FontId id, const char* string, float x, float baseline, Color colo
     }
     float top = std::round(originY_ + baseline * scale_) - font.ascent;
     SDL_SetTextureColorModFloat(font.atlas, color.r, color.g, color.b);
+    SDL_SetTextureAlphaModFloat(font.atlas, alpha);
     for (const char* c = string; *c; c++) {
         if (*c & 0x80) continue;
         const Glyph& glyph = font.glyphs[*c];
@@ -358,7 +359,43 @@ bool Ui::holdHit(float x, float y) const {
 }
 
 void Ui::block(int x, int y, Color color, float alpha) {
-    fill(kBoardX + x * kCell + 1, kBoardY + (core::kVisibleHeight - 1 - y) * kCell + 1, kCell - 2, kCell - 2, color, 7, alpha);
+    fill(boardX_ + x * cell_ + 1, boardY_ + (core::kVisibleHeight - 1 - y) * cell_ + 1, cell_ - 2, cell_ - 2, color, 7 * cell_ / kCell, alpha);
+}
+
+// The board's background, at boardX_, boardY_ and cell_.
+void Ui::checker() {
+    const Palette& colors = palette();
+    fill(boardX_, boardY_, core::kBoardWidth * cell_, core::kVisibleHeight * cell_, colors.boardBackground, 8);
+    const float cornerSquare = 8 * cell_ / kCell;
+    for (int y = 0; y < core::kVisibleHeight; y++) {
+        for (int x = (y + 1) % 2; x < core::kBoardWidth; x += 2) {
+            float cellX = boardX_ + x * cell_, cellY = boardY_ + y * cell_;
+            bool topRight = x == core::kBoardWidth - 1 && y == 0;
+            bool bottomLeft = x == 0 && y == core::kVisibleHeight - 1;
+            if (!topRight && !bottomLeft) {
+                fill(cellX, cellY, cell_, cell_, colors.checker);
+                continue;
+            }
+            // Only the corner on the board's edge is rounded.
+            fill(cellX, cellY, cell_, cell_, colors.checker, cornerSquare);
+            fill(topRight ? cellX : cellX + cell_ - cornerSquare, topRight ? cellY + cell_ - cornerSquare : cellY, cornerSquare, cornerSquare, colors.checker);
+            fill(topRight ? cellX : cellX + cell_ - cornerSquare, topRight ? cellY : cellY + cell_ - cornerSquare, cornerSquare, cornerSquare, colors.checker);
+            fill(topRight ? cellX + cell_ - cornerSquare : cellX, topRight ? cellY + cell_ - cornerSquare : cellY, cornerSquare, cornerSquare, colors.checker);
+        }
+    }
+}
+
+void Ui::stack(const core::Game& game) {
+    for (int y = 0; y < core::kBoardHeight; y++)
+        for (int x = 0; x < core::kBoardWidth; x++)
+            if (game.board.at(x, y) != core::Piece::None) block(x, y, palette().pieces[static_cast<int>(game.board.at(x, y))], 1);
+}
+
+void Ui::falling(const core::Game& game) {
+    if (game.falling.piece == core::Piece::None) return;
+    Color color = palette().pieces[static_cast<int>(game.falling.piece)];
+    for (const core::Cell& c : game.ghost().cells()) block(c.x, c.y, color, palette().ghostAlpha);
+    for (const core::Cell& c : game.falling.cells()) block(c.x, c.y, color, 1);
 }
 
 void Ui::preview(core::Piece piece, float centerX, float centerY, float cell) {
@@ -463,10 +500,10 @@ void Ui::sessionCard(const PlayView& view) {
     }
 }
 
-void Ui::drawMenu(int selected, std::span<const double> bests, int residue) {
+void Ui::drawMenu(int selected, std::span<const double> bests, int residue, double botPps) {
     const Palette& colors = palette();
     topBar("Menu");
-    constexpr float width = 560, rowH = 68, x = (1440 - width) / 2;
+    constexpr float width = 560, rowH = 64, x = (1440 - width) / 2;
     float height = 12 + (kModeCount + 1) * rowH + 44;
     float top = kRowY + (788 - height) / 2;
     fill(x, top, width, height, colors.card, 24);
@@ -488,9 +525,16 @@ void Ui::drawMenu(int selected, std::span<const double> bests, int residue) {
             text(FontLabel, "RESIDUE", x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
             text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
         }
+        if (isMode && kModes[row].versus) {
+            char buffer[16];
+            std::snprintf(buffer, sizeof buffer, "< %.1f >", botPps);
+            text(FontLabel, "BOT PPS", x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
+            text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
+        }
     }
     const bool practice = selected < kModeCount && kModes[selected].pcStyle == PcStyle::Practice;
-    text(FontSmall, practice ? "Up and down choose, left and right set the residue, Enter opens" : "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
+    const bool versus = selected < kModeCount && kModes[selected].versus;
+    text(FontSmall, practice ? "Up and down choose, left and right set the residue, Enter opens" : versus ? "Up and down choose, left and right set the bot's speed, Enter opens" : "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
 }
 
 void Ui::drawDrills(int selected, std::span<const Drill> drills, const char* error) {
@@ -574,33 +618,14 @@ void Ui::drawPlay(const PlayView& view) {
     if (view.pc) coachRows(*view.pc, rowY, view.over);
 
     fill(kBoardCardX, kRowY, 408, 788, colors.card, 28);
-    fill(kBoardX, kBoardY, 380, 760, colors.boardBackground, 8);
-    constexpr float cornerSquare = 8;
-    for (int y = 0; y < core::kVisibleHeight; y++) {
-        for (int x = (y + 1) % 2; x < core::kBoardWidth; x += 2) {
-            float cellX = kBoardX + x * kCell, cellY = kBoardY + y * kCell;
-            bool topRight = x == core::kBoardWidth - 1 && y == 0;
-            bool bottomLeft = x == 0 && y == core::kVisibleHeight - 1;
-            if (!topRight && !bottomLeft) {
-                fill(cellX, cellY, kCell, kCell, colors.checker);
-                continue;
-            }
-            // Only the corner on the board's edge is rounded.
-            fill(cellX, cellY, kCell, kCell, colors.checker, cornerSquare);
-            fill(topRight ? cellX : cellX + kCell - cornerSquare, topRight ? cellY + kCell - cornerSquare : cellY, cornerSquare, cornerSquare, colors.checker);
-            fill(topRight ? cellX : cellX + kCell - cornerSquare, topRight ? cellY : cellY + kCell - cornerSquare, cornerSquare, cornerSquare, colors.checker);
-            fill(topRight ? cellX + kCell - cornerSquare : cellX, topRight ? cellY + kCell - cornerSquare : cellY, cornerSquare, cornerSquare, colors.checker);
-        }
-    }
+    boardX_ = kBoardX, boardY_ = kBoardY, cell_ = kCell;
+    checker();
     // Lines left, under everything that's played, so it can never hide a block.
     if (view.mode->goalLines > 0 && view.mode->garbageRows == 0 && !view.over) {
         std::snprintf(buffer, sizeof buffer, "%d", std::max(view.mode->goalLines - game.stats.lines, 0));
-        SDL_SetTextureAlphaModFloat(fonts_[FontLinesLeft].atlas, colors.linesLeftAlpha);
-        text(FontLinesLeft, buffer, kBoardX + 190, kBoardY + 138, colors.muted, Align::Center);
+        text(FontLinesLeft, buffer, kBoardX + 190, kBoardY + 138, colors.muted, Align::Center, 0, colors.linesLeftAlpha);
     }
-    for (int y = 0; y < core::kBoardHeight; y++)
-        for (int x = 0; x < core::kBoardWidth; x++)
-            if (game.board.at(x, y) != core::Piece::None) block(x, y, colors.pieces[static_cast<int>(game.board.at(x, y))], 1);
+    stack(game);
     if (view.drill && !view.over) {
         for (size_t i = 0; i < view.drill->targets.size(); i++) {
             if (view.filled >> i & 1) continue;
@@ -612,11 +637,7 @@ void Ui::drawPlay(const PlayView& view) {
     if (view.pc && view.pc->showHint) {
         for (const core::Cell& c : view.pc->hintCells) block(c.x, c.y, colors.pieces[static_cast<int>(view.pc->hintPiece)], colors.ghostAlpha);
     }
-    if (!view.over && game.falling.piece != core::Piece::None) {
-        Color color = colors.pieces[static_cast<int>(game.falling.piece)];
-        for (const core::Cell& c : game.ghost().cells()) block(c.x, c.y, color, colors.ghostAlpha);
-        for (const core::Cell& c : game.falling.cells()) block(c.x, c.y, color, 1);
-    }
+    if (!view.over) falling(game);
 
     if (view.over) {
         sessionCard(view);
@@ -631,6 +652,160 @@ void Ui::drawPlay(const PlayView& view) {
 
     if (view.banner) text(FontTime, view.banner, kBoardX + 190, kBoardY + 396, colors.text, Align::Center);
     if (view.banner) text(FontRow, view.hint, kBoardX + 190, kBoardY + 428, colors.muted, Align::Center);
+}
+
+// Versus: two boards side by side, each laid out as in League: hold, then the clear just
+// made and the stats, left of the board; the queue and VS score right of it; the name under it.
+// Smaller cells than solo play, so both fit, with both sides the same size.
+namespace {
+constexpr float kVsCell = 30, kVsSide = 624, kVsTop = 100, kVsColumn = 136, kVsGap = 12;
+constexpr float kVsBoardCard = 10 * kVsCell + 28, kVsBoardCardH = 20 * kVsCell + 28;
+constexpr float kVsSideX[2] = {56, 1440 - 56 - kVsSide};
+
+const char* clearName(int lines) {
+    constexpr const char* kNames[] = {"", "SINGLE", "DOUBLE", "TRIPLE", "QUAD"};
+    return lines >= 0 && lines <= 4 ? kNames[lines] : "QUAD";
+}
+}  // namespace
+
+void Ui::versusSide(const core::Game& game, const Callout& callout, const char* name, float x, bool live, const char* banner) {
+    const Palette& colors = palette();
+    char buffer[48];
+    const float boardCardX = x + kVsColumn + kVsGap, nextX = boardCardX + kVsBoardCard + kVsGap;
+
+    card(x, kVsTop, kVsColumn, 104, "HOLD");
+    preview(game.hold, x + kVsColumn / 2, kVsTop + 64, 20);
+
+    // The last clear's name, fading, right-aligned against the board.
+    const uint64_t age = game.frame - callout.frame;
+    if (callout.any && live && age < kCalloutFrames) {
+        const float alpha = std::min(1.0f, (kCalloutFrames - age) / 30.0f), right = x + kVsColumn;
+        const core::LockResult& lock = callout.lock;
+        float y = kVsTop + 160;
+        if (lock.spin != core::Spin::None) {
+            std::snprintf(buffer, sizeof buffer, "%s-SPIN%s", kPieceNames[static_cast<int>(lock.piece)], lock.spin == core::Spin::Mini ? " MINI" : "");
+            text(FontWord, buffer, right, y, colors.pieces[static_cast<int>(lock.piece)], Align::Right, 0, alpha);
+            y += 28;
+        }
+        if (lock.lines > 0) {
+            text(FontWord, clearName(lock.lines), right, y, colors.text, Align::Right, 0, alpha);
+            y += 28;
+        }
+        if (lock.perfectClear) {
+            text(FontWord, "ALL CLEAR", right, y, colors.pieces[static_cast<int>(core::Piece::O)], Align::Right, 0, alpha);
+            y += 28;
+        }
+        if (lock.lines > 0 && lock.b2b > 0) {
+            std::snprintf(buffer, sizeof buffer, "BACK-TO-BACK X%d", lock.b2b);
+            text(FontLabel, buffer, right, y, colors.muted, Align::Right, kLabelTracking, alpha);
+            y += 22;
+        }
+        if (lock.combo > 0) {
+            std::snprintf(buffer, sizeof buffer, "%d COMBO", lock.combo);
+            text(FontLabel, buffer, right, y, colors.muted, Align::Right, kLabelTracking, alpha);
+        }
+    }
+
+    // Stats under the clears, level with the bottom of the board.
+    const float statsY = kVsTop + kVsBoardCardH - 196;
+    fill(x, statsY, kVsColumn, 196, colors.card, 24);
+    const double seconds = game.seconds();
+    struct {
+        const char* name;
+        char value[32];
+    } rows[3] = {{"PIECES", {}}, {"ATTACK", {}}, {"TIME", {}}};
+    std::snprintf(rows[0].value, sizeof rows[0].value, "%d, %.2f/S", game.stats.pieces, seconds > 0 ? game.stats.pieces / seconds : 0);
+    std::snprintf(rows[1].value, sizeof rows[1].value, "%d, %.2f/M", game.stats.attack, seconds > 0 ? game.stats.attack * 60 / seconds : 0);
+    const int ms = static_cast<int>(std::lround(seconds * 1000));
+    std::snprintf(rows[2].value, sizeof rows[2].value, "%d:%02d.%03d", ms / 60000, ms / 1000 % 60, ms % 1000);
+    for (int i = 0; i < 3; i++) {
+        label(rows[i].name, x + 16, statsY + 32 + i * 56.0f);
+        text(FontValue, rows[i].value, x + 16, statsY + 54 + i * 56.0f, colors.text);
+    }
+
+    fill(boardCardX, kVsTop, kVsBoardCard, kVsBoardCardH, colors.card, 24);
+    boardX_ = boardCardX + 14, boardY_ = kVsTop + 14, cell_ = kVsCell;
+    checker();
+    stack(game);
+    if (live) falling(game);
+    // Garbage on its way: a thin bar up the board's left edge, a row of height per line.
+    const int incoming = std::min(game.incomingLines(), core::kVisibleHeight);
+    if (incoming > 0) fill(boardX_ - 10, boardY_ + (core::kVisibleHeight - incoming) * cell_, 6, incoming * cell_, colors.pieces[static_cast<int>(core::Piece::Z)], 3);
+    if (banner) text(FontTime, banner, boardX_ + 5 * cell_, boardY_ + 10 * cell_, colors.text, Align::Center);
+    text(FontWord, name, boardCardX + kVsBoardCard / 2, kVsTop + kVsBoardCardH + 34, colors.text, Align::Center);
+
+    card(nextX, kVsTop, kVsColumn, 420, "NEXT");
+    for (int i = 0; i < 5 && i < static_cast<int>(game.queue.size()); i++) preview(game.queue[i], nextX + kVsColumn / 2, kVsTop + 84 + 72.0f * i, 20);
+    card(nextX, kVsTop + 432, kVsColumn, 84, "VS SCORE");
+    std::snprintf(buffer, sizeof buffer, "%.2f", Versus::vsScore(game.stats.attack, game.stats.garbageCleared, seconds));
+    text(FontWord, buffer, nextX + 20, kVsTop + 432 + 64, colors.text);
+}
+
+void Ui::drawVersus(const VersusView& view) {
+    const Palette& colors = palette();
+    const Versus& versus = *view.versus;
+    const Match& match = versus.match;
+    topBar(view.mode->name);
+    char buffer[64];
+
+    // First to 7, with the rounds, at the top in the middle.
+    std::snprintf(buffer, sizeof buffer, "FT%d", kVersusRounds);
+    text(FontLabel, buffer, 720, 28, colors.muted, Align::Center, kLabelTracking);
+    text(FontValue, "You", 720 - 52, 56, colors.text, Align::Right);
+    text(FontValue, "Bot", 720 + 52, 56, colors.text);
+    std::snprintf(buffer, sizeof buffer, "%d", match.wins[0]);
+    text(FontWord, buffer, 720 - 24, 57, colors.text, Align::Center);
+    text(FontWord, "-", 720, 57, colors.muted, Align::Center);
+    std::snprintf(buffer, sizeof buffer, "%d", match.wins[1]);
+    text(FontWord, buffer, 720 + 24, 57, colors.text, Align::Center);
+
+    const bool live = !view.over && !versus.roundOver;
+    std::snprintf(buffer, sizeof buffer, "Bot, %.1f PPS", versus.pps);
+    versusSide(*view.you, versus.callouts[0], "You", kVsSideX[0], live, live ? view.banner : nullptr);
+    versusSide(versus.bot, versus.callouts[1], buffer, kVsSideX[1], live, live ? view.banner : nullptr);
+
+    if (view.over) {
+        constexpr float width = 420, height = 480, x = 720 - width / 2, top = 200;
+        fill(x, top, width, height, colors.card, 24);
+        text(FontWord, match.wins[0] > match.wins[1] ? "You win the match" : "The bot wins the match", 720, top + 44, colors.text, Align::Center);
+        std::snprintf(buffer, sizeof buffer, "%d - %d", match.wins[0], match.wins[1]);
+        text(FontTime, buffer, 720, top + 100, colors.text, Align::Center, kTimeTracking);
+        const float columns[2] = {x + width - 150, x + width - 32};
+        text(FontLabel, "YOU", columns[0], top + 140, colors.muted, Align::Right, kLabelTracking);
+        text(FontLabel, "BOT", columns[1], top + 140, colors.muted, Align::Right, kLabelTracking);
+        const char* names[] = {"PPS", "APM", "APP", "VS score"};
+        for (int row = 0; row < 4; row++) {
+            const float y = top + 150 + row * 38.0f;
+            fill(x + 24, y, width - 48, 1, colors.line);
+            text(FontRow, names[row], x + 24, y + 26, colors.muted);
+            for (int side = 0; side < 2; side++) {
+                const SideTotals& t = match.totals[side];
+                const double values[] = {t.seconds > 0 ? t.pieces / t.seconds : 0, t.seconds > 0 ? t.attack * 60 / t.seconds : 0, t.pieces > 0 ? static_cast<double>(t.attack) / t.pieces : 0, Versus::vsScore(t.attack, t.garbageCleared, t.seconds)};
+                std::snprintf(buffer, sizeof buffer, row == 2 ? "%.3f" : "%.2f", values[row]);
+                text(FontValue, buffer, columns[side], y + 26, colors.text, Align::Right);
+            }
+        }
+        // This session's matches, newest first.
+        float y = top + 150 + 4 * 38.0f + 20;
+        fill(x + 24, y, width - 48, 1, colors.line);
+        text(FontLabel, "SESSION", x + 24, y + 28, colors.muted, Align::Left, kLabelTracking);
+        int shown = 0;
+        for (auto run = view.history.rbegin(); run != view.history.rend() && shown < 6; ++run) {
+            if (!run->mode->versus) continue;
+            std::snprintf(buffer, sizeof buffer, "%s %d - %d", run->rounds[0] > run->rounds[1] ? "Won" : "Lost", run->rounds[0], run->rounds[1]);
+            text(FontRow, buffer, x + 24 + (shown % 2) * 186.0f, y + 56 + (shown / 2) * 26.0f, colors.text);
+            shown++;
+        }
+        text(FontSmall, view.hint, 720, top + height - 18, colors.muted, Align::Center);
+    } else if (versus.roundOver) {
+        constexpr float width = 340, height = 170, x = 720 - width / 2, top = 330;
+        fill(x, top, width, height, colors.card, 24);
+        std::snprintf(buffer, sizeof buffer, "ROUND %d", match.rounds);
+        text(FontLabel, buffer, 720, top + 34, colors.muted, Align::Center, kLabelTracking);
+        text(FontWord, versus.lastWinner == 0 ? "You take the round" : versus.lastWinner == 1 ? "The bot takes the round" : "A draw", 720, top + 70, colors.text, Align::Center);
+        std::snprintf(buffer, sizeof buffer, "%d - %d", match.wins[0], match.wins[1]);
+        text(FontTime, buffer, 720, top + 128, colors.text, Align::Center, kTimeTracking);
+    }
 }
 
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "app/ui.h"
+#include "app/versus.h"
 #include "core/game.h"
 
 // Only this thread, while drawing: Apple's GPU driver allocates on its own threads.
@@ -131,7 +132,7 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         ui.beginFrame();
         const std::array<double, kModeCount> bests{60.824};
-        ui.drawMenu(dark ? 7 : 0, bests, 3);
+        ui.drawMenu(dark ? kModeCount - 1 : 0, bests, 3, 1.5);
         SDL_FlushRenderer(renderer);
         SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-dark.png" : "/menu-light.png")).c_str());
@@ -288,12 +289,76 @@ int main(int argc, char** argv) {
         SDL_DestroySurface(listPixels);
     }
 
+    // Versus mid-round with clears named and garbage on its way, then a round's card and the match's results.
+    const Mode& versusMode = kModes[kModeCount - 1];
+    Versus versus;
+    versus.pps = 1.5;
+    core::Game you = sampleGame();
+    you.stats.attack = 9;
+    you.stats.pieces = 32;
+    you.frame = 722;
+    versus.bot = sampleGame();
+    versus.bot.board = {};
+    for (int y = 0; y < 5; y++)
+        for (int x = 0; x < 10; x++)
+            if (x != (y * 3) % 10) versus.bot.board.at(x, y) = y < 2 ? core::Piece::Garbage : core::Piece::L;
+    versus.bot.frame = 722;
+    versus.bot.stats.pieces = 30;
+    versus.bot.stats.attack = 4;
+    core::LockResult tsd;
+    tsd.piece = core::Piece::T;
+    tsd.lines = 2;
+    tsd.spin = core::Spin::Normal;
+    tsd.b2b = 2;
+    tsd.combo = 1;
+    versus.callouts[0] = {tsd, 700, true};
+    core::LockResult quad;
+    quad.piece = core::Piece::I;
+    quad.lines = 4;
+    versus.callouts[1] = {quad, 650, true};
+    // Garbage on its way to you, so the meter shows.
+    versus.toYou = {{core::GarbageEvent::Target, 1}, {core::GarbageEvent::Arrive, 1, 1, 0, 4}, {core::GarbageEvent::Confirm, 1, 1}};
+    const core::InputEvent none[1] = {};
+    you.tick(std::span(none, 0), versus.toYou);
+    versus.match.wins = {3, 2};
+    versus.match.rounds = 5;
+    std::vector<RunResult> matches = {{&versusMode, 0, {}, false, false, {7, 4}}, {&versusMode, 0, {}, false, false, {5, 7}}};
+    for (bool dark : {false, true}) {
+        const char* suffix = dark ? "-dark.png" : "-light.png";
+        auto save = [&](const char* name) {
+            SDL_FlushRenderer(renderer);
+            SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
+            SDL_SavePNG(pixels, (std::string(argv[1]) + "/" + name + suffix).c_str());
+            SDL_DestroySurface(pixels);
+        };
+        ui.dark = dark;
+        versus.roundOver = false;
+        ui.beginFrame();
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches});
+        save("versus");
+        versus.roundOver = true;
+        versus.lastWinner = 0;
+        ui.beginFrame();
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches});
+        save("versus-round");
+        versus.match.wins = {7, 4};
+        versus.match.rounds = 11;
+        versus.match.totals[0] = {402, 260, 31, 255.4};
+        versus.match.totals[1] = {380, 199, 22, 255.4};
+        ui.beginFrame();
+        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches});
+        save("versus-results");
+        versus.match.wins = {3, 2};
+    }
+    versus.roundOver = false;
+
     auto draw = [&](bool dark) {
         ui.dark = dark;
         ui.beginFrame();
         game.frame++;
         ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults});
         ui.drawPlay({&coachMode, &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &killed});
+        ui.drawVersus({&versusMode, &you, &versus, false, "Set", "", matches});
     };
     for (int i = 0; i < 10; i++) {
         draw(i % 2);
