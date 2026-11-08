@@ -1,12 +1,12 @@
 name 2.6 PPS
-# Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
-#   40L: mean 41.88 s, best 38.92 s, 16 of 16 finished, PPS 2.60
-#   versus against 3 PPS: won 2 of 24, PPS 2.60, APP 0.536, APM 83.7
-#   survival, mean time alive of 600 s: 574.1 s at 40 APM incoming, 35.3 s at 120 APM
-holes -5.476
+# Weights tuned at 3 PPS. Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
+#   40L: mean 42.32 s, best 40.38 s, 16 of 16 finished, PPS 2.59
+#   versus against 3 PPS: won 0 of 24, PPS 2.60, APP 0.479, APM 74.8
+#   survival, mean time alive of 600 s: 594.1 s at 40 APM incoming, 52.3 s at 120 APM
+holes -4.596
 height -0.2213
 danger -1.578
-bumpiness -0.5498
+bumpiness -1.175
 well 0.4845
 tSlot 2.761
 attack 1.789

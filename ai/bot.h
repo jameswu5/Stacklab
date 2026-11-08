@@ -23,6 +23,10 @@ struct BotWeights {
     double attack = 2;        // per line sent on the way
     double b2b = 1.5;         // per level of the back-to-back chain
     double wasted = -1.5;     // per line cleared without sending anything
+    // Off until tuned, so existing files keep their play.
+    double incoming = 0;  // per queued line not yet cancelled, times the highest column
+    double surge = 0;     // per level of B2B above the surge's charge point, when the rules charge it
+    double combo = 0;     // per level of the combo
 };
 
 
@@ -55,6 +59,7 @@ private:
         uint8_t next;  // index into the previews of the piece after `current`
         int8_t b2b, combo;
         int16_t root;  // which first move this came from
+        int16_t sent;  // lines sent on the way, which cancel incoming garbage
         float reward, score;
     };
     struct Root {
@@ -75,6 +80,7 @@ private:
     std::vector<int> order_;
     std::vector<core::Piece> queue_;
     const core::Ruleset* rules_ = nullptr;
+    int incoming_ = 0;   // garbage queued when the search began
     int lastTicks_ = 0;  // the last plan's length, without its wait
 };
 
@@ -82,7 +88,5 @@ private:
 // BotWeights' names, width, depth, pps and mistakes. False if it can't be read, a key isn't
 // known or a value is out of range.
 bool loadBot(const std::string& path, Bot& bot);
-// The weights alone, for app/versus.cpp until it takes the whole bot.
-bool loadBotWeights(const std::string& path, BotWeights& weights);
 
 }  // namespace ai
