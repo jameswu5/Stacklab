@@ -1,5 +1,5 @@
 name 3.5 PPS
-# Measured with tools/bot_match from fixed seeds, uncapped Handling defaults:
+# Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
 #   40L: mean 30.31 s, best 28.98 s, 16 of 16 finished, PPS 3.48
 #   versus against 3 PPS: won 21 of 24, PPS 3.50, APP 0.801, APM 168.1
 #   survival, mean time alive of 600 s: 600.0 s at 40 APM incoming, 505.8 s at 120 APM
