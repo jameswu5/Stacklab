@@ -46,7 +46,6 @@ public:
     int depth = 0;        // pieces looked ahead, the falling one included; 0 for all that are visible
     double pps = 0;       // pieces a second at most; 0 for no cap
     double mistakes = 0;  // the share of placements that take one of the next few choices instead
-    bool bag = false;     // score past the previews by what the 7-bag can deal next; with depth 0 only
     core::Rng rng{1};     // for mistakes
 
     // Call it on a copy of the game, on any thread, when a piece has just spawned. False when
@@ -70,9 +69,7 @@ private:
         float score = 0;
     };
 
-    void placeAll(const Node& node, core::Falling start, core::Piece hold, core::Piece current, int next, bool atRoot, bool held);
     void expand(const Node& node, const core::Game& game, bool atRoot);
-    float bagScore(const Node& node);
     void addChild(const Node& parent, const Placement& placement, core::Piece piece, core::Piece hold, core::Piece current, int next, bool atRoot, bool held);
     float evaluate(const Node& node) const;
     bool plan(const core::Game& game, BotChoice& choice);
@@ -84,7 +81,6 @@ private:
     std::vector<core::Piece> queue_;
     const core::Ruleset* rules_ = nullptr;
     int incoming_ = 0;   // garbage queued when the search began
-    uint8_t bagLeft_ = 0;  // a bit per core::Piece: what the bag can still deal after the previews
     int lastTicks_ = 0;  // the last plan's length, without its wait
 };
 
@@ -92,9 +88,5 @@ private:
 // BotWeights' names, width, depth, pps and mistakes. False if it can't be read, a key isn't
 // known or a value is out of range.
 bool loadBot(const std::string& path, Bot& bot);
-
-// A bit per core::Piece: what the 7-bag can deal after the previews, from what's visible.
-// For a piece that has just spawned off the queue, as choose takes it.
-uint8_t botBagLeft(const core::Game& game);
 
 }  // namespace ai

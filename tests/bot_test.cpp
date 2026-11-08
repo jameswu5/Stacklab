@@ -5,18 +5,12 @@
 
 #include "ai/bot.h"
 
-static int spins = 0, softDrops = 0, placements = 0, bagChecks = 0;
+static int spins = 0, softDrops = 0, placements = 0;
 
 static void play(ai::Bot& bot, uint32_t seed, int pieces) {
     core::Game game(core::Ruleset{}, core::Handling{}, seed);
     game.fillGarbage(6);  // a messy start, for tucks and spins
     for (int piece = 0; piece < pieces && !game.toppedOut; piece++) {
-        // The first piece past the previews, once core has dealt it, is always one the bag allows.
-        const size_t previews = game.rules.previews;
-        if (game.queue.size() > previews) {
-            assert(ai::botBagLeft(game) >> static_cast<int>(game.queue[previews]) & 1);
-            bagChecks++;
-        }
         ai::BotChoice choice;
         assert(bot.choose(game, choice));
         bool locked = false;
@@ -61,6 +55,5 @@ int main() {
     ai::BotChoice choice;
     assert(!bot.choose(game, choice, &cancel));
 
-    assert(bagChecks > placements / 2);
-    std::printf("bot_test: %d placements, %d spins, %d soft drops, %d bag checks\n", placements, spins, softDrops, bagChecks);
+    std::printf("bot_test: %d placements, %d spins, %d soft drops\n", placements, spins, softDrops);
 }
