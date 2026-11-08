@@ -14,6 +14,7 @@ namespace ai {
 namespace {
 
 constexpr uint16_t kFullRow = (1 << core::kBoardWidth) - 1;
+constexpr uint8_t kFullBag = 0xFE;  // a bit per core::Piece from I to Z
 
 bool filled(const std::array<uint16_t, core::kBoardHeight>& rows, int x, int y) {
     return x < 0 || x >= core::kBoardWidth || y < 0 || (y < core::kBoardHeight && (rows[y] >> x & 1));
@@ -33,14 +34,25 @@ uint64_t hashOf(const std::array<uint16_t, core::kBoardHeight>& rows, core::Piec
 
 }  // namespace
 
+uint8_t botBagLeft(const core::Game& game) {
+    // The pieces dealt so far are placed, falling, held or previewed, and bags are 7 long. The
+    // falling piece came off the queue, so the bag's pieces so far end with it and the previews.
+    const int previews = std::min<int>(game.rules.previews, static_cast<int>(game.queue.size()));
+    const int inBag = (game.stats.pieces + 1 + (game.hold != core::Piece::None) + previews) % 7;
+    uint8_t left = kFullBag;
+    for (int i = previews - inBag; inBag && i < previews; i++) left &= ~(1 << static_cast<int>(i < 0 ? game.falling.piece : game.queue[i]));
+    return left;
+}
+
 bool loadBot(const std::string& path, Bot& bot) {
     std::ifstream file(path);
     if (!file) return false;
     BotWeights& w = bot.weights;
+    double bag = bot.bag;
     const std::pair<const char*, double*> weights[] = {
         {"holes", &w.holes}, {"height", &w.height}, {"danger", &w.danger}, {"bumpiness", &w.bumpiness}, {"well", &w.well},
         {"tSlot", &w.tSlot}, {"attack", &w.attack}, {"b2b", &w.b2b}, {"wasted", &w.wasted},
-        {"incoming", &w.incoming}, {"surge", &w.surge}, {"combo", &w.combo}, {"pps", &bot.pps}, {"mistakes", &bot.mistakes},
+        {"incoming", &w.incoming}, {"surge", &w.surge}, {"combo", &w.combo}, {"pps", &bot.pps}, {"bag", &bag}, {"mistakes", &bot.mistakes},
     };
     const std::pair<const char*, int*> counts[] = {{"width", &bot.width}, {"depth", &bot.depth}};
     for (std::string line; std::getline(file, line);) {
@@ -63,6 +75,7 @@ bool loadBot(const std::string& path, Bot& bot) {
             return false;
         }
     }
+    bot.bag = bag != 0;
     return bot.width > 0 && bot.depth >= 0 && bot.pps >= 0 && bot.mistakes >= 0;
 }
 
@@ -169,34 +182,53 @@ void Bot::addChild(const Node& parent, const Placement& placement, core::Piece p
     children_.push_back(child);
 }
 
-void Bot::expand(const Node& node, const core::Game& game, bool atRoot) {
+// Adds a child for every placement of `start`'s piece.
+void Bot::placeAll(const Node& node, core::Falling start, core::Piece hold, core::Piece current, int next, bool atRoot, bool held) {
     core::Board board;
-    for (int y = 0; y < core::kBoardHeight; y++)
+    int top = 0;
+    for (int y = 0; y < core::kBoardHeight; y++) {
+        if (node.rows[y]) top = y + 1;
         for (int x = 0; x < core::kBoardWidth; x++)
             if (node.rows[y] >> x & 1) board.at(x, y) = core::Piece::Garbage;
-    auto peek = [&](int i) { return i < static_cast<int>(queue_.size()) ? queue_[i] : core::Piece::None; };
-
+    }
     // As in the PC solver: this far above the stack, a piece has the same choices as from the
     // spawn, for far fewer states. choose finds the inputs from where the piece really is.
-    int top = 0;
-    for (int y = 0; y < core::kBoardHeight; y++)
-        if (node.rows[y]) top = y + 1;
-    auto lowered = [&](core::Falling start) {
-        start.y = std::min(start.y, static_cast<double>(top + kPcAirRows));
-        start.highestY = std::min(start.highestY, static_cast<int>(start.y));
-        return start;
-    };
+    start.y = std::min(start.y, static_cast<double>(top + kPcAirRows));
+    start.highestY = std::min(start.highestY, static_cast<int>(start.y));
+    search_.run(board, start, *rules_);
+    for (const Placement& p : search_.placements) addChild(node, p, start.piece, hold, current, next, atRoot, held);
+}
 
-    search_.run(board, lowered(atRoot ? game.falling : core::spawnFalling(node.current)), *rules_);
-    for (const Placement& p : search_.placements) addChild(node, p, node.current, node.hold, peek(node.next), node.next + 1, atRoot, false);
+void Bot::expand(const Node& node, const core::Game& game, bool atRoot) {
+    auto peek = [&](int i) { return i < static_cast<int>(queue_.size()) ? queue_[i] : core::Piece::None; };
+    placeAll(node, atRoot ? game.falling : core::spawnFalling(node.current), node.hold, peek(node.next), node.next + 1, atRoot, false);
 
     if (!rules_->allowHold || (atRoot && game.holdUsed)) return;
     const bool empty = node.hold == core::Piece::None;
     const core::Piece piece = empty ? peek(node.next) : node.hold;
     if (piece == core::Piece::None || piece == node.current) return;
     const int after = empty ? node.next + 1 : node.next;
-    search_.run(board, lowered(core::spawnFalling(piece)), *rules_);
-    for (const Placement& p : search_.placements) addChild(node, p, piece, node.current, peek(after), after + 1, atRoot, true);
+    placeAll(node, core::spawnFalling(piece), node.current, peek(after), after + 1, atRoot, true);
+}
+
+// A state past the last preview, scored by the next piece: the mean over what the bag still
+// allows of the best placement of it, or of the held piece instead.
+float Bot::bagScore(const Node& node) {
+    double total = 0;
+    int count = 0;
+    for (int piece = 1; piece <= 7; piece++) {
+        if (!(bagLeft_ >> piece & 1)) continue;
+        const auto next = static_cast<core::Piece>(piece);
+        children_.clear();
+        placeAll(node, core::spawnFalling(next), node.hold, core::Piece::None, node.next, false, false);
+        if (rules_->allowHold && node.hold != core::Piece::None && node.hold != next)
+            placeAll(node, core::spawnFalling(node.hold), next, core::Piece::None, node.next, false, true);
+        float best = -1e6f;  // nothing fits: as bad as it gets
+        for (const Node& child : children_) best = std::max(best, child.score);
+        total += best;
+        count++;
+    }
+    return static_cast<float>(total / count);
 }
 
 bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bool>* cancel) {
@@ -223,9 +255,11 @@ bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bo
     start.b2b = static_cast<int8_t>(std::clamp(now.stats.b2b, -1, 127));
     start.combo = static_cast<int8_t>(std::clamp(now.stats.combo, -1, 127));
     incoming_ = now.incomingLines();
+    bagLeft_ = botBagLeft(now);
     beam_.push_back(start);
 
     std::unordered_set<uint64_t> seen;
+    int last = -1;  // the deepest layer kept
     for (int d = 0; !beam_.empty() && (depth == 0 || d < depth); d++) {
         children_.clear();
         for (const Node& node : beam_) {
@@ -233,6 +267,7 @@ bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bo
             if (node.current != core::Piece::None) expand(node, now, d == 0);
         }
         if (children_.empty()) break;
+        last = d;
         std::sort(children_.begin(), children_.end(), [](const Node& a, const Node& b) { return a.score > b.score; });
         beam_.clear();
         seen.clear();
@@ -245,6 +280,16 @@ bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bo
                 root.depth = d;
                 root.score = child.score;
             }
+        }
+    }
+
+    // Past the previews, each first move is judged by its best state's bag score instead.
+    if (bag && depth == 0 && last >= 0) {
+        for (const Node& node : beam_) roots_[node.root].score = -1e9f;
+        for (const Node& node : beam_) {
+            if (cancel && cancel->load(std::memory_order_relaxed)) return false;
+            Root& root = roots_[node.root];
+            root.score = std::max(root.score, bagScore(node));
         }
     }
 
