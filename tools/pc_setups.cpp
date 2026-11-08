@@ -717,21 +717,54 @@ int main(int argc, char** argv) {
     for (int i = 0; i < top && i < int(ranked.size()); i++)
         std::printf("%.2f%%  %zu orders\n%s\n", 100.0 * ranked[i].second / total, builders(ranked[i].first), draw(ranked[i].first).c_str());
 
+    // Greedy covering lists: over every order, then per start, which the player knows before the setup.
     std::vector<int> covered(orderCount, 0);
-    std::printf("greedy covering list (each order uses the best listed setup it can build):\n");
-    for (int pick = 0; pick < 12; pick++) {
-        long bestGain = 0;
-        const Setup* chosen = nullptr;
-        for (const auto& [setup, list] : reached) {
-            long gain = 0;
-            for (int o : list) gain += std::max(0, rate[setup] - covered[o]);
-            if (gain > bestGain) bestGain = gain, chosen = &setup;
+    auto cover = [&](int lo, int hi, int picks, auto&& report) {
+        for (int pick = 0; pick < picks; pick++) {
+            long bestGain = 0;
+            const Setup* chosen = nullptr;
+            for (const auto& [setup, list] : reached) {
+                long gain = 0;
+                for (auto o = std::lower_bound(list.begin(), list.end(), lo); o != list.end() && *o < hi; o++) gain += std::max(0, rate[setup] - covered[*o]);
+                if (gain > bestGain) bestGain = gain, chosen = &setup;
+            }
+            if (!chosen) break;
+            const auto& list = reached[*chosen];
+            for (auto o = std::lower_bound(list.begin(), list.end(), lo); o != list.end() && *o < hi; o++) covered[*o] = std::max(covered[*o], rate[*chosen]);
+            const double sofar = std::accumulate(covered.begin() + lo, covered.begin() + hi, 0.0) / ((hi - lo) * total);
+            const long builds = std::count_if(covered.begin() + lo, covered.begin() + hi, [](int c) { return c > 0; });
+            report(pick, *chosen, sofar, 100.0 * builds / (hi - lo));
         }
-        if (!chosen) break;
-        for (int o : reached[*chosen]) covered[o] = std::max(covered[o], rate[*chosen]);
-        const double sofar = std::accumulate(covered.begin(), covered.end(), 0.0) / (orderCount * total);
-        const long builds = std::count_if(covered.begin(), covered.end(), [](int c) { return c > 0; });
-        std::printf("%d. rate %.2f%%, built by %zu orders; list so far %.2f%%, some setup for %.1f%% of orders (perfect %.2f%%)\n%s\n", pick + 1, 100.0 * rate[*chosen] / total, reached[*chosen].size(), 100 * sofar, 100.0 * builds / orderCount, 100 * perfect, draw(*chosen).c_str());
+    };
+    std::printf("greedy covering list (each order uses the best listed setup it can build):\n");
+    cover(0, orderCount, 12, [&](int pick, const Setup& chosen, double sofar, double share) {
+        std::printf("%d. rate %.2f%%, built by %zu orders; list so far %.2f%%, some setup for %.1f%% of orders (perfect %.2f%%)\n%s\n", pick + 1, 100.0 * rate[chosen] / total, builders(chosen), 100 * sofar, share, 100 * perfect, draw(chosen).c_str());
+    });
+    if (from.size() > 1) {
+        const char* names = ".IJLOSTZ";
+        std::printf("\ncovering lists per start, 3 setups each: used, held, perfect play, then the list after 1, 2 and 3 setups\n");
+        std::fill(covered.begin(), covered.end(), 0);
+        double sums[4] = {};
+        for (size_t s = 0; s < from.size(); s++) {
+            const int lo = int(s) * perStart, hi = lo + perStart;
+            std::string used;
+            for (int p = 1; p <= 7; p++)
+                if (from[s].used >> p & 1) used += names[p];
+            const double best1 = std::accumulate(best.begin() + lo, best.begin() + hi, 0.0) / (perStart * total);
+            sums[0] += best1;
+            double after[3] = {};
+            std::string boards;
+            cover(lo, hi, 3, [&](int pick, const Setup& chosen, double sofar, double) {
+                after[pick] = sofar;
+                boards += draw(chosen);
+            });
+            for (int k = 0; k < 3; k++) {
+                if (k && !after[k]) after[k] = after[k - 1];
+                sums[k + 1] += after[k];
+            }
+            std::printf("used %s held %c: perfect %.2f%%, list %.2f%% %.2f%% %.2f%%\n%s\n", used.c_str(), names[int(from[s].hold)], 100 * best1, 100 * after[0], 100 * after[1], 100 * after[2], boards.c_str());
+        }
+        std::printf("average over starts: perfect %.2f%%, with 1, 2 and 3 setups per start %.2f%% %.2f%% %.2f%%\n", 100 * sums[0] / from.size(), 100 * sums[1] / from.size(), 100 * sums[2] / from.size(), 100 * sums[3] / from.size());
     }
 
     // 5. What the tilings leave out, on a few orders walked forwards.
