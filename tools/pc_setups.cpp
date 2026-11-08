@@ -11,7 +11,8 @@
 //
 // The move search lets no time pass. --harddrop allows only placements a hard drop from above
 // reaches: no tucks or spins, so its rates are a lower bound.
-//   pc_setups [--residue R] [--harddrop] [--check N] [--verify N] [--top N]
+//   pc_setups [--residue R] [--harddrop] [--check N] [--verify N] [--top N] [--cache FILE] [--save FILE]
+// --cache keeps the backward sets between runs; --save lists every setup with a PC.
 #include <algorithm>
 #include <bit>
 #include <bitset>
@@ -121,7 +122,8 @@ std::vector<Bits> place(Bits board, Piece piece, int lines) {
 }
 
 const std::vector<Bits>& children(Bits board, Piece piece, int lines) {
-    static std::unordered_map<uint64_t, std::vector<Bits>> cache;
+    thread_local std::unordered_map<uint64_t, std::vector<Bits>> cache;
+    if (cache.size() > 1'000'000) cache.clear();  // keeps memory down
     const uint64_t key = board | uint64_t(piece) << 40 | uint64_t(lines) << 44;
     auto found = cache.find(key);
     if (found != cache.end()) return found->second;
@@ -317,61 +319,81 @@ std::vector<Start> starts() {
 int factorial(int n) { return n <= 1 ? 1 : n * factorial(n - 1); }
 
 // For one tiling: every order of the bag, from every start, that builds it with hold, and the
-// piece then in hold. Orders are numbered start by start, each start's in lexicographic order.
+// piece then in hold. Orders are numbered start by start, each start's in lexicographic order, so
+// the orders that begin with a given piece are one block and can be worked out once.
 void buildable(const std::vector<int>& tiling, const std::vector<Start>& from, std::vector<std::pair<int, Piece>>& out) {
+    using Orders = std::bitset<5040>;
     const int k = int(tiling.size());
     const int all = (1 << k) - 1;
-    std::unordered_map<int, bool> reach;  // placed tiles * 8 + tile: whether the move search gets there
+    std::array<int8_t, 128 * 8> reach;  // placed tiles * 8 + tile: whether it can lock there, -1 unknown
+    reach.fill(-1);
     auto reaches = [&](int placed, int t) {
-        auto [it, fresh] = reach.try_emplace(placed * 8 + t);
-        if (fresh) {
+        int8_t& known = reach[placed * 8 + t];
+        if (known < 0) {
             Bits board = 0;
             for (int i = 0; i < k; i++)
                 if (placed >> i & 1) board |= tiles[tiling[i]].cells;
             const Tile& tile = tiles[tiling[t]];
-            const auto cells = locks(board, tile.piece, kRows);
-            it->second = std::find(cells.begin(), cells.end(), tile.cells) != cells.end();
-        }
-        return it->second;
-    };
-    struct State {
-        int placed;
-        Piece hold;
-        bool operator==(const State&) const = default;
-    };
-    const int perStart = factorial(setupPieces());
-    for (size_t s = 0; s < from.size(); s++) {
-        auto walk = [&](auto& self, const std::vector<State>& states, uint8_t drawn, int index, int depth) -> void {
-            if (depth == 7) {
-                for (const State& state : states)
-                    if (state.placed == all) out.push_back({index, state.hold});
-                return;
+            // Resting, and clear straight up, it's a hard drop from open air, where any rotation
+            // and column is reachable. Only the rest need the move search.
+            bool open = (tile.cells & kRowBits) || ((tile.cells >> 10) & board);
+            for (int lift = 1; lift < kRows; lift++) open = open && !((tile.cells << (10 * lift)) & board);
+            if (open || hardDropOnly) {
+                known = open;
+            } else {
+                const auto cells = locks(board, tile.piece, kRows);
+                known = std::find(cells.begin(), cells.end(), tile.cells) != cells.end();
             }
+        }
+        return known == 1;
+    };
+    // The orders of the pieces not yet drawn that finish the tiling from here.
+    std::unordered_map<uint32_t, Orders> memo;
+    auto finish = [&](auto& self, int placed, Piece hold, uint8_t drawn, int depth) -> const Orders& {
+        const uint32_t key = placed | uint32_t(hold) << 7 | uint32_t(drawn) << 11;
+        auto found = memo.find(key);
+        if (found != memo.end()) return found->second;
+        Orders result;
+        if (depth == 7) {
+            if (placed == all) result.set(0);
+        } else {
+            const int width = factorial(6 - depth);  // orders under each choice here
             int rank = 0;
             for (int p = 1; p <= 7; p++) {
                 if (drawn >> p & 1) continue;
-                std::vector<State> next;
-                auto put = [&](const State& state, Piece piece, Piece hold) {
-                    for (int t = 0; t < k; t++)
-                        if (!(state.placed >> t & 1) && tiles[tiling[t]].piece == piece && reaches(state.placed, t)) {
-                            const State after{state.placed | 1 << t, hold};
-                            if (std::find(next.begin(), next.end(), after) == next.end()) next.push_back(after);
-                        }
+                auto then = [&](int nowPlaced, Piece nowHeld) {
+                    const Orders& rest = self(self, nowPlaced, nowHeld, drawn | 1 << p, depth + 1);
+                    if (rest.any()) result |= rest << (rank * width);
                 };
-                for (const State& state : states) {
-                    put(state, Piece(p), state.hold);
-                    if (state.hold == Piece::None) {
-                        if (std::find(next.begin(), next.end(), State{state.placed, Piece(p)}) == next.end()) next.push_back({state.placed, Piece(p)});
-                    } else {
-                        put(state, state.hold, Piece(p));
-                    }
-                }
-                const int width = factorial(6 - depth);  // orders under each choice here
-                if (!next.empty()) self(self, next, drawn | 1 << p, index + rank * width, depth + 1);
+                auto put = [&](Piece piece, Piece held) {
+                    for (int t = 0; t < k; t++)
+                        if (!(placed >> t & 1) && tiles[tiling[t]].piece == piece && reaches(placed, t)) then(placed | 1 << t, held);
+                };
+                put(Piece(p), hold);
+                if (hold == Piece::None) then(placed, Piece(p));
+                else put(hold, Piece(p));
                 rank++;
             }
-        };
-        walk(walk, {{0, from[s].hold}}, from[s].used, int(s) * perStart, residue);
+        }
+        return memo.emplace(key, result).first->second;
+    };
+    const int perStart = factorial(setupPieces());
+    for (size_t s = 0; s < from.size(); s++) {
+        // The pieces this start has must cover the tiles, with one left over in hold, or none at PC1.
+        std::array<int, 8> left{};
+        left[int(from[s].hold)]++;
+        for (int p = 1; p <= 7; p++) left[p] += !(from[s].used >> p & 1);
+        for (int t : tiling) left[int(tiles[t].piece)]--;
+        Piece held = Piece::None;
+        bool fits = true;
+        for (int p = 1; p <= 7; p++) {
+            fits = fits && left[p] >= 0;
+            if (left[p] > 0) held = Piece(p);
+        }
+        if (!fits) continue;
+        const Orders& orders = finish(finish, 0, from[s].hold, from[s].used, residue);
+        for (int j = 0; j < perStart; j++)
+            if (orders[j]) out.push_back({int(s) * perStart + j, held});
     }
 }
 
@@ -421,12 +443,16 @@ std::unordered_set<Setup, SetupHash> walkOrder(const Start& start, const std::ar
 
 int main(int argc, char** argv) {
     int check = 0, verify = 0, top = 20;
+    const char* cache = nullptr;
+    const char* save = nullptr;
     for (int i = 1; i < argc; i++) {
         if (!std::strcmp(argv[i], "--harddrop")) hardDropOnly = true;
         else if (!std::strcmp(argv[i], "--check") && i + 1 < argc) check = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--verify") && i + 1 < argc) verify = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--top") && i + 1 < argc) top = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--residue") && i + 1 < argc) residue = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
+        else if (!std::strcmp(argv[i], "--save") && i + 1 < argc) save = argv[++i];
     }
     if (residue < 0 || residue > 1) {
         std::fprintf(stderr, "residues 0 and 1 only for now\n");
@@ -438,40 +464,45 @@ int main(int argc, char** argv) {
     const int perStart = factorial(setupPieces());
     const int orderCount = int(from.size()) * perStart;
     buildTiles();
-    buildClearable(3);
-
-    // 1. Setup boards: 7 tiles from clearable[3] (residue 0, hold empty), or 6 tiles a placement before it.
-    auto clock = std::chrono::steady_clock::now();
-    std::vector<std::pair<Bits, int>> boards;  // board, tiles
-    if (residue == 0)
-        for (Bits b : clearable[3])
-            if (std::popcount(b) == 28) boards.push_back({b, 7});
-    {
-        std::vector<Bits> six;
-        for (Bits b : clearable[3]) before(b, 3, [&](Bits board) {
-            if (std::popcount(board) == 24) six.push_back(board);
-        });
-        std::sort(six.begin(), six.end());
-        six.erase(std::unique(six.begin(), six.end()), six.end());
-        for (Bits b : six) boards.push_back({b, 6});
+    // The backward sets take minutes, so --cache keeps them in a file between runs.
+    if (FILE* in = cache ? std::fopen(cache, "rb") : nullptr) {
+        uint64_t size;
+        while (std::fread(&size, 8, 1, in) == 1) {
+            clearable.emplace_back(size);
+            if (std::fread(clearable.back().data(), 8, size, in) != size) return 1;
+        }
+        std::fclose(in);
     }
-    std::fprintf(stderr, "candidate boards: %zu (%.0f s)\n", boards.size(), seconds(clock));
+    if (clearable.size() < 4) {
+        clearable.resize(1);
+        buildClearable(3);
+        if (FILE* out = cache ? std::fopen(cache, "wb") : nullptr) {
+            for (size_t n = 1; n < clearable.size(); n++) {
+                const uint64_t size = clearable[n].size();
+                std::fwrite(&size, 8, 1, out);
+                std::fwrite(clearable[n].data(), 8, size, out);
+            }
+            std::fclose(out);
+        }
+    }
 
-    // 2. Cut each into the bag's pieces and find the orders that build it.
-    std::unordered_map<Setup, std::vector<int>, SetupHash> reached;  // setup: orders that build it
+    // 1. Setup boards: 7 tiles from clearable[3] (residue 0, hold empty), or 6 tiles a placement
+    // before it. There are too many of the second to hold at once, so they come in parts.
+    // 2. Cut each into the bag's pieces, find the orders that build it, and rate each setup once.
+    auto clock = std::chrono::steady_clock::now();
+    std::unordered_map<Setup, int, SetupHash> rate;                     // every setup some order builds
+    std::unordered_map<Setup, std::vector<uint16_t>, SetupHash> reached;  // those with a PC: orders that build them
     std::atomic<long> tilingCount = 0;
-    std::mutex merge;
-    auto work = [&](size_t first, size_t step) {
-        std::unordered_map<Setup, std::vector<int>, SetupHash> mine;
-        for (size_t i = first; i < boards.size(); i += step) {
+    std::mutex lock;
+    auto work = [&](const std::vector<Bits>& boards, int pieces, size_t first) {
+        for (size_t i = first; i < boards.size(); i += kThreads) {
             std::array<int, 8> most;
-            most.fill(1);
-            if (residue > 0) most.fill(2);  // the held piece can repeat one of the bag's
+            most.fill(residue > 0 ? 2 : 1);  // the held piece can repeat one of the bag's
             std::vector<int> chosen;
             std::vector<std::vector<int>> found;
-            tilings(boards[i].first, most, chosen, found);
+            tilings(boards[i], most, chosen, found);
             for (const auto& tiling : found) {
-                if (int(tiling.size()) != boards[i].second) continue;
+                if (int(tiling.size()) != pieces) continue;
                 int repeats = 0;  // at most one piece twice, and only the held one can be
                 std::array<int, 8> count{};
                 for (int t : tiling) repeats += ++count[int(tiles[t].piece)] == 2;
@@ -479,29 +510,62 @@ int main(int argc, char** argv) {
                 tilingCount++;
                 std::vector<std::pair<int, Piece>> builds;
                 buildable(tiling, from, builds);
-                for (auto [order, hold] : builds) mine[{boards[i].first, hold}].push_back(order);
+                std::sort(builds.begin(), builds.end(), [](auto a, auto b) { return a.second != b.second ? a.second < b.second : a.first < b.first; });
+                for (size_t j = 0; j < builds.size();) {
+                    const Setup setup{boards[i], builds[j].second};
+                    std::vector<uint16_t> orders;
+                    for (; j < builds.size() && builds[j].second == setup.hold; j++) orders.push_back(uint16_t(builds[j].first));
+                    std::unique_lock guard(lock);
+                    auto known = rate.find(setup);
+                    if (known == rate.end()) {
+                        guard.unlock();
+                        const int h = hits(setup, queues);
+                        guard.lock();
+                        known = rate.emplace(setup, h).first;
+                    }
+                    if (!known->second) continue;
+                    std::vector<uint16_t>& list = reached[setup];
+                    std::vector<uint16_t> merged;
+                    std::set_union(list.begin(), list.end(), orders.begin(), orders.end(), std::back_inserter(merged));
+                    list = std::move(merged);
+                }
             }
-            if (i % 1000000 == 0) std::fprintf(stderr, "%zu of %zu boards, %ld tilings (%.0f s)\n", i, boards.size(), tilingCount.load(), seconds(clock));
+            if (i % 1000000 == 0) std::fprintf(stderr, "%zu of %zu boards, %ld tilings, %zu setups (%.0f s)\n", i, boards.size(), tilingCount.load(), rate.size(), seconds(clock));
         }
-        std::lock_guard lock(merge);
-        for (auto& [setup, list] : mine) reached[setup].insert(reached[setup].end(), list.begin(), list.end());
     };
-    std::vector<std::thread> threads;
-    for (int t = 0; t < kThreads; t++) threads.emplace_back(work, t, kThreads);
-    for (auto& thread : threads) thread.join();
-    for (auto& [setup, list] : reached) {
-        std::sort(list.begin(), list.end());
-        list.erase(std::unique(list.begin(), list.end()), list.end());
+    auto run = [&](const std::vector<Bits>& boards, int pieces) {
+        std::vector<std::thread> threads;
+        for (int t = 0; t < kThreads; t++) threads.emplace_back(work, std::cref(boards), pieces, t);
+        for (auto& thread : threads) thread.join();
+    };
+    size_t candidates = 0;
+    if (residue == 0) {
+        std::vector<Bits> seven;
+        for (Bits b : clearable[3])
+            if (std::popcount(b) == 28) seven.push_back(b);
+        candidates += seven.size();
+        run(seven, 7);
+    }
+    constexpr int kParts = 8;
+    for (int part = 0; part < kParts; part++) {
+        std::vector<Bits> six;
+        for (Bits b : clearable[3]) before(b, 3, [&](Bits board) {
+            if (std::popcount(board) == 24 && std::hash<uint64_t>()(board) * 0x9E3779B97F4A7C15 >> 61 == uint64_t(part)) six.push_back(board);
+        });
+        std::sort(six.begin(), six.end());
+        six.erase(std::unique(six.begin(), six.end()), six.end());
+        candidates += six.size();
+        std::fprintf(stderr, "part %d: %zu boards (%.0f s)\n", part, six.size(), seconds(clock));
+        run(six, 6);
+    }
+    const size_t live = reached.size();
+    // Every setup with a PC: board as hex, hold, queues that clear it, orders that build it.
+    if (FILE* out = save ? std::fopen(save, "w") : nullptr) {
+        for (const auto& [setup, list] : reached) std::fprintf(out, "%010llx %d %d %zu\n", (unsigned long long)setup.board, int(setup.hold), rate[setup], list.size());
+        std::fclose(out);
     }
     std::printf("residue %d: %d orders of the bag, %d queues after it\n", residue, orderCount, int(total));
-    std::printf("setups some order builds: %zu, from %ld tilings (%.0f s)\n", reached.size(), tilingCount.load(), seconds(clock));
-
-    // 3. Each one's rate.
-    clock = std::chrono::steady_clock::now();
-    std::unordered_map<Setup, int, SetupHash> rate;
-    for (const auto& [setup, _] : reached) rate[setup] = hits(setup, queues);
-    const size_t live = std::count_if(rate.begin(), rate.end(), [](const auto& r) { return r.second > 0; });
-    std::printf("with a PC for some queue: %zu (%.0f s)\n", live, seconds(clock));
+    std::printf("candidate boards %zu, tilings %ld, setups some order builds %zu, with a PC for some queue %zu (%.0f s)\n", candidates, tilingCount.load(), rate.size(), live, seconds(clock));
 
     if (check) {
         std::mt19937 rng(1);
@@ -527,14 +591,18 @@ int main(int argc, char** argv) {
     const double perfect = std::accumulate(best.begin(), best.end(), 0.0) / (orderCount * total);
     std::printf("perfect play, setup chosen from this bag alone: %.2f%%\n", 100 * perfect);
 
+    auto builders = [&](const Setup& setup) {
+        auto it = reached.find(setup);
+        return it == reached.end() ? size_t(0) : it->second.size();
+    };
     std::vector<std::pair<Setup, int>> ranked(rate.begin(), rate.end());
     std::sort(ranked.begin(), ranked.end(), [&](const auto& a, const auto& b) {
         if (a.second != b.second) return a.second > b.second;
-        return reached[a.first].size() > reached[b.first].size();
+        return builders(a.first) > builders(b.first);
     });
     std::printf("\ntop %d setups: rate, orders of the bag that build it (of %d)\n", top, orderCount);
     for (int i = 0; i < top && i < int(ranked.size()); i++)
-        std::printf("%.2f%%  %zu orders\n%s\n", 100.0 * ranked[i].second / total, reached[ranked[i].first].size(), draw(ranked[i].first).c_str());
+        std::printf("%.2f%%  %zu orders\n%s\n", 100.0 * ranked[i].second / total, builders(ranked[i].first), draw(ranked[i].first).c_str());
 
     std::vector<int> covered(orderCount, 0);
     std::printf("greedy covering list (each order uses the best listed setup it can build):\n");
@@ -570,22 +638,27 @@ int main(int argc, char** argv) {
         }
         clock = std::chrono::steady_clock::now();
         const auto walked = walkOrder(start, order);
-        int listed = 0, missing = 0, missingLive = 0, extra = 0, missingBest = 0;
+        // Only setups with a PC count: the tilings keep no others.
+        int live = 0, listed = 0, cleared = 0, clearedBest = 0, other = 0, extra = 0;
         for (const Setup& s : walked) {
             auto it = reached.find(s);
             if (it != reached.end() && std::binary_search(it->second.begin(), it->second.end(), index)) {
+                live++;
                 listed++;
                 continue;
             }
-            missing++;
             const int h = hits(s, queues);
-            missingLive += h > 0;
-            missingBest = std::max(missingBest, h);
-            if (std::popcount(s.board) == 4 * (10 - placementsLeft(s.hold)))
-                std::printf("NOT A LINE CLEAR, yet missed:\n%s", draw(s).c_str());
+            if (!h) continue;
+            live++;
+            if (std::popcount(s.board) < 4 * (10 - placementsLeft(s.hold))) {
+                cleared++;
+                clearedBest = std::max(clearedBest, h);
+            } else if (++other <= 3) {
+                std::printf("missed with no line clear:\n%s", draw(s).c_str());
+            }
         }
         for (const auto& [setup, list] : reached)
             extra += std::binary_search(list.begin(), list.end(), index) && !walked.count(setup);
-        std::printf("order %d walked forwards: %zu setups, %d listed, %d missed (%d with a PC, best %.2f%%, order's best listed %.2f%%), %d listed but not walked (%.0f s)\n", index, walked.size(), listed, missing, missingLive, 100.0 * missingBest / total, 100.0 * best[index] / total, extra, seconds(clock));
+        std::printf("order %d walked forwards: %d setups with a PC, %d listed, %d missed with a line clear in the bag (best %.2f%%; best listed %.2f%%), %d missed without one, %d listed but not walked (%.0f s)\n", index, live, listed, cleared, 100.0 * clearedBest / total, 100.0 * best[index] / total, other, extra, seconds(clock));
     }
 }
