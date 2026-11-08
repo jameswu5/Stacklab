@@ -1,10 +1,12 @@
-# Hand-set weights for ai::Bot, not tuned yet. See BotWeights in ai/bot.h for what each means.
-holes -4
-height -0.3
-danger -1
-bumpiness -0.4
-well 0.6
-tSlot 2.5
-attack 2
-b2b 1.5
-wasted -1.5
+# Settings for ai::Bot, read by ai::loadBot; see ai/bot.h. Weights from 30 rounds of tools/tune_bot.py
+# at width 16, depth 3; at width 48 they beat the hand-set ones 173-67 in 240 versus games.
+holes -5.476
+height -0.2213
+danger -1.578
+bumpiness -0.5498
+well 0.4845
+tSlot 2.761
+attack 1.789
+b2b 2.548
+wasted -2.169
+width 48
