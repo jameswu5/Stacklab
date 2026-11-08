@@ -55,7 +55,7 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     }
     if (mode->versus) {
         if (!versus) versus = std::make_unique<Versus>();
-        versus->pps = botPps;
+        versus->preset = botPreset;
         versus->options = versusOptions;
         versus->match = {};
         versus->startRound(seed);

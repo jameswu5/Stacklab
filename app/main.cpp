@@ -41,6 +41,7 @@ struct App {
     Replay replay;  // the one being played back
     std::vector<RunResult> playbackHistory;  // the session with the replay's run last, for its results
     bool hasBestReplay = false;  // the mode's best run was saved as a replay
+    std::vector<BotPreset> presets;
 
     uint64_t frameNs = 0, worstFrameNs = 0;
 };
@@ -102,7 +103,11 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
         case SDL_SCANCODE_LEFT:
         case SDL_SCANCODE_RIGHT:
             if (app.menuRow < kModeCount && kModes[app.menuRow].pcStyle == PcStyle::Practice) app.play.residue = (app.play.residue + (key.scancode == SDL_SCANCODE_LEFT ? 6 : 1)) % 7;
-            if (app.menuRow < kModeCount && kModes[app.menuRow].versus) app.play.botPps = std::clamp(app.play.botPps + (key.scancode == SDL_SCANCODE_LEFT ? -0.5 : 0.5), 0.5, 3.0);
+            if (app.menuRow < kModeCount && kModes[app.menuRow].versus) {
+                const int count = static_cast<int>(app.presets.size());
+                app.play.botPreset = (app.play.botPreset + (key.scancode == SDL_SCANCODE_LEFT ? count - 1 : 1)) % count;
+                app.settings.botPreset = app.presets[app.play.botPreset].name;
+            }
             break;
         case SDL_SCANCODE_RETURN:
             if (key.repeat) break;
@@ -251,7 +256,7 @@ void drawFrame(App& app, Ui& ui) {
     ui.dark = app.settings.dark;
     ui.beginFrame();
     if (app.screen == Screen::Menu) {
-        ui.drawMenu(app.menuRow, app.bests, app.play.residue, app.play.botPps);
+        ui.drawMenu(app.menuRow, app.bests, app.play.residue, app.presets[app.play.botPreset]);
     } else if (app.screen == Screen::Drills) {
         ui.drawDrills(app.drillRow, app.drillSet.drills, app.drillError.empty() ? nullptr : app.drillError.c_str());
     } else if (app.screen == Screen::Settings) {
@@ -268,7 +273,7 @@ void drawFrame(App& app, Ui& ui) {
         }
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
         if (play.mode->versus) {
-            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), app.history});
+            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), app.history, app.presets[play.botPreset].name.c_str()});
         } else {
             PcView pcView;
             const PcView* pc = nullptr;
@@ -307,6 +312,9 @@ int main(int, char**) {
     SDL_free(prefPath);
     app.settingsPath = app.prefPath + "settings.json";
     app.settings = loadSettings(app.settingsPath);
+    app.presets = botPresets();
+    for (size_t i = 0; i < app.presets.size(); i++)
+        if (app.presets[i].name == app.settings.botPreset) app.play.botPreset = static_cast<int>(i);
     for (int i = 0; i < kModeCount; i++)
         if (kModes[i].bestFile) app.bests[i] = loadBest(app.prefPath + kModes[i].bestFile);
     applyBinds(app);

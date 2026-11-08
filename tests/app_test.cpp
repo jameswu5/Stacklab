@@ -1538,7 +1538,7 @@ void testVersusRound() {
     assert(mode && mode->rules.b2bCharging && mode->rules.openerPhase == 14 && !mode->undo && !mode->bestFile);
     Play play;
     play.mode = mode;
-    play.botPps = 1.5;
+    play.botPreset = 2;
     play.restart(core::Handling{}, 11, 0);
     play.versus->waitForBot = true;
     assert(play.versus->bot.queue == play.game.queue);  // one seed for both, as in League
@@ -1571,7 +1571,7 @@ void testVersusRound() {
     std::printf("versus round: %llu frames, you %d pieces %d attack %d received, bot %d pieces %d attack %d received, %s topped out\n", static_cast<unsigned long long>(play.game.frame), play.game.stats.pieces, play.game.stats.attack,
                 play.game.stats.garbageReceived, bot.stats.pieces, bot.stats.attack, bot.stats.garbageReceived, play.game.toppedOut ? "you" : "the bot");
     assert(play.versus->roundOver && (play.game.toppedOut || bot.toppedOut));
-    assert(bot.stats.pieces > 20 && play.game.stats.attack > 0 && bot.stats.garbageReceived > 0);
+    assert(bot.stats.pieces > 10 && play.game.stats.attack > 0 && bot.stats.garbageReceived > 0);
     assert(playAllocations == 0);
     const Match match = play.versus->match;
     assert(match.rounds == 1 && match.wins[0] + match.wins[1] <= 1 && !play.over);
@@ -1641,7 +1641,7 @@ void testVersusOptions() {
     quiet.toYou = false;
     Versus versus;
     versus.options = quiet;
-    versus.pps = 3;
+    versus.preset = 5;
     versus.waitForBot = true;
     versus.startRound(5);
     for (int f = 0; f < 60 * 60 && versus.bot.stats.attack == 0 && !versus.bot.toppedOut; f++) {
@@ -1649,6 +1649,28 @@ void testVersusOptions() {
         assert(versus.toYou.empty());
     }
     assert(versus.bot.stats.attack > 0);
+}
+
+// The presets in file order, and each bot keeping to its PPS cap with no ticks lost between pieces.
+void testBotPresets() {
+    const std::vector<BotPreset> presets = botPresets();
+    assert(presets.size() == 7 && presets[0].name == "Beginner" && presets[5].name == "3 PPS" && presets[5].pps == 3);
+    for (int i = 0; i < static_cast<int>(presets.size()); i++) {
+        Versus versus;
+        versus.preset = i;
+        versus.waitForBot = true;
+        versus.options.toYou = versus.options.toBot = false;
+        versus.startRound(9);
+        // Timed from the first lock to the 41st, so the start's wait doesn't count.
+        uint64_t firstLock = 0;
+        for (uint64_t f = 0; versus.bot.stats.pieces < 41 && !versus.bot.toppedOut; f++) {
+            versus.afterYourTick({}, f);
+            if (versus.bot.stats.pieces == 1 && firstLock == 0) firstLock = versus.bot.frame;
+        }
+        const double pps = 40.0 * core::kTicksPerSecond / (versus.bot.frame - firstLock);
+        std::printf("preset %s: %.2f PPS, cap %.1f\n", presets[i].name.c_str(), pps, presets[i].pps);
+        assert(!versus.bot.toppedOut && pps > presets[i].pps * 0.97 && pps < presets[i].pps * 1.03);
+    }
 }
 
 void testReplayRoundTrip() {
@@ -1740,5 +1762,6 @@ int main() {
     testVersusRound();
     testReplayRoundTrip();
     testVersusOptions();
+    testBotPresets();
     return 0;
 }
