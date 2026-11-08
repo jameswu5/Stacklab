@@ -793,6 +793,12 @@ const std::vector<LockResult>& Game::tick(std::span<const InputEvent> inputs, st
     return locks_;
 }
 
+int Game::incomingLines() const {
+    int lines = 0;
+    for (const Incoming& in : incoming_) lines += in.amount;
+    return lines;
+}
+
 Falling Game::ghost() const {
     Falling out = falling;
     int y = row(out.y);

@@ -11,6 +11,7 @@
 #include "app/pc_coach.h"
 #include "app/settings.h"
 #include "app/timing.h"
+#include "app/versus.h"
 #include "core/game.h"
 #include "modes/drill.h"
 #include "modes/modes.h"
@@ -53,6 +54,9 @@ struct Play {
     std::unique_ptr<PcCoach> coach;  // made by the first run of a mode with the coach
     int residue = 0;                 // the bag residue PC practice starts from
 
+    std::unique_ptr<Versus> versus;  // made by the first versus match
+    double botPps = 1;               // the bot's cap, chosen on the menu
+
     uint64_t lastInputNs = 0, worstInputNs = 0;
 
     // A ring of the state each placement started from, for modes with undo.
@@ -68,6 +72,7 @@ struct Play {
 
     void restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs);
     void begin();                                       // ends the countdown
+    void nextRound(uint64_t nowNs);                     // versus: the next round of the same match, after its countdown
     void key(Bind action, bool down, uint64_t timeNs);  // action is one of the first eight
     void stepTo(uint64_t nowNs);                        // runs every tick completed by this time
     void stepShown(uint64_t nowNs);                     // call after stepTo, before drawing `shown`

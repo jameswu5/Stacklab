@@ -51,6 +51,12 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
         coach->style = mode->pcStyle;
         coach->start(game, dealt);
     }
+    if (mode->versus) {
+        if (!versus) versus = std::make_unique<Versus>();
+        versus->pps = botPps;
+        versus->match = {};
+        versus->startRound(seed);
+    }
     shown = game;
     inputs.clear();
     startNs = runStartNs;
@@ -119,16 +125,32 @@ void Play::key(Bind action, bool down, uint64_t timeNs) {
     if (started && !over && !missed) inputs.push(static_cast<core::Action>(action), down, timeNs, startNs, game.frame);
 }
 
+void Play::nextRound(uint64_t nowNs) {
+    const Match match = versus->match;
+    restart(game.handling, static_cast<uint32_t>(nowNs), nowNs + kCountdownNs);
+    versus->match = match;
+}
+
 void Play::stepTo(uint64_t nowNs) {
+    if (mode->versus && versus->roundOver && !over && nowNs >= versus->roundEndNs + kRoundCardNs) nextRound(nowNs);
     if (!started && nowNs >= startNs) begin();
     if (mode->pcFile) coach->poll();
     uint64_t target = tickAt(nowNs > startNs ? nowNs - startNs : 0).tick;
-    while (!over && !missed && game.frame < target) {
+    while (!over && !missed && !(mode->versus && versus->roundOver) && game.frame < target) {
         auto due = inputs.due(game.frame);
         int progressBefore = mode->goalProgress(game.stats);
         // ponytail: finesse is off with levels, since the move search doesn't let time pass and
         // late levels fall fast enough for that to invent faults. Search from the floor to turn it on.
-        const auto& locks = mode->rules.levels ? game.tick(due) : finesse.tick(game, due);
+        const auto& locks = mode->versus ? game.tick(due, versus->toYou) : mode->rules.levels ? game.tick(due) : finesse.tick(game, due);
+        if (mode->versus) {
+            versus->afterYourTick(locks, game.frame);
+            inputs.consume(due.size());
+            if (game.toppedOut || versus->bot.toppedOut) {
+                over = versus->endRound(game, nowNs);
+                endSeconds = game.seconds();
+            }
+            continue;
+        }
         if (!locks.empty()) faults.note(finesse.judged);
 
         if (game.toppedOut && mode->editable) {
