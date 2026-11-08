@@ -198,7 +198,7 @@ void buildClearable(int upTo) {
         for (int part = 0; part < parts; part++) {
             std::vector<Bits> candidates;
             for (Bits after : clearable[n - 1]) before(after, n - 1, [&](Bits board) {
-                if (std::hash<uint64_t>()(board) * 0x9E3779B97F4A7C15 % parts == uint64_t(part)) candidates.push_back(board);
+                if ((board * 0x9E3779B97F4A7C15 >> 32) % parts == uint64_t(part)) candidates.push_back(board);
             });
             std::sort(candidates.begin(), candidates.end());
             candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
@@ -643,7 +643,7 @@ int main(int argc, char** argv) {
                     best[o] = std::max(best[o], known->second);
                     if (known->second >= listFrom) reached[setup].push_back(uint16_t(o));
                 }
-                if (++walked % 200 == 0) std::fprintf(stderr, "%d orders, %zu setups (%.0f s)\n", walked.load(), rate.size(), seconds(clock));
+                if (++walked % 10 == 0) std::fprintf(stderr, "%d orders, %zu setups (%.0f s)\n", walked.load(), rate.size(), seconds(clock));
             }
         };
         std::vector<std::thread> threads;
@@ -666,7 +666,7 @@ int main(int argc, char** argv) {
     for (int part = 0; residue < 3 && part < parts; part++) {
         std::vector<Bits> boards;
         for (Bits b : clearable[level]) before(b, level, [&](Bits board) {
-            if (std::popcount(board) == 4 * placed && std::hash<uint64_t>()(board) * 0x9E3779B97F4A7C15 % parts == uint64_t(part)) boards.push_back(board);
+            if (std::popcount(board) == 4 * placed && (board * 0x9E3779B97F4A7C15 >> 32) % parts == uint64_t(part)) boards.push_back(board);
         });
         std::sort(boards.begin(), boards.end());
         boards.erase(std::unique(boards.begin(), boards.end()), boards.end());
