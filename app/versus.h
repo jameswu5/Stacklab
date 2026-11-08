@@ -65,6 +65,10 @@ public:
     int preset = 0;  // into botPresets()
     VersusOptions options;
     bool waitForBot = false;  // tests: wait for each plan, so a round plays out the same at any load
+    // The bot's inputs are recorded into this replay's bot fields, while there's room reserved,
+    // or played back from them in place of the worker's plans.
+    Replay* recording = nullptr;
+    const Replay* playback = nullptr;
     Match match;
     bool roundOver = false;
     uint64_t roundEndNs = 0;
@@ -92,6 +96,7 @@ private:
     // asked for as the last began. It's only played if the bot's game came out as foreseen.
     BotPlan plan_, next_;
     int planAt_ = 0;
+    size_t playbackAt_ = 0;
     core::Board foreseenBoard_;
     int foreseenPieces_ = 0;
     std::array<int, 2> sends_{}, received_{};  // each side's sends so far, and the last of the other's it has been given

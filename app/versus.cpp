@@ -120,6 +120,7 @@ void Versus::startRound(uint32_t seed) {
     askId_++;  // an answer about the last round is dropped
     asking_ = hasNext_ = false;
     plan_.ticks = planAt_ = 0;
+    playbackAt_ = 0;
 }
 
 void Versus::send(int from, std::span<const core::LockResult> locks) {
@@ -161,7 +162,7 @@ void Versus::afterYourTick(std::span<const core::LockResult> locks, uint64_t fra
 
     // The next piece is planned as the last one's plan begins, from the game as that plan
     // will leave it, so the bot loses no ticks waiting for its worker.
-    if (!asking_ && !hasNext_ && !bot.toppedOut) {
+    if (!playback && !asking_ && !hasNext_ && !bot.toppedOut) {
         BotRequest& request = worker_->next();
         request.id = ++askId_;
         request.preset = preset;
@@ -191,9 +192,19 @@ void Versus::afterYourTick(std::span<const core::LockResult> locks, uint64_t fra
         }
     }
     std::span<const core::InputEvent> inputs;
-    if (planAt_ < plan_.ticks) {
+    if (playback) {
+        size_t end = playbackAt_;
+        while (end < playback->botInputs.size() && playback->botTicks[end] <= bot.frame) end++;
+        inputs = std::span(playback->botInputs).subspan(playbackAt_, end - playbackAt_);
+        playbackAt_ = end;
+    } else if (planAt_ < plan_.ticks) {
         inputs = std::span(plan_.events[planAt_].data(), plan_.counts[planAt_]);
         planAt_++;
+    }
+    for (const core::InputEvent& e : inputs) {
+        if (!recording || recording->botInputs.size() == recording->botInputs.capacity()) break;
+        recording->botTicks.push_back(bot.frame);
+        recording->botInputs.push_back(e);
     }
     auto seen = std::find_if(held_.begin(), held_.end(), [&](const auto& h) { return h.first > bot.frame; });
     for (auto h = held_.begin(); h != seen; h++) toBot.push_back(h->second);

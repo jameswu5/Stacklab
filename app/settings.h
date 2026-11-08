@@ -4,6 +4,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include <array>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -85,11 +86,20 @@ struct Replay {
     core::Handling handling;
     std::vector<uint64_t> ticks;
     std::vector<core::InputEvent> inputs;
+    // Versus: the bot's preset by name (empty otherwise), the options, and the inputs the bot
+    // played. The bot always has core::Handling's defaults.
+    std::string botPreset;
+    VersusOptions versus;
+    std::vector<uint64_t> botTicks;
+    std::vector<core::InputEvent> botInputs;
 };
 
 // False if the file can't be read or isn't a replay.
 bool loadReplay(const std::string& path, Replay& replay);
 void saveReplay(const Replay& replay, const std::string& path);
+// A versus match, a replay per round.
+bool loadMatch(const std::string& path, std::vector<Replay>& rounds);
+void saveMatch(std::span<const Replay> rounds, const std::string& path);
 
 // The settings screen is a flat list of rows.
 enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowSafelock, RowIrs, RowIhs, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, RowBotDelay, RowToYou, RowToBot, RowMultiplier, kRowCount };

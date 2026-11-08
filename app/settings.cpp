@@ -228,44 +228,101 @@ void adjustRow(Settings& settings, int row, int dir) {
     }
 }
 
+namespace {
+
+json inputsJson(std::span<const uint64_t> ticks, std::span<const core::InputEvent> events) {
+    json inputs = json::array();
+    for (size_t i = 0; i < events.size(); i++) {
+        const core::InputEvent& e = events[i];
+        inputs.push_back({ticks[i], static_cast<int>(e.action), e.pressed, e.subframe, e.hoisted});
+    }
+    return inputs;
+}
+
+void inputsFromJson(const json& inputs, std::vector<uint64_t>& ticks, std::vector<core::InputEvent>& events) {
+    ticks.clear();
+    events.clear();
+    for (const json& input : inputs) {
+        ticks.push_back(input.at(0).get<uint64_t>());
+        events.push_back({static_cast<core::Action>(input.at(1).get<int>()), input.at(2).get<bool>(), input.at(3).get<double>(), input.at(4).get<bool>()});
+    }
+}
+
+json replayJson(const Replay& replay) {
+    const core::Handling& h = replay.handling;
+    json file = {
+        {"version", 1},
+        {"mode", replay.mode},
+        {"residue", replay.residue},
+        {"seed", replay.seed},
+        {"handling", {{"arr", h.arr}, {"das", h.das}, {"dcd", h.dcd}, {"sdf", h.sdf}, {"safelock", h.safelock}, {"cancel", h.cancel}, {"may20g", h.may20g}, {"irsHold", h.irsHold}, {"ihsHold", h.ihsHold}}},
+        {"inputs", inputsJson(replay.ticks, replay.inputs)},
+    };
+    if (!replay.botPreset.empty()) {
+        const VersusOptions& v = replay.versus;
+        file["bot"] = {
+            {"preset", replay.botPreset},
+            {"versus", {{"delayMs", v.delayMs}, {"garbageToYou", v.toYou}, {"garbageToBot", v.toBot}, {"multiplier", v.multiplier}}},
+            {"inputs", inputsJson(replay.botTicks, replay.botInputs)},
+        };
+    }
+    return file;
+}
+
+// Throws json::exception on a file that doesn't fit.
+void replayFromJson(const json& file, Replay& replay) {
+    replay.mode = file.at("mode").get<std::string>();
+    replay.residue = file.at("residue").get<int>();
+    replay.seed = file.at("seed").get<uint32_t>();
+    const json& h = file.at("handling");
+    replay.handling = {h.at("arr"), h.at("das"), h.at("dcd"), h.at("sdf"), h.at("safelock"), h.at("cancel"), h.at("may20g"), h.at("irsHold"), h.at("ihsHold")};
+    inputsFromJson(file.at("inputs"), replay.ticks, replay.inputs);
+    replay.botPreset.clear();
+    replay.botTicks.clear();
+    replay.botInputs.clear();
+    if (!file.contains("bot")) return;
+    const json& bot = file.at("bot");
+    const json& v = bot.at("versus");
+    replay.botPreset = bot.at("preset").get<std::string>();
+    replay.versus = {v.at("delayMs").get<int>(), v.at("garbageToYou").get<bool>(), v.at("garbageToBot").get<bool>(), v.at("multiplier").get<double>()};
+    inputsFromJson(bot.at("inputs"), replay.botTicks, replay.botInputs);
+}
+
+void writeReplayFile(const json& file, const std::string& path) {
+    std::error_code ignored;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ignored);
+    writeJson(file, path, -1);
+}
+
+}  // namespace
+
 bool loadReplay(const std::string& path, Replay& replay) {
     const json file = readJson(path);
     if (!file.is_object() || !file.contains("inputs")) return false;
     try {
-        replay.mode = file.at("mode").get<std::string>();
-        replay.residue = file.at("residue").get<int>();
-        replay.seed = file.at("seed").get<uint32_t>();
-        const json& h = file.at("handling");
-        replay.handling = {h.at("arr"), h.at("das"), h.at("dcd"), h.at("sdf"), h.at("safelock"), h.at("cancel"), h.at("may20g"), h.at("irsHold"), h.at("ihsHold")};
-        replay.ticks.clear();
-        replay.inputs.clear();
-        for (const json& input : file.at("inputs")) {
-            replay.ticks.push_back(input.at(0).get<uint64_t>());
-            replay.inputs.push_back({static_cast<core::Action>(input.at(1).get<int>()), input.at(2).get<bool>(), input.at(3).get<double>(), input.at(4).get<bool>()});
-        }
+        replayFromJson(file, replay);
     } catch (const json::exception&) {
         return false;
     }
     return true;
 }
 
-// Inputs as [tick, action, pressed, subframe, hoisted], one a row in effect, to keep files small.
-void saveReplay(const Replay& replay, const std::string& path) {
-    const core::Handling& h = replay.handling;
-    json inputs = json::array();
-    for (size_t i = 0; i < replay.inputs.size(); i++) {
-        const core::InputEvent& e = replay.inputs[i];
-        inputs.push_back({replay.ticks[i], static_cast<int>(e.action), e.pressed, e.subframe, e.hoisted});
+void saveReplay(const Replay& replay, const std::string& path) { writeReplayFile(replayJson(replay), path); }
+
+bool loadMatch(const std::string& path, std::vector<Replay>& rounds) {
+    const json file = readJson(path);
+    if (!file.is_object() || !file.contains("rounds")) return false;
+    try {
+        rounds.assign(file.at("rounds").size(), {});
+        for (size_t i = 0; i < rounds.size(); i++) replayFromJson(file.at("rounds").at(i), rounds[i]);
+    } catch (const json::exception&) {
+        return false;
     }
-    const json file = {
-        {"version", 1},
-        {"mode", replay.mode},
-        {"residue", replay.residue},
-        {"seed", replay.seed},
-        {"handling", {{"arr", h.arr}, {"das", h.das}, {"dcd", h.dcd}, {"sdf", h.sdf}, {"safelock", h.safelock}, {"cancel", h.cancel}, {"may20g", h.may20g}, {"irsHold", h.irsHold}, {"ihsHold", h.ihsHold}}},
-        {"inputs", inputs},
-    };
-    std::error_code ignored;
-    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ignored);
-    writeJson(file, path, -1);
+    return !rounds.empty();
+}
+
+void saveMatch(std::span<const Replay> rounds, const std::string& path) {
+    json file = {{"version", 1}, {"rounds", json::array()}};
+    for (const Replay& round : rounds) file["rounds"].push_back(replayJson(round));
+    writeReplayFile(file, path);
 }
