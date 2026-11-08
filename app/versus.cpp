@@ -14,6 +14,7 @@ namespace {
 
 struct BotRequest {
     uint64_t id = 0;
+    double pps = 1;
     core::Game game{kVersusRules, core::Handling{}, 1};  // constructed, so copying into it doesn't allocate
 };
 
@@ -31,8 +32,8 @@ struct BotAnswer {
 class BotWorker {
 public:
     BotWorker() {
-        // y3's weights from the bundled file, or the bot's own fallbacks if it can't be read.
-        if (!ai::loadBotWeights(std::string(SDL_GetBasePath()) + "data/bot/default.txt", bot_.weights)) bot_.weights = {};
+        // y3's settings from the bundled file, or the bot's own fallbacks if it can't be read.
+        if (!ai::loadBot(std::string(SDL_GetBasePath()) + "data/bot/default.txt", bot_)) bot_ = {};
         for (BotRequest& request : requests_.slots()) request.game.queue.reserve(64);
         thread_ = std::thread([this] { run(); });
     }
@@ -69,6 +70,7 @@ private:
             const BotRequest& request = requests_.latest();
             BotAnswer& answer = answers_.next();
             answer.id = request.id;
+            bot_.pps = request.pps;  // its plan starts with the wait that keeps to it
             answer.ok = bot_.choose(request.game, choice_) && choice_.inputs.size() <= kBotPlanTicks;
             answer.ticks = answer.ok ? static_cast<int>(choice_.inputs.size()) : 0;
             for (int t = 0; t < answer.ticks; t++) {
@@ -111,7 +113,6 @@ void Versus::startRound(uint32_t seed) {
     roundOver = false;
     askId_++;  // an answer about the last round is dropped
     asking_ = false;
-    nextAskFrame_ = 0;
     planTicks_ = planAt_ = 0;
 }
 
@@ -152,14 +153,14 @@ void Versus::afterYourTick(std::span<const core::LockResult> locks, uint64_t fra
     note(0, locks, frame);
     send(0, locks);
 
-    // The bot starts a piece at most pps times a second, from its game as it stands.
-    if (planAt_ == planTicks_ && !asking_ && bot.frame >= nextAskFrame_ && !bot.toppedOut) {
+    // The next piece is planned from the bot's game as it stands.
+    if (planAt_ == planTicks_ && !asking_ && !bot.toppedOut) {
         BotRequest& request = worker_->next();
         request.id = ++askId_;
+        request.pps = pps;
         request.game = bot;
         worker_->ask();
         asking_ = true;
-        nextAskFrame_ = bot.frame + static_cast<uint64_t>(core::kTicksPerSecond / pps);
     }
     if (asking_) {
         BotAnswer answer;
