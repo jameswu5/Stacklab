@@ -72,7 +72,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     champion_path = os.path.join(out_dir, "champion.txt")
     candidate_path = os.path.join(out_dir, "candidate.txt")
-    champion = read(start)
+    champion = {name: 0.0 for name in WEIGHTS} | read(start)  # weights the file leaves out are 0, as in ai::BotWeights
     write(champion_path, champion, "start")
     log = open(os.path.join(out_dir, "log.txt"), "a")
 
