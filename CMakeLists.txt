@@ -92,3 +92,7 @@ target_compile_options(pc_test PRIVATE -UNDEBUG)
 target_compile_options(bot_test PRIVATE -UNDEBUG)
 target_compile_options(app_test PRIVATE -UNDEBUG)
 target_compile_options(replay_parity PRIVATE -UNDEBUG)
+
+# Measures PC1 setups. Run by hand; it takes minutes.
+add_executable(pc_setups tools/pc_setups.cpp)
+target_link_libraries(pc_setups PRIVATE ai)
