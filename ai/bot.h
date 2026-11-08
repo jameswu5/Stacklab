@@ -80,5 +80,7 @@ private:
 // A data file of `name value` lines, `#` starting a comment: BotWeights' names, and width,
 // depth, pps and mistakes. False if it can't be read, a name isn't known or a value is out of range.
 bool loadBot(const std::string& path, Bot& bot);
+// The weights alone, for app/versus.cpp until it takes the whole bot.
+bool loadBotWeights(const std::string& path, BotWeights& weights);
 
 }  // namespace ai
