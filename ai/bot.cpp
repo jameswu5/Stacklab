@@ -39,7 +39,8 @@ bool loadBot(const std::string& path, Bot& bot) {
     BotWeights& w = bot.weights;
     const std::pair<const char*, double*> weights[] = {
         {"holes", &w.holes}, {"height", &w.height}, {"danger", &w.danger}, {"bumpiness", &w.bumpiness}, {"well", &w.well},
-        {"tSlot", &w.tSlot}, {"attack", &w.attack}, {"b2b", &w.b2b}, {"wasted", &w.wasted}, {"pps", &bot.pps}, {"mistakes", &bot.mistakes},
+        {"tSlot", &w.tSlot}, {"attack", &w.attack}, {"b2b", &w.b2b}, {"wasted", &w.wasted},
+        {"incoming", &w.incoming}, {"surge", &w.surge}, {"combo", &w.combo}, {"pps", &bot.pps}, {"mistakes", &bot.mistakes},
     };
     const std::pair<const char*, int*> counts[] = {{"width", &bot.width}, {"depth", &bot.depth}};
     for (std::string line; std::getline(file, line);) {
@@ -109,12 +110,16 @@ float Bot::evaluate(const Node& node) const {
         tSlot = rows[y] == (kFullRow & ~(1 << x)) && rows[y + 1] == (kFullRow & ~three) &&
                 (filled(rows, x - 1, y + 2) != filled(rows, x + 1, y + 2)) && !filled(rows, x, y + 2);
     }
-    // ponytail: only the board as found is scored; garbage on its way, surge charge and combo aren't
+
+    // ponytail: garbage that would rise on the way isn't simulated; it only weighs on the score
+    const int pending = std::max(incoming_ - node.sent, 0);
+    const int charge = rules_->b2bCharging ? std::max(node.b2b - rules_->b2bChargeAt, 0) : 0;
 
     const double over = std::max(highest - 10, 0);
     return static_cast<float>(node.reward + weights.holes * holes + weights.height * total / core::kBoardWidth + weights.danger * over * over +
                               weights.bumpiness * bumpiness + weights.well * wellDepth + weights.tSlot * tSlot +
-                              weights.b2b * std::max<int>(node.b2b, 0));
+                              weights.b2b * std::max<int>(node.b2b, 0) + weights.incoming * pending * highest +
+                              weights.surge * charge + weights.combo * std::max<int>(node.combo, 0));
 }
 
 void Bot::addChild(const Node& parent, const Placement& placement, core::Piece piece, core::Piece hold, core::Piece current, int next, bool atRoot, bool held) {
@@ -157,6 +162,7 @@ void Bot::addChild(const Node& parent, const Placement& placement, core::Piece p
         child.combo = -1;
     }
     child.reward += static_cast<float>(weights.attack * sent + (sent == 0 ? weights.wasted * lines : 0));
+    child.sent = static_cast<int16_t>(std::min(child.sent + sent, 1000.0));
 
     child.current = current;
     child.hold = hold;
@@ -223,6 +229,7 @@ bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bo
     start.hold = now.hold;
     start.b2b = static_cast<int8_t>(std::clamp(now.stats.b2b, -1, 127));
     start.combo = static_cast<int8_t>(std::clamp(now.stats.combo, -1, 127));
+    incoming_ = now.incomingLines();
     beam_.push_back(start);
 
     std::unordered_set<uint64_t> seen;
