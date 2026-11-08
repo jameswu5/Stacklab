@@ -1,0 +1,18 @@
+name 3 PPS
+# Measured with tools/bot_match from fixed seeds, uncapped Handling defaults:
+#   40L: mean 36.11 s, best 34.18 s, 16 of 16 finished, PPS 2.98
+#   versus against 3 PPS: won 12 of 24, PPS 2.98, APP 0.815, APM 145.9
+#   survival, mean time alive of 600 s: 583.1 s at 40 APM incoming, 310.0 s at 120 APM
+holes -5.476
+height -0.2213
+danger -1.578
+bumpiness -0.5498
+well 0.4845
+tSlot 2.761
+attack 1.789
+b2b 2.548
+wasted -2.169
+pps 3.0
+width 48
+depth 0
+mistakes 0.02
