@@ -500,7 +500,7 @@ void Ui::sessionCard(const PlayView& view) {
     }
 }
 
-void Ui::drawMenu(int selected, std::span<const double> bests, int residue, double botPps) {
+void Ui::drawMenu(int selected, std::span<const double> bests, int residue, const BotPreset& bot) {
     const Palette& colors = palette();
     topBar("Menu");
     constexpr float width = 560, rowH = 64, x = (1440 - width) / 2;
@@ -526,15 +526,16 @@ void Ui::drawMenu(int selected, std::span<const double> bests, int residue, doub
             text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
         }
         if (isMode && kModes[row].versus) {
-            char buffer[16];
-            std::snprintf(buffer, sizeof buffer, "< %.1f >", botPps);
-            text(FontLabel, "BOT PPS", x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
+            char buffer[64];
+            std::snprintf(buffer, sizeof buffer, "BOT, %.1f PPS", bot.pps);
+            text(FontLabel, buffer, x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
+            std::snprintf(buffer, sizeof buffer, "< %s >", bot.name.c_str());
             text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
         }
     }
     const bool practice = selected < kModeCount && kModes[selected].pcStyle == PcStyle::Practice;
     const bool versus = selected < kModeCount && kModes[selected].versus;
-    text(FontSmall, practice ? "Up and down choose, left and right set the residue, Enter opens" : versus ? "Up and down choose, left and right set the bot's speed, Enter opens" : "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
+    text(FontSmall, practice ? "Up and down choose, left and right set the residue, Enter opens" : versus ? "Up and down choose, left and right choose the bot, Enter opens" : "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
 }
 
 void Ui::drawDrills(int selected, std::span<const Drill> drills, const char* error) {
@@ -765,7 +766,7 @@ void Ui::drawVersus(const VersusView& view) {
     text(FontWord, buffer, 720 + 24, 57, colors.text, Align::Center);
 
     const bool live = !view.over && !versus.roundOver;
-    std::snprintf(buffer, sizeof buffer, "Bot, %.1f PPS", versus.pps);
+    std::snprintf(buffer, sizeof buffer, "Bot, %s", view.botName);
     versusSide(*view.you, versus.callouts[0], "You", kVsSideX[0], live, live ? view.banner : nullptr);
     versusSide(versus.bot, versus.callouts[1], buffer, kVsSideX[1], live, live ? view.banner : nullptr);
 

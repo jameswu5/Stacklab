@@ -77,6 +77,7 @@ Settings loadSettings(const std::string& path) {
     settings.vsync = get(file, "vsync", settings.vsync);
     settings.overlay = get(file, "overlay", settings.overlay);
     settings.dark = get(file, "dark", settings.dark);
+    settings.botPreset = get(file, "botPreset", settings.botPreset);
     const json versus = get(file, "versus", json::object());
     VersusOptions& v = settings.versus;
     v.delayMs = std::clamp(get(versus, "delayMs", v.delayMs), 0, 1000);
@@ -108,7 +109,7 @@ void saveSettings(const Settings& settings, const std::string& path) {
         });
     }
     const VersusOptions& v = settings.versus;
-    writeJson({{"vsync", settings.vsync}, {"overlay", settings.overlay}, {"dark", settings.dark},
+    writeJson({{"vsync", settings.vsync}, {"overlay", settings.overlay}, {"dark", settings.dark}, {"botPreset", settings.botPreset},
                {"versus", {{"delayMs", v.delayMs}, {"garbageToYou", v.toYou}, {"garbageToBot", v.toBot}, {"multiplier", v.multiplier}}},
                {"active", settings.active}, {"profiles", profiles}}, path);
 }

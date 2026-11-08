@@ -61,7 +61,7 @@ struct Play {
     int residue = 0;                 // the bag residue PC practice starts from
 
     std::unique_ptr<Versus> versus;  // made by the first versus match
-    double botPps = 1;               // the bot's cap, chosen on the menu
+    int botPreset = 0;               // into botPresets(), chosen on the menu
     VersusOptions versusOptions;     // from the settings
 
     uint64_t lastInputNs = 0, worstInputNs = 0;

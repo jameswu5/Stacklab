@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         ui.beginFrame();
         const std::array<double, kModeCount> bests{60.824};
-        ui.drawMenu(dark ? kModeCount - 1 : 0, bests, 3, 1.5);
+        ui.drawMenu(dark ? kModeCount - 1 : 0, bests, 3, {"3 PPS", "", 3});
         SDL_FlushRenderer(renderer);
         SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-dark.png" : "/menu-light.png")).c_str());
@@ -294,7 +294,6 @@ int main(int argc, char** argv) {
     // Versus mid-round with clears named and garbage on its way, then a round's card and the match's results.
     const Mode& versusMode = kModes[kModeCount - 1];
     Versus versus;
-    versus.pps = 1.5;
     core::Game you = sampleGame();
     you.stats.attack = 9;
     you.stats.pieces = 32;
@@ -336,19 +335,19 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         versus.roundOver = false;
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches});
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "3 PPS"});
         save("versus");
         versus.roundOver = true;
         versus.lastWinner = 0;
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches});
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "3 PPS"});
         save("versus-round");
         versus.match.wins = {7, 4};
         versus.match.rounds = 11;
         versus.match.totals[0] = {402, 260, 31, 255.4};
         versus.match.totals[1] = {380, 199, 22, 255.4};
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches});
+        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches, "3 PPS"});
         save("versus-results");
         versus.match.wins = {3, 2};
     }

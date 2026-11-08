@@ -63,6 +63,7 @@ struct VersusView {
     const char* banner;  // the countdown's word, or null
     const char* hint;    // under the results
     std::span<const RunResult> history;  // when over, the last is this match
+    const char* botName = "Bot";         // its preset
 };
 
 class Ui {
@@ -73,7 +74,7 @@ public:
 
     // Every draw starts with beginFrame, which follows the output size.
     void beginFrame();
-    void drawMenu(int selected, std::span<const double> bests, int residue, double botPps);  // one row per mode, then Settings
+    void drawMenu(int selected, std::span<const double> bests, int residue, const BotPreset& bot);  // one row per mode, then Settings
     void drawDrills(int selected, std::span<const Drill> drills, const char* error);  // error is null or a file that couldn't be used
     void drawPlay(const PlayView& view);
     void drawVersus(const VersusView& view);

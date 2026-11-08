@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "app/settings.h"
@@ -37,6 +38,22 @@ struct Match {
     std::array<SideTotals, 2> totals{};
 };
 
+// A bot to play, from data/bot/presets in file-name order.
+struct BotPreset {
+    std::string name, path;
+    double pps;  // its cap
+};
+std::vector<BotPreset> botPresets();  // at least one
+
+// The bot's choice as plain arrays, so passing it back allocates nothing.
+struct BotPlan {
+    uint64_t id = 0;
+    bool ok = false;  // false: nothing fits, so the piece just drops
+    int ticks = 0;
+    std::array<uint8_t, kBotPlanTicks> counts{};
+    std::array<std::array<core::InputEvent, kBotTickEvents>, kBotPlanTicks> events{};
+};
+
 class BotWorker;
 
 class Versus {
@@ -45,7 +62,7 @@ public:
     ~Versus();  // joins the worker
 
     core::Game bot{kVersusRules, core::Handling{}, 1};
-    double pps = 1;  // the most pieces a second the bot starts
+    int preset = 0;  // into botPresets()
     VersusOptions options;
     bool waitForBot = false;  // tests: wait for each plan, so a round plays out the same at any load
     Match match;
@@ -70,11 +87,13 @@ private:
 
     std::unique_ptr<BotWorker> worker_;
     uint64_t askId_ = 0;
-    bool asking_ = false;
-    // The plan being played, a tick of key events at a time.
-    std::array<std::array<core::InputEvent, kBotTickEvents>, kBotPlanTicks> plan_{};
-    std::array<uint8_t, kBotPlanTicks> planCounts_{};
-    int planTicks_ = 0, planAt_ = 0;
+    bool asking_ = false, hasNext_ = false;
+    // The plan being played, a tick of key events at a time, and the one for the next piece,
+    // asked for as the last began. It's only played if the bot's game came out as foreseen.
+    BotPlan plan_, next_;
+    int planAt_ = 0;
+    core::Board foreseenBoard_;
+    int foreseenPieces_ = 0;
     std::array<int, 2> sends_{}, received_{};  // each side's sends so far, and the last of the other's it has been given
     std::array<int, 2> acked_{};               // the last of `received_` passed back to the sender
     std::vector<std::pair<uint64_t, core::GarbageEvent>> held_;  // sent to the bot, and the bot frame it sees them on
