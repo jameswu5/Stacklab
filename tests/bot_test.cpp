@@ -1,6 +1,7 @@
 // The bot's key presses put each piece where it chose, through core's real rules.
 #include <cassert>
 #include <cstdio>
+#include <filesystem>
 
 #include "ai/bot.h"
 
@@ -32,6 +33,14 @@ static void play(ai::Bot& bot, uint32_t seed, int pieces) {
 int main() {
     ai::Bot bot;
     assert(ai::loadBot("data/bot/default.txt", bot));
+    // Each preset loads and has a name for the menu.
+    int presets = 0;
+    for (const auto& entry : std::filesystem::directory_iterator("data/bot/presets")) {
+        ai::Bot preset;
+        assert(ai::loadBot(entry.path().string(), preset) && !preset.name.empty());
+        presets++;
+    }
+    assert(presets > 0);
     for (uint32_t seed = 1; seed <= 4; seed++) play(bot, seed, 150);
 
     // A slow, sloppy bot: its waits let gravity act before it moves.

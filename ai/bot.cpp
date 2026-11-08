@@ -47,6 +47,10 @@ bool loadBot(const std::string& path, Bot& bot) {
         std::string name;
         double value;
         if (!(in >> name)) continue;
+        if (name == "name") {
+            std::getline(in >> std::ws, bot.name);
+            continue;
+        }
         if (!(in >> value)) return false;
         const auto weight = std::find_if(std::begin(weights), std::end(weights), [&](const auto& n) { return name == n.first; });
         const auto count = std::find_if(std::begin(counts), std::end(counts), [&](const auto& n) { return name == n.first; });
