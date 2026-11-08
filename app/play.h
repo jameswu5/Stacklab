@@ -62,6 +62,7 @@ struct Play {
 
     std::unique_ptr<Versus> versus;  // made by the first versus match
     double botPps = 1;               // the bot's cap, chosen on the menu
+    VersusOptions versusOptions;     // from the settings
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 

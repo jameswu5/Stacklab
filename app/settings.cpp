@@ -77,6 +77,12 @@ Settings loadSettings(const std::string& path) {
     settings.vsync = get(file, "vsync", settings.vsync);
     settings.overlay = get(file, "overlay", settings.overlay);
     settings.dark = get(file, "dark", settings.dark);
+    const json versus = get(file, "versus", json::object());
+    VersusOptions& v = settings.versus;
+    v.delayMs = std::clamp(get(versus, "delayMs", v.delayMs), 0, 1000);
+    v.toYou = get(versus, "garbageToYou", v.toYou);
+    v.toBot = get(versus, "garbageToBot", v.toBot);
+    v.multiplier = std::clamp(get(versus, "multiplier", v.multiplier), 0.1, 3.0);
     json profiles = get(file, "profiles", json::array());
     if (profiles.is_array() && !profiles.empty()) {
         settings.profiles.clear();
@@ -101,7 +107,10 @@ void saveSettings(const Settings& settings, const std::string& path) {
             {"keys", keys},
         });
     }
-    writeJson({{"vsync", settings.vsync}, {"overlay", settings.overlay}, {"dark", settings.dark}, {"active", settings.active}, {"profiles", profiles}}, path);
+    const VersusOptions& v = settings.versus;
+    writeJson({{"vsync", settings.vsync}, {"overlay", settings.overlay}, {"dark", settings.dark},
+               {"versus", {{"delayMs", v.delayMs}, {"garbageToYou", v.toYou}, {"garbageToBot", v.toBot}, {"multiplier", v.multiplier}}},
+               {"active", settings.active}, {"profiles", profiles}}, path);
 }
 
 void bindKey(Profile& profile, Bind bind, SDL_Scancode key) {
@@ -153,6 +162,10 @@ std::string rowLabel(int row) {
         case RowVsync: return "VSync";
         case RowOverlay: return "Debug overlay";
         case RowTheme: return "Theme";
+        case RowBotDelay: return "Bot reaction to garbage";
+        case RowToYou: return "Garbage to you";
+        case RowToBot: return "Garbage to the bot";
+        case RowMultiplier: return "Attack multiplier";
     }
     return "";
 }
@@ -180,6 +193,10 @@ std::string rowValue(const Settings& settings, int row) {
         case RowVsync: return settings.vsync ? "On" : "Off";
         case RowOverlay: return settings.overlay ? "On" : "Off";
         case RowTheme: return settings.dark ? "Dark" : "Light";
+        case RowBotDelay: std::snprintf(buffer, sizeof buffer, "%d ms", settings.versus.delayMs); return buffer;
+        case RowToYou: return settings.versus.toYou ? "On" : "Off";
+        case RowToBot: return settings.versus.toBot ? "On" : "Off";
+        case RowMultiplier: std::snprintf(buffer, sizeof buffer, "%.1fx", settings.versus.multiplier); return buffer;
     }
     return "";
 }
@@ -203,6 +220,10 @@ void adjustRow(Settings& settings, int row, int dir) {
         case RowVsync: settings.vsync = !settings.vsync; break;
         case RowOverlay: settings.overlay = !settings.overlay; break;
         case RowTheme: settings.dark = !settings.dark; break;
+        case RowBotDelay: settings.versus.delayMs = std::clamp(settings.versus.delayMs + dir * 50, 0, 1000); break;
+        case RowToYou: settings.versus.toYou = !settings.versus.toYou; break;
+        case RowToBot: settings.versus.toBot = !settings.versus.toBot; break;
+        case RowMultiplier: step(settings.versus.multiplier, 0.1, 0.1, 3); break;
     }
 }
 

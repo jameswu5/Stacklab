@@ -101,6 +101,10 @@ void testSettings() {
     assert(settings.profile().handling.das == 5.9);
     assert(settings.profile().handling.arr == 0);
     assert(settings.profile().handling.sdf == 40);
+    adjustRow(settings, RowBotDelay, 1);
+    adjustRow(settings, RowToYou, 1);
+    adjustRow(settings, RowMultiplier, 1);
+    assert(rowValue(settings, RowBotDelay) == "50 ms" && rowValue(settings, RowToYou) == "Off" && rowValue(settings, RowMultiplier) == "1.1x");
 
     Profile second = settings.profile();
     second.name = "Second";
@@ -120,6 +124,7 @@ void testSettings() {
     assert(loaded.profile().handling.irsHold);
     assert(!loaded.profile().handling.ihsHold);
     assert(loaded.profile().keys[BindRight].size() == 2);
+    assert(loaded.versus.delayMs == 50 && !loaded.versus.toYou && loaded.versus.toBot && loaded.versus.multiplier == 1.1);
 
     // A file from before undo existed gets its default key, unless that key is taken.
     { std::ofstream(path) << R"({"profiles": [{"keys": {"left": [4]}}]})"; }
@@ -1589,6 +1594,63 @@ void testVersusRound() {
 
 // A run saved as a replay, loaded and played back through Play ends in the same game: 40L, and PC
 // practice, whose residue deals a held piece. Undo leaves a run without one, and playing back saves nothing.
+// A quad on your side, sent through the match's garbage with these options; the bot's incoming
+// lines after each of `frames` ticks.
+std::vector<int> quadToBot(const VersusOptions& options, int frames) {
+    const Mode* mode = nullptr;
+    for (const Mode& m : kModes)
+        if (m.versus) mode = &m;
+    Play play;
+    play.mode = mode;
+    play.versusOptions = options;
+    play.restart(core::Handling{}, 3, 0);
+    core::Game& you = play.game;
+    for (int y = 0; y < 4; y++)
+        for (int x = 1; x < core::kBoardWidth; x++) you.board.at(x, y) = core::Piece::J;  // not garbage, which earns a bonus
+    you.board.at(1, 4) = core::Piece::J;  // so it isn't a perfect clear
+    you.falling = {core::Piece::I, 1, -2, 10.5};
+    const core::InputEvent drop[] = {{core::Action::HardDrop, true, 0}, {core::Action::HardDrop, false, 0}};
+    std::vector<int> incoming;
+    for (int f = 0; f < frames; f++) {
+        const auto& locks = you.tick(f == 0 ? std::span(drop) : std::span<const core::InputEvent>{}, play.versus->toYou);
+        if (f == 0) assert(locks.size() == 1 && locks[0].lines == 4);
+        play.versus->afterYourTick(locks, you.frame);
+        incoming.push_back(play.versus->bot.incomingLines());
+    }
+    return incoming;
+}
+
+void testVersusOptions() {
+    // A quad sends 4, doubled by the multiplier, which the bot's rules get too.
+    assert(quadToBot({}, 1)[0] == 4);
+    VersusOptions doubled;
+    doubled.multiplier = 2;
+    assert(quadToBot(doubled, 1)[0] == 8);
+    // Garbage off to the bot: none arrives.
+    VersusOptions off;
+    off.toBot = false;
+    assert(quadToBot(off, 30).back() == 0);
+    // A 100 ms reaction: the bot sees it 6 frames later.
+    VersusOptions slow;
+    slow.delayMs = 100;
+    const std::vector<int> late = quadToBot(slow, 8);
+    assert(late[5] == 0 && late[6] == 4);
+
+    // Garbage off to you: the bot's sends never reach you. A bot made to win sends plenty.
+    VersusOptions quiet;
+    quiet.toYou = false;
+    Versus versus;
+    versus.options = quiet;
+    versus.pps = 3;
+    versus.startRound(5);
+    for (int f = 0; f < 60 * 60 && versus.bot.stats.attack == 0 && !versus.bot.toppedOut; f++) {
+        versus.afterYourTick({}, f);
+        assert(versus.toYou.empty());
+        std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+    assert(versus.bot.stats.attack > 0);
+}
+
 void testReplayRoundTrip() {
     const std::string path = (std::filesystem::temp_directory_path() / "stacklab-replay-test.json").string();
     for (const Mode* mode : {&kModes[0], &kModes[7]}) {
@@ -1677,5 +1739,6 @@ int main() {
     testPlayDoesNotAllocate(kModes[6]);
     testVersusRound();
     testReplayRoundTrip();
+    testVersusOptions();
     return 0;
 }

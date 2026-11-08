@@ -112,13 +112,15 @@ int main(int argc, char** argv) {
         SDL_DestroySurface(pixels);
     }
 
-    ui.dark = true;
-    ui.beginFrame();
-    ui.drawSettings(Settings{}, RowSafelock, false);
-    SDL_FlushRenderer(renderer);
-    SDL_Surface* settingsPixels = SDL_RenderReadPixels(renderer, nullptr);
-    SDL_SavePNG(settingsPixels, (std::string(argv[1]) + "/settings.png").c_str());
-    SDL_DestroySurface(settingsPixels);
+    for (bool dark : {false, true}) {
+        ui.dark = dark;
+        ui.beginFrame();
+        ui.drawSettings(Settings{}, dark ? RowSafelock : RowMultiplier, false);
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* settingsPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(settingsPixels, (std::string(argv[1]) + (dark ? "/settings-dark.png" : "/settings-light.png")).c_str());
+        SDL_DestroySurface(settingsPixels);
+    }
 
     core::Game fresh(core::Ruleset{}, core::Handling{}, 1);
     ui.beginFrame();

@@ -93,15 +93,19 @@ private:
 Versus::Versus() : worker_(std::make_unique<BotWorker>()) {
     toYou.reserve(256);
     toBot.reserve(256);
+    held_.reserve(256);
     bot.queue.reserve(64);
 }
 
 Versus::~Versus() = default;
 
 void Versus::startRound(uint32_t seed) {
-    bot = core::Game(kVersusRules, core::Handling{}, seed);
+    core::Ruleset rules = kVersusRules;
+    rules.garbageMultiplier = options.multiplier;
+    bot = core::Game(rules, core::Handling{}, seed);
     toYou.assign({{core::GarbageEvent::Target, 1}});
     toBot.assign({{core::GarbageEvent::Target, 0}});
+    held_.clear();
     sends_ = received_ = acked_ = {};
     callouts = {};
     roundOver = false;
@@ -112,19 +116,25 @@ void Versus::startRound(uint32_t seed) {
 }
 
 void Versus::send(int from, std::span<const core::LockResult> locks) {
-    std::vector<core::GarbageEvent>& out = from == 0 ? toBot : toYou;
+    if (!(from == 0 ? options.toBot : options.toYou)) return;
+    // The bot's garbage waits out its reaction delay.
+    const uint64_t due = bot.frame + static_cast<uint64_t>(options.delayMs * core::kTicksPerSecond / 1000);
+    auto out = [&](core::GarbageEvent e) {
+        if (from == 0) held_.push_back({due, e});
+        else toYou.push_back(e);
+    };
     // Here sends are seen as soon as they're made, so say so at once with an empty Arrive. Core
     // otherwise only learns it from the next real send, and keeps everything sent till then.
     if (received_[from] != acked_[from]) {
         acked_[from] = received_[from];
-        out.push_back({core::GarbageEvent::Arrive, from, sends_[from], received_[from], 0});
+        out({core::GarbageEvent::Arrive, from, sends_[from], received_[from], 0});
     }
     for (const core::LockResult& lock : locks) {
         for (int amount : lock.sent) {
             if (amount == 0) continue;
             const int iid = ++sends_[from];
-            out.push_back({core::GarbageEvent::Arrive, from, iid, received_[from], amount});
-            out.push_back({core::GarbageEvent::Confirm, from, iid});
+            out({core::GarbageEvent::Arrive, from, iid, received_[from], amount});
+            out({core::GarbageEvent::Confirm, from, iid});
         }
     }
 }
@@ -171,6 +181,9 @@ void Versus::afterYourTick(std::span<const core::LockResult> locks, uint64_t fra
         inputs = std::span(plan_[planAt_].data(), planCounts_[planAt_]);
         planAt_++;
     }
+    auto seen = std::find_if(held_.begin(), held_.end(), [&](const auto& h) { return h.first > bot.frame; });
+    for (auto h = held_.begin(); h != seen; h++) toBot.push_back(h->second);
+    held_.erase(held_.begin(), seen);
     for (const core::GarbageEvent& e : toBot)
         if (e.type == core::GarbageEvent::Arrive) received_[1] = e.iid;
     const auto& locks2 = bot.tick(inputs, toBot);
