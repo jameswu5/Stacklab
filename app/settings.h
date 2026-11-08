@@ -67,6 +67,21 @@ struct PcRecord {
 PcRecord loadPcRecord(const std::string& path);
 void savePcRecord(const PcRecord& record, const std::string& path);
 
+// A run, as BRIEF.md section 3 says replays are: the mode (which gives the ruleset), what the
+// run chose, the seed, handling, and every input with the tick it ran on.
+struct Replay {
+    std::string mode;  // the mode's name
+    int residue = 0;   // PC practice's bag residue
+    uint32_t seed = 0;
+    core::Handling handling;
+    std::vector<uint64_t> ticks;
+    std::vector<core::InputEvent> inputs;
+};
+
+// False if the file can't be read or isn't a replay.
+bool loadReplay(const std::string& path, Replay& replay);
+void saveReplay(const Replay& replay, const std::string& path);
+
 // The settings screen is a flat list of rows.
 enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowSafelock, RowIrs, RowIhs, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, kRowCount };
 

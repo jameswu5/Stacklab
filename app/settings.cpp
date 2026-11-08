@@ -23,9 +23,9 @@ json readJson(const std::string& path) {
 }
 
 // Written via a rename, so a crash can't leave a half-written file behind.
-void writeJson(const json& value, const std::string& path) {
+void writeJson(const json& value, const std::string& path, int indent = 2) {
     std::string temp = path + ".tmp";
-    std::ofstream(temp) << value.dump(2);
+    std::ofstream(temp) << value.dump(indent);
     std::error_code ignored;
     std::filesystem::rename(temp, path, ignored);
 }
@@ -204,4 +204,46 @@ void adjustRow(Settings& settings, int row, int dir) {
         case RowOverlay: settings.overlay = !settings.overlay; break;
         case RowTheme: settings.dark = !settings.dark; break;
     }
+}
+
+bool loadReplay(const std::string& path, Replay& replay) {
+    const json file = readJson(path);
+    if (!file.is_object() || !file.contains("inputs")) return false;
+    try {
+        replay.mode = file.at("mode").get<std::string>();
+        replay.residue = file.at("residue").get<int>();
+        replay.seed = file.at("seed").get<uint32_t>();
+        const json& h = file.at("handling");
+        replay.handling = {h.at("arr"), h.at("das"), h.at("dcd"), h.at("sdf"), h.at("safelock"), h.at("cancel"), h.at("may20g"), h.at("irsHold"), h.at("ihsHold")};
+        replay.ticks.clear();
+        replay.inputs.clear();
+        for (const json& input : file.at("inputs")) {
+            replay.ticks.push_back(input.at(0).get<uint64_t>());
+            replay.inputs.push_back({static_cast<core::Action>(input.at(1).get<int>()), input.at(2).get<bool>(), input.at(3).get<double>(), input.at(4).get<bool>()});
+        }
+    } catch (const json::exception&) {
+        return false;
+    }
+    return true;
+}
+
+// Inputs as [tick, action, pressed, subframe, hoisted], one a row in effect, to keep files small.
+void saveReplay(const Replay& replay, const std::string& path) {
+    const core::Handling& h = replay.handling;
+    json inputs = json::array();
+    for (size_t i = 0; i < replay.inputs.size(); i++) {
+        const core::InputEvent& e = replay.inputs[i];
+        inputs.push_back({replay.ticks[i], static_cast<int>(e.action), e.pressed, e.subframe, e.hoisted});
+    }
+    const json file = {
+        {"version", 1},
+        {"mode", replay.mode},
+        {"residue", replay.residue},
+        {"seed", replay.seed},
+        {"handling", {{"arr", h.arr}, {"das", h.das}, {"dcd", h.dcd}, {"sdf", h.sdf}, {"safelock", h.safelock}, {"cancel", h.cancel}, {"may20g", h.may20g}, {"irsHold", h.irsHold}, {"ihsHold", h.ihsHold}}},
+        {"inputs", inputs},
+    };
+    std::error_code ignored;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ignored);
+    writeJson(file, path, -1);
 }

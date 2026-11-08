@@ -20,8 +20,14 @@
 // isn't recorded or published. Tune this against TETR.IO by feel.
 constexpr uint64_t kCountdownNs = 1'000'000'000;
 
+// ponytail: a run with more inputs than this isn't saved as a replay; raise it if long runs need one.
+constexpr size_t kReplayInputs = 1 << 16;
+
 // ponytail: older placements are forgotten past this; a slot costs about 1 KB.
 constexpr int kUndoDepth = 256;
+
+// Beside the mode's best file: "best-40l.json" keeps its run in "best-40l-replay.json".
+inline std::string bestReplayPath(const std::string& bestPath) { return bestPath.substr(0, bestPath.size() - 5) + "-replay.json"; }
 
 // Starts a game as if `residue` pieces were already placed, with one more carried in
 // hold, chosen with `seed`. Hold is empty at residue 0, which starts a plain game.
@@ -59,6 +65,13 @@ struct Play {
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 
+    // This run's inputs, as a replay, and the replay being played back instead of keys, if any.
+    Replay recording;
+    bool recordingFull = false;
+    bool usedUndo = false;
+    const Replay* playback = nullptr;
+    size_t playbackAt = 0;
+
     // A ring of the state each placement started from, for modes with undo.
     // Constructed up front for the same reason as `shown`, so play doesn't allocate.
     struct UndoSlot {
@@ -72,6 +85,11 @@ struct Play {
 
     void restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs);
     void begin();                                       // ends the countdown
+    // Plays a replay of this mode through the same path, with keys ignored. It saves nothing.
+    void startPlayback(const Replay& replay, uint64_t runStartNs);
+    // Undo, drill chains, Sandbox's edits and the bot's moves aren't in the inputs, so those runs have none.
+    bool replayable() const { return !usedUndo && !recordingFull && !drill && !mode->editable && !mode->versus; }
+    std::span<const core::InputEvent> due() const;      // the inputs for the next tick, from keys or the replay
     void nextRound(uint64_t nowNs);                     // versus: the next round of the same match, after its countdown
     void key(Bind action, bool down, uint64_t timeNs);  // action is one of the first eight
     void stepTo(uint64_t nowNs);                        // runs every tick completed by this time

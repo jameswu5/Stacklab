@@ -89,6 +89,7 @@ public:
     void take(const PcAnswer& answer);  // an answer that isn't about the latest question is dropped
     void toggleHint() { hintWanted_ = !hintWanted_; }
     void save();  // adds this run to the record, once
+    void discard() { saved_ = true; }  // a replay of a run already counted: saves nothing
 
     // Only what the player can see, as the solver's answers must be fair to that.
     void fillQuery(const core::Game& game, ai::PcQuery& query) const;
