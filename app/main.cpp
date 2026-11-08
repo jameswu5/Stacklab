@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <ctime>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -36,6 +38,9 @@ struct App {
     std::vector<RunResult> history;  // this session's ended runs; a retried run didn't end
     int selected = 0;
     bool capturing = false;
+    Replay replay;  // the one being played back
+    std::vector<RunResult> playbackHistory;  // the session with the replay's run last, for its results
+    bool hasBestReplay = false;  // the mode's best run was saved as a replay
 
     uint64_t frameNs = 0, worstFrameNs = 0;
 };
@@ -76,6 +81,7 @@ void startRun(App& app, const Drill* drill, uint64_t timeNs) {
     app.play.drill = drill;
     app.play.bestPath = mode.bestFile ? app.prefPath + mode.bestFile : "";
     app.play.best = app.bests[app.menuRow];
+    app.hasBestReplay = mode.bestFile && std::filesystem::exists(bestReplayPath(app.play.bestPath));
     app.screen = Screen::Play;
     restart(app, timeNs);
     if (mode.pcFile) {
@@ -132,8 +138,20 @@ void handleDrillsKey(App& app, const SDL_KeyboardEvent& key) {
     }
 }
 
+// Fixed keys on the results: P watches this run again, O the mode's best. Only Esc stops a replay.
 void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
     if (key.repeat) return;
+    Play& play = app.play;
+    if (key.down && play.over && (key.scancode == SDL_SCANCODE_P || key.scancode == SDL_SCANCODE_O)) {
+        if (key.scancode == SDL_SCANCODE_P && !play.playback) {
+            if (!play.replayable()) return;
+            app.replay = play.recording;
+        }
+        if (key.scancode == SDL_SCANCODE_O && !(app.hasBestReplay && loadReplay(bestReplayPath(play.bestPath), app.replay))) return;
+        play.startPlayback(app.replay, key.timestamp + kCountdownNs);
+        return;
+    }
+    if (play.playback && !play.over && app.binds[key.scancode] != BindMenu) return;
     int bind = app.binds[key.scancode];
     if (bind < 0) return;
     if (bind == BindRetry) {
@@ -205,12 +223,26 @@ void handleSettingsKey(App& app, const SDL_KeyboardEvent& key) {
     }
 }
 
+// A replay's run isn't recorded again: it only gets a copy of the session to show its results in.
 void recordRun(App& app) {
     const Play& play = app.play;
+    if (play.playback) {
+        app.playbackHistory = app.history;
+        app.playbackHistory.push_back({play.mode, play.endSeconds, play.game.stats, play.game.toppedOut, false});
+        return;
+    }
     double& best = app.bests[app.menuRow];
     app.history.push_back({play.mode, play.endSeconds, play.game.stats, play.game.toppedOut, play.best != best});
     if (play.mode->versus) app.history.back().rounds = play.versus->match.wins;
+    if (play.best != best && play.replayable()) app.hasBestReplay = true;
     best = play.best;
+    if (!play.replayable()) return;
+    char stamp[32];
+    const std::time_t now = std::time(nullptr);
+    std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S-", std::localtime(&now));
+    std::string name = play.mode->name;
+    for (char& c : name) c = c == ' ' ? '-' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    saveReplay(play.recording, app.prefPath + "replays/" + stamp + name + ".json");
 }
 
 void drawFrame(App& app, Ui& ui) {
@@ -227,7 +259,8 @@ void drawFrame(App& app, Ui& ui) {
         const char* banner = nullptr;
         std::string hint;
         auto keyName = [&](Bind bind) { return rowValue(app.settings, static_cast<int>(RowBindFirst) + bind); };
-        if (play.over) hint = keyName(BindRetry) + " to retry, " + keyName(BindMenu) + " for the menu";
+        if (play.over && (play.playback || play.replayable())) hint = keyName(BindRetry) + " retry, " + keyName(BindMenu) + " menu, P replay" + (app.hasBestReplay ? ", O best" : "");
+        else if (play.over) hint = keyName(BindRetry) + " to retry, " + keyName(BindMenu) + " for the menu";
         else if (play.missed) {
             banner = "Missed";
             hint = keyName(BindRetry) + " to retry, " + keyName(BindUndo) + " to undo";
@@ -242,7 +275,7 @@ void drawFrame(App& app, Ui& ui) {
                 pcView = play.coach->view(play.shown, play.mode->goalLines, play.over);
                 pc = &pcView;
             }
-            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc});
+            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, play.playback ? app.playbackHistory : app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc});
         }
     }
     if (app.settings.overlay) {

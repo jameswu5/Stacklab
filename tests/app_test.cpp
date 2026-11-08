@@ -1587,6 +1587,66 @@ void testVersusRound() {
     assert(play.over && play.versus->match.wins[0] == 7);
 }
 
+// A run saved as a replay, loaded and played back through Play ends in the same game: 40L, and PC
+// practice, whose residue deals a held piece. Undo leaves a run without one, and playing back saves nothing.
+void testReplayRoundTrip() {
+    const std::string path = (std::filesystem::temp_directory_path() / "stacklab-replay-test.json").string();
+    for (const Mode* mode : {&kModes[0], &kModes[7]}) {
+        assert(mode->pcStyle == (mode == &kModes[0] ? PcStyle::Coach : PcStyle::Practice));
+        Play play;
+        play.mode = mode;
+        play.residue = 3;
+        play.restart(core::Handling{}, 77, 0);
+        ai::Bot bot;
+        ai::BotChoice choice;
+        int plannedFor = -1;
+        uint64_t now = 0;
+        size_t playAllocations = 0;
+        while (!play.over && play.game.frame < 60 * 300) {
+            const uint64_t frame = play.game.frame;
+            if (play.started && plannedFor != play.game.stats.pieces) {
+                onMainThread = false;
+                const bool ok = bot.choose(play.game, choice);
+                onMainThread = true;
+                plannedFor = play.game.stats.pieces;
+                for (size_t t = 0; ok && t < choice.inputs.size(); t++)
+                    for (const core::InputEvent& e : choice.inputs[t]) play.key(static_cast<Bind>(e.action), e.pressed, (frame + t) * kTickNs + static_cast<uint64_t>(e.subframe * kTickNs));
+            }
+            now += kTickNs;
+            const size_t before = allocations;
+            play.stepTo(now);
+            play.stepShown(now);
+            if (!play.over) playAllocations += allocations - before;  // saving at the end may allocate
+        }
+        assert(play.over && play.replayable() && !play.recording.inputs.empty() && playAllocations == 0);
+        saveReplay(play.recording, path);
+
+        Replay loaded;
+        assert(loadReplay(path, loaded));
+        assert(loaded.mode == mode->name && loaded.seed == 77 && loaded.residue == 3 && loaded.inputs.size() == play.recording.inputs.size());
+        Play again;
+        again.mode = mode;
+        again.startPlayback(loaded, 0);
+        again.key(BindHardDrop, true, kTickNs);  // keys do nothing during playback
+        for (uint64_t t = kTickNs; !again.over && again.game.frame < 60 * 300; t += kTickNs) again.stepTo(t);
+        assert(again.over && again.game.frame == play.game.frame && again.endSeconds == play.endSeconds);
+        assert(again.game.board.cells == play.game.board.cells && again.game.hold == play.game.hold);
+        assert(again.game.stats.pieces == play.game.stats.pieces && again.game.stats.lines == play.game.stats.lines && again.game.stats.keys == play.game.stats.keys && again.game.stats.score == play.game.stats.score && again.game.stats.attack == play.game.stats.attack);
+        std::printf("replay of %s: %llu frames, %d pieces, %zu inputs, the same\n", mode->name, static_cast<unsigned long long>(play.game.frame), play.game.stats.pieces, play.recording.inputs.size());
+    }
+    std::filesystem::remove(path);
+    assert(!loadReplay(path, *std::make_unique<Replay>()));
+
+    Play undone;
+    assert(kModes[6].undo);
+    undone.mode = &kModes[6];
+    undone.restart(core::Handling{}, 1, 0);
+    undone.key(BindHardDrop, true, 0);
+    undone.stepTo(2 * kTickNs);
+    undone.undo(2 * kTickNs);
+    assert(!undone.replayable());
+}
+
 int main() {
     onMainThread = true;
     testTickAt();
@@ -1616,5 +1676,6 @@ int main() {
     testBagCount();
     testPlayDoesNotAllocate(kModes[6]);
     testVersusRound();
+    testReplayRoundTrip();
     return 0;
 }

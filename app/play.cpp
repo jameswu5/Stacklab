@@ -59,6 +59,16 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     }
     shown = game;
     inputs.clear();
+    playback = nullptr;
+    usedUndo = recordingFull = false;
+    recording.mode = mode->name;
+    recording.residue = residue;
+    recording.seed = seed;
+    recording.handling = handling;
+    recording.ticks.clear();
+    recording.inputs.clear();
+    recording.ticks.reserve(kReplayInputs);
+    recording.inputs.reserve(kReplayInputs);
     startNs = runStartNs;
     started = false;
     over = false;
@@ -82,8 +92,24 @@ void Play::saveUndo() {
     undoCount = std::min(undoCount + 1, kUndoDepth);
 }
 
+void Play::startPlayback(const Replay& replay, uint64_t runStartNs) {
+    residue = replay.residue;
+    restart(replay.handling, replay.seed, runStartNs);
+    if (mode->pcFile) coach->discard();
+    playback = &replay;
+    playbackAt = 0;
+}
+
+std::span<const core::InputEvent> Play::due() const {
+    if (!playback) return inputs.due(game.frame);
+    size_t end = playbackAt;
+    while (end < playback->inputs.size() && playback->ticks[end] <= game.frame) end++;
+    return std::span(playback->inputs).subspan(playbackAt, end - playbackAt);
+}
+
 void Play::undo(uint64_t timeNs) {
-    if (!mode->undo || !started || over) return;
+    if (!mode->undo || !started || over || playback) return;
+    usedUndo = true;
     // A miss saved no slot, so the newest is where the missed piece started.
     if (undoCount > 1 && !missed) {
         undoNewest = (undoNewest + kUndoDepth - 1) % kUndoDepth;
@@ -118,6 +144,7 @@ void Play::begin() {
 }
 
 void Play::key(Bind action, bool down, uint64_t timeNs) {
+    if (playback) return;
     if (!started && timeNs >= startNs) begin();
     int& count = held[action];
     if (down ? count++ > 0 : count == 0 || --count > 0) return;
@@ -137,14 +164,25 @@ void Play::stepTo(uint64_t nowNs) {
     if (mode->pcFile) coach->poll();
     uint64_t target = tickAt(nowNs > startNs ? nowNs - startNs : 0).tick;
     while (!over && !missed && !(mode->versus && versus->roundOver) && game.frame < target) {
-        auto due = inputs.due(game.frame);
+        auto due = this->due();
+        // Into space reserved at restart, so recording never allocates.
+        for (size_t i = 0; i < due.size() && !playback && !recordingFull; i++) {
+            recordingFull = recording.inputs.size() == kReplayInputs;
+            if (recordingFull) break;
+            recording.ticks.push_back(game.frame);
+            recording.inputs.push_back(due[i]);
+        }
+        auto consume = [&] {
+            if (playback) playbackAt += due.size();
+            else inputs.consume(due.size());
+        };
         int progressBefore = mode->goalProgress(game.stats);
         // ponytail: finesse is off with levels, since the move search doesn't let time pass and
         // late levels fall fast enough for that to invent faults. Search from the floor to turn it on.
         const auto& locks = mode->versus ? game.tick(due, versus->toYou) : mode->rules.levels ? game.tick(due) : finesse.tick(game, due);
         if (mode->versus) {
             versus->afterYourTick(locks, game.frame);
-            inputs.consume(due.size());
+            consume();
             if (game.toppedOut || versus->bot.toppedOut) {
                 over = versus->endRound(game, nowNs);
                 endSeconds = game.seconds();
@@ -165,20 +203,22 @@ void Play::stepTo(uint64_t nowNs) {
         if (mode->goalLines > 0 && mode->goalProgress(game.stats) >= mode->goalLines) {
             over = true;
             endSeconds = finishSeconds(game, due, locks, progressBefore, *mode);
-            if (mode->bestFile && (best == 0 || endSeconds < best)) {
+            if (mode->bestFile && !playback && (best == 0 || endSeconds < best)) {
                 best = endSeconds;
                 saveBest(best, bestPath);
+                if (replayable() && !bestPath.empty()) saveReplay(recording, bestReplayPath(bestPath));
             }
         }
         if (mode->bestIsScore() && !game.toppedOut && game.frame >= static_cast<uint64_t>(mode->timeLimitSeconds) * core::kTicksPerSecond) {
             over = true;
             endSeconds = game.seconds();
-            if (game.stats.score > best) {
+            if (game.stats.score > best && !playback) {
                 best = game.stats.score;
                 saveBestScore(game.stats.score, bestPath);
+                if (replayable() && !bestPath.empty()) saveReplay(recording, bestReplayPath(bestPath));
             }
         }
-        inputs.consume(due.size());
+        consume();
         // A new attempt has its own clock, so the next call picks it up. A miss waits for a key.
         if (drill && judgeDrill(locks, nowNs)) return;
         if (mode->pcFile) {
@@ -258,8 +298,9 @@ void Play::cycleHold() {
 void Play::stepShown(uint64_t nowNs) {
     shown = game;
     if (over || !started || missed) return;
-    auto due = inputs.due(game.frame);
+    auto due = this->due();
     shown.tick(due);
+    if (playback) return;
 
     for (size_t reached = inputs.head + due.size(); inputs.measured < reached; inputs.measured++) {
         lastInputNs = nowNs - std::min(nowNs, inputs.times[inputs.measured]);
