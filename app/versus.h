@@ -16,7 +16,7 @@
 constexpr int kVersusRounds = 7;                     // first to this many
 constexpr uint64_t kRoundCardNs = 2'000'000'000;     // the round's result, before the next countdown
 constexpr uint64_t kCalloutFrames = 90;              // how long a clear's name stays, fading at the end
-constexpr int kBotPlanTicks = 160, kBotTickEvents = 4;  // the longest plan the bot plays, in ticks of key events
+constexpr int kBotPlanTicks = 320, kBotTickEvents = 4;  // the longest plan the bot plays, its PPS wait included, in ticks of key events
 
 // The last clear worth naming on one side, and when.
 struct Callout {
@@ -70,7 +70,6 @@ private:
     std::unique_ptr<BotWorker> worker_;
     uint64_t askId_ = 0;
     bool asking_ = false;
-    uint64_t nextAskFrame_ = 0;
     // The plan being played, a tick of key events at a time.
     std::array<std::array<core::InputEvent, kBotTickEvents>, kBotPlanTicks> plan_{};
     std::array<uint8_t, kBotPlanTicks> planCounts_{};
