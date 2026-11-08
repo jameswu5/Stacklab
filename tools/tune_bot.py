@@ -3,9 +3,9 @@
 
     python3 -I tools/tune_bot.py <bot_match> <start bot file> <output dir> <rounds> [seed]
 
-Each round perturbs every weight of the champion by a random factor and plays the
-candidate against the champion in versus, in pairs of games on the same seeds with the
-sides swapped. A sequential probability ratio test (wins against losses, draws left out)
+Each round changes one weight of the champion, in turn: by a random factor, or by a
+random amount when it's 0. The candidate plays the champion in versus, in pairs of games
+on the same seeds with the sides swapped. A sequential probability ratio test (wins against losses, draws left out)
 decides: H0 is a 50% win rate and H1 is 60%, each with 5% error. The candidate replaces
 the champion only when the test accepts H1. Settings other than weights, such as width
 and depth, are kept from the start file. The champion is written to <output dir>/champion.txt
@@ -18,7 +18,9 @@ import re
 import subprocess
 import sys
 
-WEIGHTS = ["holes", "height", "danger", "bumpiness", "well", "tSlot", "attack", "b2b", "wasted"]
+WEIGHTS = ["incoming", "surge", "combo", "holes", "height", "danger", "bumpiness", "well", "tSlot", "attack", "b2b", "wasted"]
+# The first step for a weight at 0. `incoming` multiplies lines queued by column height, so it's small.
+ZERO_STEP = {"incoming": 0.05}
 P0, P1, ALPHA, BETA = 0.5, 0.6, 0.05, 0.05
 UPPER = math.log((1 - BETA) / ALPHA)
 LOWER = math.log(BETA / (1 - ALPHA))
@@ -76,12 +78,13 @@ def main():
 
     for round_ in range(rounds):
         candidate = dict(champion)
-        for name in WEIGHTS:
-            candidate[name] = champion.get(name, 0) * math.exp(rng.gauss(0, 0.3))
+        name = WEIGHTS[round_ % len(WEIGHTS)]
+        value = champion.get(name, 0)
+        candidate[name] = value * math.exp(rng.gauss(0, 0.4)) if value else rng.gauss(0, ZERO_STEP.get(name, 0.5))
         write(candidate_path, candidate, f"candidate {round_}")
         # Seeds never repeat between rounds, so no candidate is fitted to one set of queues.
         accepted, won, lost, drew = sprt(bot_match, candidate_path, champion_path, seed * 1_000_000 + round_ * 1000)
-        line = f"round {round_}: won {won}, lost {lost}, drew {drew}, {'accepted' if accepted else 'rejected'}"
+        line = f"round {round_}, {name} {candidate[name]:.4g}: won {won}, lost {lost}, drew {drew}, {'accepted' if accepted else 'rejected'}"
         if accepted:
             champion = candidate
             write(champion_path, champion, line)
