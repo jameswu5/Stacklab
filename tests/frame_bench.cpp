@@ -1,9 +1,10 @@
 // Frame time in the PC coach with the solver's worker busy: the app's own Play, coach and
 // drawing, in real time, with a scripted player pressing keys. A hidden window, so it never
 // takes focus, and no pref path, so it saves nothing.
-// Usage: frame_bench <base-dir> <follow|stack|random|control> <runs>
+// Usage: frame_bench <base-dir> <follow|stack|random|control|versus> <runs>
 //   follow: takes the hint whenever a PC is ready, else stacks; stack: never takes it;
-//   random: random placements, for awkward stacks with holes; control: stack in Bag count, which never asks.
+//   random: random placements, for awkward stacks with holes; control: stack in Bag count, which never asks;
+//   versus: stack against the bot, for <runs> rounds of one match.
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -89,6 +90,7 @@ struct Stats {
         bool busy;
         double solveMsSoFar;
         int pieces;
+        int ticks;  // how many ticks this frame ran
     };
     std::vector<Worst> worst;
 };
@@ -109,49 +111,56 @@ int main(int argc, char** argv) {
     SDL_SetRenderTarget(renderer, target);
     Ui ui(renderer, std::string(argv[1]) + "/assets/fonts/");
 
+    const bool versus = style == "versus";
     const Mode* coachMode = nullptr;
     for (const Mode& mode : kModes)
-        if (mode.pcFile && mode.pcStyle == (style == "control" ? PcStyle::Count : PcStyle::Coach)) coachMode = &mode;
+        if (versus ? mode.versus : mode.pcFile && mode.pcStyle == (style == "control" ? PcStyle::Count : PcStyle::Coach)) coachMode = &mode;
     Profile profile;
     Play play;
     play.mode = coachMode;
     ai::MoveSearch search;
     std::mt19937 rng(7);
     Stats stats;
+    PcCoach dummyCoach;  // versus has no coach; this one is never asked
     stats.frames.reserve(1 << 20);
     stats.busyFrames.reserve(1 << 20);
     int finished = 0, pcs = 0, toppedOut = 0, lines = 0;
 
-    for (int run = 0; run < runs; run++) {
+    for (int run = 0; run < (versus ? 1 : runs); run++) {
         uint64_t start = SDL_GetTicksNS();
         play.restart(profile.handling, 1000 + run, start + kCountdownNs);
         std::vector<Press> presses;
         size_t next = 0;
         int plannedFor = -1;
-        uint64_t askedAt = start, lastAsk = play.coach->askId(), frameStart = SDL_GetTicksNS();
-        bool waiting = true;
-        while (!play.over) {
-            const uint64_t now = SDL_GetTicksNS();
+        uint64_t askedAt = start, lastAsk = versus ? 0 : play.coach->askId(), frameStart = SDL_GetTicksNS();
+        bool waiting = !versus;
+        while (!play.over && !(versus && play.versus->match.rounds >= runs)) {
+            const uint64_t now = SDL_GetTicksNS(), frameBefore = play.game.frame;
             uint64_t planStart = 0, planNs = 0;  // the scripted player's work, which isn't the app's
             for (; next < presses.size() && presses[next].at <= now; next++) play.key(presses[next].bind, presses[next].down, presses[next].at);
             play.stepTo(now);
             play.stepShown(now);
             if (play.over) break;  // the results need this session's history, which isn't kept here
 
-            PcCoach& coach = *play.coach;
-            if (coach.askId() != lastAsk) {
+            if (versus) {
+                ui.beginFrame();
+                ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, nullptr, "", {}});
+                SDL_FlushRenderer(renderer);
+            }
+            PcCoach& coach = versus ? dummyCoach : *play.coach;
+            if (!versus && coach.askId() != lastAsk) {
                 lastAsk = coach.askId();
                 askedAt = now;
                 waiting = true;
             }
-            if (waiting && coach.answered()) {
+            if (!versus && waiting && coach.answered()) {
                 stats.solves.push_back((now - askedAt) / 1e6);
                 waiting = false;
             }
-            PcView view = coach.view(play.shown, play.mode->goalLines, play.over);
+            PcView view = versus ? PcView{} : coach.view(play.shown, play.mode->goalLines, play.over);
             const bool readyHint = view.status == std::string("PC ready");
             // Plan once the last presses are done, and in follow, once the coach has answered.
-            if (!play.over && play.started && next == presses.size() && plannedFor != play.game.stats.pieces && (style != "follow" || coach.answered())) {
+            if (!play.over && play.started && !(versus && play.versus->roundOver) && next == presses.size() && plannedFor != play.game.stats.pieces && (style != "follow" || coach.answered())) {
                 if (style == "follow" && readyHint && !view.showHint) {
                     coach.toggleHint();
                     view = coach.view(play.shown, play.mode->goalLines, play.over);
@@ -192,8 +201,8 @@ int main(int argc, char** argv) {
                 planNs = SDL_GetTicksNS() - planStart;
             }
 
-            ui.beginFrame();
-            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, nullptr, "", play.best, {}, nullptr, 0, &play.faults, &view});
+            if (!versus) ui.beginFrame();
+            if (!versus) ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, nullptr, "", play.best, {}, nullptr, 0, &play.faults, &view});
             SDL_FlushRenderer(renderer);
 
             const uint64_t done = SDL_GetTicksNS();
@@ -201,7 +210,7 @@ int main(int argc, char** argv) {
             if (play.started) {
                 stats.frames.push_back(ms);
                 if (waiting) stats.busyFrames.push_back(ms);
-                stats.worst.push_back({ms, waiting, (done - askedAt) / 1e6, play.game.stats.pieces});
+                stats.worst.push_back({ms, waiting, (done - askedAt) / 1e6, play.game.stats.pieces, static_cast<int>(play.game.frame - frameBefore)});
                 std::partial_sort(stats.worst.begin(), stats.worst.begin() + std::min<size_t>(stats.worst.size(), 10), stats.worst.end(), [](auto& a, auto& b) { return a.ms > b.ms; });
                 if (stats.worst.size() > 10) stats.worst.resize(10);
             }
@@ -212,7 +221,7 @@ int main(int argc, char** argv) {
         }
         finished += play.game.stats.lines >= 40;
         toppedOut += play.game.toppedOut;
-        pcs += play.coach->progress.pcs;
+        if (!versus) pcs += play.coach->progress.pcs;
         lines += play.game.stats.lines;
     }
 
@@ -228,7 +237,7 @@ int main(int argc, char** argv) {
                 static_cast<size_t>(std::count_if(stats.frames.begin(), stats.frames.end(), [](double ms) { return ms > 16.7; })));
     std::printf("frames with a solve running %zu: median %.2f ms, p99.9 %.2f, worst %.2f\n", stats.busyFrames.size(), pct(stats.busyFrames, 0.5), pct(stats.busyFrames, 0.999), pct(stats.busyFrames, 1));
     std::printf("answers %zu, ask to answer: median %.1f ms, p99 %.1f, worst %.1f\n", stats.solves.size(), pct(stats.solves, 0.5), pct(stats.solves, 0.99), pct(stats.solves, 1));
-    for (const auto& w : stats.worst) std::printf("  worst frame %.2f ms, %s (%.0f ms since the ask), piece %d\n", w.ms, w.busy ? "solve running" : "worker idle", w.solveMsSoFar, w.pieces);
+    for (const auto& w : stats.worst) std::printf("  worst frame %.2f ms, %d ticks, %s (%.0f ms since the ask), piece %d\n", w.ms, w.ticks, w.busy ? "solve running" : "worker idle", w.solveMsSoFar, w.pieces);
     TTF_Quit();
     SDL_Quit();
     return 0;
