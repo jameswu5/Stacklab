@@ -658,8 +658,11 @@ void Ui::drawPlay(const PlayView& view) {
 // made and the stats, left of the board; the queue and VS score right of it; the name under it.
 // Smaller cells than solo play, so both fit, with both sides the same size.
 namespace {
-constexpr float kVsCell = 30, kVsSide = 624, kVsTop = 100, kVsColumn = 136, kVsGap = 12;
+// 32 is the largest cell that keeps a gap between the sides; the row is centred under the top bar,
+// with the name under the board counted in.
+constexpr float kVsCell = 32, kVsColumn = 136, kVsGap = 12;
 constexpr float kVsBoardCard = 10 * kVsCell + 28, kVsBoardCardH = 20 * kVsCell + 28;
+constexpr float kVsSide = 2 * (kVsColumn + kVsGap) + kVsBoardCard, kVsTop = kRowY + (900 - kRowY - kVsBoardCardH - 50) / 2;
 constexpr float kVsSideX[2] = {56, 1440 - 56 - kVsSide};
 
 const char* clearName(int lines) {
