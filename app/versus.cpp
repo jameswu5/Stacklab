@@ -164,7 +164,9 @@ void Versus::afterYourTick(std::span<const core::LockResult> locks, uint64_t fra
     }
     if (asking_) {
         BotAnswer answer;
-        if (worker_->poll(answer) && answer.id == askId_) {
+        bool answered;
+        while (!(answered = worker_->poll(answer) && answer.id == askId_) && waitForBot) std::this_thread::yield();
+        if (answered) {
             asking_ = false;
             planAt_ = 0;
             planTicks_ = answer.ok ? answer.ticks : 1;
