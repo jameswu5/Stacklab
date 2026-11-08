@@ -66,13 +66,6 @@ bool loadBot(const std::string& path, Bot& bot) {
     return bot.width > 0 && bot.depth >= 0 && bot.pps >= 0 && bot.mistakes >= 0;
 }
 
-bool loadBotWeights(const std::string& path, BotWeights& weights) {
-    Bot bot;
-    if (!loadBot(path, bot)) return false;
-    weights = bot.weights;
-    return true;
-}
-
 float Bot::evaluate(const Node& node) const {
     const auto& rows = node.rows;
     int heights[core::kBoardWidth] = {};
