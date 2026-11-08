@@ -1,12 +1,12 @@
 name Advanced
-# Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
-#   40L: mean 48.85 s, best 45.52 s, 16 of 16 finished, PPS 2.21
-#   versus against 3 PPS: won 0 of 24, PPS 2.23, APP 0.448, APM 59.8
-#   survival, mean time alive of 600 s: 534.8 s at 40 APM incoming, 23.8 s at 120 APM
-holes -5.476
+# Weights tuned at 3 PPS. Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
+#   40L: mean 49.94 s, best 45.95 s, 16 of 16 finished, PPS 2.21
+#   versus against 3 PPS: won 0 of 24, PPS 2.23, APP 0.506, APM 67.6
+#   survival, mean time alive of 600 s: 579.1 s at 40 APM incoming, 37.4 s at 120 APM
+holes -4.596
 height -0.2213
 danger -1.578
-bumpiness -0.5498
+bumpiness -1.175
 well 0.4845
 tSlot 2.761
 attack 1.789
