@@ -12,7 +12,7 @@
 // The move search lets no time pass. --harddrop allows only placements a hard drop from above
 // reaches: no tucks or spins, so its rates are a lower bound.
 //   pc_setups [--residue R] [--harddrop] [--check N] [--verify N] [--top N] [--cache FILE] [--save FILE]
-// --cache keeps the backward sets between runs; --save lists every setup with a PC.
+// --cache keeps the backward sets between runs; --save lists every setup at half the queues or more.
 #include <algorithm>
 #include <bit>
 #include <bitset>
@@ -189,21 +189,38 @@ std::vector<std::vector<Bits>> clearable{{0}};
 bool isClearable(Bits board, int n) { return std::binary_search(clearable[n].begin(), clearable[n].end(), board); }
 
 void buildClearable(int upTo) {
-    for (int n = 1; n <= upTo; n++) {
+    for (int n = int(clearable.size()); n <= upTo; n++) {
         auto clock = std::chrono::steady_clock::now();
-        std::vector<Bits> candidates;
-        for (Bits after : clearable[n - 1]) before(after, n - 1, [&](Bits board) { candidates.push_back(board); });
-        std::sort(candidates.begin(), candidates.end());
-        candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+        // In parts by hash, so the candidates never all sit in memory at once.
+        const int parts = n < 4 ? 1 : 16;
         std::vector<Bits> kept;
-        for (Bits board : candidates) {
-            bool reaches = false;
-            for (int p = 1; p <= 7 && !reaches; p++)
-                for (Bits child : place(board, Piece(p), linesFor(board, n))) reaches = reaches || isClearable(child, n - 1);
-            if (reaches) kept.push_back(board);
+        size_t total = 0;
+        for (int part = 0; part < parts; part++) {
+            std::vector<Bits> candidates;
+            for (Bits after : clearable[n - 1]) before(after, n - 1, [&](Bits board) {
+                if (std::hash<uint64_t>()(board) * 0x9E3779B97F4A7C15 % parts == uint64_t(part)) candidates.push_back(board);
+            });
+            std::sort(candidates.begin(), candidates.end());
+            candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+            total += candidates.size();
+            std::vector<std::vector<Bits>> found(kThreads);
+            std::vector<std::thread> threads;
+            for (int t = 0; t < kThreads; t++)
+                threads.emplace_back([&, t] {
+                    for (size_t i = t; i < candidates.size(); i += kThreads) {
+                        bool reaches = false;
+                        for (int p = 1; p <= 7 && !reaches; p++)
+                            for (Bits child : place(candidates[i], Piece(p), linesFor(candidates[i], n))) reaches = reaches || isClearable(child, n - 1);
+                        if (reaches) found[t].push_back(candidates[i]);
+                    }
+                });
+            for (auto& thread : threads) thread.join();
+            for (const auto& list : found) kept.insert(kept.end(), list.begin(), list.end());
+            if (parts > 1) std::fprintf(stderr, "clearable in %d, part %d: %zu so far (%.0f s)\n", n, part, kept.size(), seconds(clock));
         }
+        std::sort(kept.begin(), kept.end());
         clearable.push_back(std::move(kept));
-        std::fprintf(stderr, "clearable in %d: %zu of %zu candidates (%.1f s)\n", n, clearable[n].size(), candidates.size(), seconds(clock));
+        std::fprintf(stderr, "clearable in %d: %zu of %zu candidates (%.1f s)\n", n, clearable[n].size(), total, seconds(clock));
     }
 }
 
@@ -256,6 +273,7 @@ Orders workOutWins(Bits board, int n) {
         result[0] = board == 0;
         return result;
     }
+    if (n < int(clearable.size()) && !isClearable(board, n)) return result;
     const int lines = linesFor(board, n);
     for (int p = 1; p <= 7; p++)
         for (Bits child : children(board, Piece(p), lines)) orShifted(result, wins(child, n - 1), size_t(p - 1) * pow7(n - 1));
@@ -263,7 +281,7 @@ Orders workOutWins(Bits board, int n) {
 }
 
 void buildWins() {
-    for (int n = 0; n < int(clearable.size()); n++) {
+    for (int n = 0; n <= 3; n++) {
         std::vector<Orders> level;
         for (Bits board : clearable[n]) level.push_back(workOutWins(board, n));
         builtWins.push_back(std::move(level));
@@ -512,8 +530,8 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--save") && i + 1 < argc) save = argv[++i];
         else if (!std::strcmp(argv[i], "--every") && i + 1 < argc) every = std::atoi(argv[++i]);
     }
-    if (residue < 0 || residue > 3 || residue == 2) {
-        std::fprintf(stderr, "residues 0, 1 and 3 only for now\n");
+    if (residue < 0 || residue > 3) {
+        std::fprintf(stderr, "residues 0 to 3 only\n");
         return 1;
     }
     const auto queues = allQueues(queueLength());
@@ -522,18 +540,19 @@ int main(int argc, char** argv) {
     const int perStart = factorial(setupPieces());
     const int orderCount = int(from.size()) * perStart;
     buildTiles();
-    // The backward sets take minutes, so --cache keeps them in a file between runs.
+    // The backward sets take minutes, so --cache keeps them in a file between runs. Residues 2
+    // and 3 also use the boards 4 placements from a clear.
+    const int levels = residue >= 2 ? 4 : 3;
     if (FILE* in = cache ? std::fopen(cache, "rb") : nullptr) {
         uint64_t size;
-        while (std::fread(&size, 8, 1, in) == 1) {
+        while (int(clearable.size()) <= levels && std::fread(&size, 8, 1, in) == 1) {
             clearable.emplace_back(size);
             if (std::fread(clearable.back().data(), 8, size, in) != size) return 1;
         }
         std::fclose(in);
     }
-    if (clearable.size() < 4) {
-        clearable.resize(1);
-        buildClearable(3);
+    if (int(clearable.size()) <= levels) {
+        buildClearable(levels);
         if (FILE* out = cache ? std::fopen(cache, "wb") : nullptr) {
             for (size_t n = 1; n < clearable.size(); n++) {
                 const uint64_t size = clearable[n].size();
@@ -553,7 +572,11 @@ int main(int argc, char** argv) {
     // 2. Cut each into the bag's pieces, find the orders that build it, and rate each setup once.
     auto clock = std::chrono::steady_clock::now();
     std::unordered_map<Setup, int, SetupHash> rate;                     // every setup some order builds
-    std::unordered_map<Setup, std::vector<uint16_t>, SetupHash> reached;  // those with a PC: orders that build them
+    // Setups at half the queues or more, which is where the covering list picks from: orders that
+    // build them. --verify needs every setup with a PC, which takes more memory.
+    std::unordered_map<Setup, std::vector<uint16_t>, SetupHash> reached;
+    const int listFrom = verify ? 1 : int(total) / 2;
+    std::vector<int> best(orderCount, 0);  // per order, the best rate it can build
     std::atomic<long> tilingCount = 0;
     std::mutex lock;
     auto work = [&](const std::vector<Bits>& boards, int pieces, size_t first) {
@@ -585,7 +608,8 @@ int main(int argc, char** argv) {
                         guard.lock();
                         known = rate.emplace(setup, h).first;
                     }
-                    if (!known->second) continue;
+                    for (uint16_t o : orders) best[o] = std::max(best[o], known->second);
+                    if (known->second < listFrom) continue;
                     std::vector<uint16_t>& list = reached[setup];
                     std::vector<uint16_t> merged;
                     std::set_union(list.begin(), list.end(), orders.begin(), orders.end(), std::back_inserter(merged));
@@ -616,7 +640,8 @@ int main(int argc, char** argv) {
                         guard.lock();
                         known = rate.emplace(setup, h).first;
                     }
-                    if (known->second) reached[setup].push_back(uint16_t(o));
+                    best[o] = std::max(best[o], known->second);
+                    if (known->second >= listFrom) reached[setup].push_back(uint16_t(o));
                 }
                 if (++walked % 200 == 0) std::fprintf(stderr, "%d orders, %zu setups (%.0f s)\n", walked.load(), rate.size(), seconds(clock));
             }
@@ -634,20 +659,23 @@ int main(int argc, char** argv) {
         candidates += seven.size();
         run(seven, 7);
     }
-    constexpr int kParts = 8;
-    for (int part = 0; residue < 2 && part < kParts; part++) {
-        std::vector<Bits> six;
-        for (Bits b : clearable[3]) before(b, 3, [&](Bits board) {
-            if (std::popcount(board) == 24 && std::hash<uint64_t>()(board) * 0x9E3779B97F4A7C15 >> 61 == uint64_t(part)) six.push_back(board);
+    // The setup's pieces less the one held, a placement before the boards that many from a clear.
+    const int placed = residue == 0 ? 6 : setupPieces();
+    const int level = 9 - placed;
+    const int parts = residue == 2 ? 32 : 8;
+    for (int part = 0; residue < 3 && part < parts; part++) {
+        std::vector<Bits> boards;
+        for (Bits b : clearable[level]) before(b, level, [&](Bits board) {
+            if (std::popcount(board) == 4 * placed && std::hash<uint64_t>()(board) * 0x9E3779B97F4A7C15 % parts == uint64_t(part)) boards.push_back(board);
         });
-        std::sort(six.begin(), six.end());
-        six.erase(std::unique(six.begin(), six.end()), six.end());
-        candidates += six.size();
-        std::fprintf(stderr, "part %d: %zu boards (%.0f s)\n", part, six.size(), seconds(clock));
-        run(six, 6);
+        std::sort(boards.begin(), boards.end());
+        boards.erase(std::unique(boards.begin(), boards.end()), boards.end());
+        candidates += boards.size();
+        std::fprintf(stderr, "part %d: %zu boards (%.0f s)\n", part, boards.size(), seconds(clock));
+        run(boards, placed);
     }
-    const size_t live = reached.size();
-    // Every setup with a PC: board as hex, hold, queues that clear it, orders that build it.
+    const size_t live = std::count_if(rate.begin(), rate.end(), [](const auto& r) { return r.second > 0; });
+    // Every setup at half the queues or more: board as hex, hold, queues that clear it, orders that build it.
     if (FILE* out = save ? std::fopen(save, "w") : nullptr) {
         for (const auto& [setup, list] : reached) std::fprintf(out, "%010llx %d %d %zu\n", (unsigned long long)setup.board, int(setup.hold), rate[setup], list.size());
         std::fclose(out);
@@ -673,9 +701,6 @@ int main(int argc, char** argv) {
     }
 
     // 4. Best per order, then a greedy covering list.
-    std::vector<int> best(orderCount, 0);
-    for (const auto& [setup, list] : reached)
-        for (int o : list) best[o] = std::max(best[o], rate[setup]);
     const double perfect = std::accumulate(best.begin(), best.end(), 0.0) / (orderCount * total);
     std::printf("perfect play, setup chosen from this bag alone: %.2f%%\n", 100 * perfect);
 
