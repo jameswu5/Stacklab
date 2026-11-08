@@ -32,7 +32,9 @@ static void play(ai::Bot& bot, uint32_t seed, int pieces) {
 
 int main() {
     ai::Bot bot;
-    assert(ai::loadBot("data/bot/default.txt", bot));
+    assert(ai::loadBot("data/bot/presets/6-pps-3.0.txt", bot));
+    bot.pps = 0;  // full speed, for a quick test
+    bot.mistakes = 0;
     // Each preset loads and has a name for the menu.
     int presets = 0;
     for (const auto& entry : std::filesystem::directory_iterator("data/bot/presets")) {

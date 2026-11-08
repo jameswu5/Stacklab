@@ -4,7 +4,7 @@
 //   bot_match sprint <games> <seed> <bot>             40 lines, timed
 //   bot_match survival <games> <seed> <bot> [apm]     garbage at a steady rate until top out
 //
-// A bot is a settings file for ai::loadBot, such as data/bot/default.txt. In versus,
+// A bot is a settings file for ai::loadBot, such as data/bot/presets/6-pps-3.0.txt. In versus,
 // games come in pairs on the same seeds with the sides swapped, so queue luck cancels.
 #include <algorithm>
 #include <atomic>
