@@ -64,6 +64,7 @@ struct VersusView {
     const char* hint;    // under the results
     std::span<const RunResult> history;  // when over, the last is this match
     const char* botName = "Bot";         // its preset
+    bool replay = false;                 // a replay is playing, which the top bar says
 };
 
 class Ui {

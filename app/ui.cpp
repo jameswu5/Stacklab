@@ -751,7 +751,9 @@ void Ui::drawVersus(const VersusView& view) {
     const Palette& colors = palette();
     const Versus& versus = *view.versus;
     const Match& match = versus.match;
-    topBar(view.mode->name);
+    char title[64];
+    std::snprintf(title, sizeof title, view.replay ? "%s - Replay" : "%s", view.mode->name);
+    topBar(title);
     char buffer[64];
 
     // First to 7, with the rounds, at the top in the middle.

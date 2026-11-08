@@ -63,6 +63,7 @@ struct Play {
     std::unique_ptr<Versus> versus;  // made by the first versus match
     int botPreset = 0;               // into botPresets(), chosen on the menu
     VersusOptions versusOptions;     // from the settings
+    std::vector<Replay> rounds;      // versus: this match's rounds before the one in `recording`
 
     uint64_t lastInputNs = 0, worstInputNs = 0;
 
@@ -88,8 +89,8 @@ struct Play {
     void begin();                                       // ends the countdown
     // Plays a replay of this mode through the same path, with keys ignored. It saves nothing.
     void startPlayback(const Replay& replay, uint64_t runStartNs);
-    // Undo, drill chains, Sandbox's edits and the bot's moves aren't in the inputs, so those runs have none.
-    bool replayable() const { return !usedUndo && !recordingFull && !drill && !mode->editable && !mode->versus; }
+    // Undo, drill chains and Sandbox's edits aren't in the inputs, so those runs have none.
+    bool replayable() const { return !usedUndo && !recordingFull && !drill && !mode->editable; }
     std::span<const core::InputEvent> due() const;      // the inputs for the next tick, from keys or the replay
     void nextRound(uint64_t nowNs);                     // versus: the next round of the same match, after its countdown
     void key(Bind action, bool down, uint64_t timeNs);  // action is one of the first eight

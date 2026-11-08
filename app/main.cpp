@@ -235,6 +235,7 @@ void recordRun(App& app) {
     if (play.playback) {
         app.playbackHistory = app.history;
         app.playbackHistory.push_back({play.mode, play.endSeconds, play.game.stats, play.game.toppedOut, false});
+        if (play.mode->versus) app.playbackHistory.back().rounds = play.versus->match.wins;
         return;
     }
     double& best = app.bests[app.menuRow];
@@ -248,7 +249,12 @@ void recordRun(App& app) {
     std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S-", std::localtime(&now));
     std::string name = play.mode->name;
     for (char& c : name) c = c == ' ' ? '-' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    saveReplay(play.recording, app.prefPath + "replays/" + stamp + name + ".json");
+    const std::string path = app.prefPath + "replays/" + stamp + name + ".json";
+    if (!play.mode->versus) return saveReplay(play.recording, path);
+    std::vector<Replay> rounds = play.rounds;
+    rounds.push_back(play.recording);
+    for (Replay& round : rounds) round.botPreset = app.presets[play.botPreset].name;
+    saveMatch(rounds, path);
 }
 
 void drawFrame(App& app, Ui& ui) {
@@ -273,7 +279,7 @@ void drawFrame(App& app, Ui& ui) {
         }
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
         if (play.mode->versus) {
-            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), app.history, app.presets[play.botPreset].name.c_str()});
+            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), play.playback ? app.playbackHistory : app.history, app.presets[play.botPreset].name.c_str(), play.playback != nullptr});
         } else {
             PcView pcView;
             const PcView* pc = nullptr;

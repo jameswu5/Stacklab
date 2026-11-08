@@ -58,7 +58,10 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
         versus->preset = botPreset;
         versus->options = versusOptions;
         versus->match = {};
+        versus->recording = &recording;
+        versus->playback = nullptr;
         versus->startRound(seed);
+        rounds.clear();
     }
     shown = game;
     inputs.clear();
@@ -72,6 +75,13 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     recording.inputs.clear();
     recording.ticks.reserve(kReplayInputs);
     recording.inputs.reserve(kReplayInputs);
+    recording.versus = versusOptions;
+    recording.botTicks.clear();
+    recording.botInputs.clear();
+    if (mode->versus) {
+        recording.botTicks.reserve(kReplayInputs);
+        recording.botInputs.reserve(kReplayInputs);
+    }
     startNs = runStartNs;
     started = false;
     over = false;
@@ -97,7 +107,9 @@ void Play::saveUndo() {
 
 void Play::startPlayback(const Replay& replay, uint64_t runStartNs) {
     residue = replay.residue;
+    if (mode->versus) versusOptions = replay.versus;
     restart(replay.handling, replay.seed, runStartNs);
+    if (mode->versus) versus->playback = &replay;
     if (mode->pcFile) coach->discard();
     playback = &replay;
     playbackAt = 0;
@@ -157,8 +169,11 @@ void Play::key(Bind action, bool down, uint64_t timeNs) {
 
 void Play::nextRound(uint64_t nowNs) {
     const Match match = versus->match;
+    std::vector<Replay> played = std::move(rounds);
+    played.push_back(recording);  // between rounds, so allocating can't disturb play
     restart(game.handling, static_cast<uint32_t>(nowNs), nowNs + kCountdownNs);
     versus->match = match;
+    rounds = std::move(played);
 }
 
 void Play::stepTo(uint64_t nowNs) {
@@ -186,8 +201,9 @@ void Play::stepTo(uint64_t nowNs) {
         if (mode->versus) {
             versus->afterYourTick(locks, game.frame);
             consume();
+            recordingFull = recordingFull || recording.botInputs.size() == kReplayInputs;
             if (game.toppedOut || versus->bot.toppedOut) {
-                over = versus->endRound(game, nowNs);
+                over = versus->endRound(game, nowNs) || playback;  // a replay is one round
                 endSeconds = game.seconds();
             }
             continue;

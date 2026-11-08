@@ -1531,22 +1531,13 @@ void testPlayDoesNotAllocate(const Mode& mode) {
 // A whole versus round through Play: this side is a bot pressing keys at about 5 pieces a
 // second, against the app's bot on its worker. Garbage goes both ways until one tops out,
 // then the round card, and the next round keeps the score. Playing doesn't allocate.
-void testVersusRound() {
-    const Mode* mode = nullptr;
-    for (const Mode& m : kModes)
-        if (m.versus) mode = &m;
-    assert(mode && mode->rules.b2bCharging && mode->rules.openerPhase == 14 && !mode->undo && !mode->bestFile);
-    Play play;
-    play.mode = mode;
-    play.botPreset = 2;
-    play.restart(core::Handling{}, 11, 0);
-    play.versus->waitForBot = true;
-    assert(play.versus->bot.queue == play.game.queue);  // one seed for both, as in League
+// Plays a versus round with a bot of its own for you, from the start, and returns the time it
+// ended at. Allocations during play are added to `playAllocations`.
+uint64_t playScriptedRound(Play& play, size_t& playAllocations) {
     ai::Bot me;
     ai::BotChoice choice;
     uint64_t now = 0, nextPiece = 0;
     int plannedFor = -1;
-    size_t playAllocations = 0;
     while (!play.versus->roundOver && play.game.frame < 60 * 600) {
         const uint64_t frame = play.game.frame;
         if (play.started && plannedFor != play.game.stats.pieces && frame >= nextPiece) {
@@ -1567,6 +1558,22 @@ void testVersusRound() {
         play.stepTo(now);
         playAllocations += allocations - before;
     }
+    return now;
+}
+
+void testVersusRound() {
+    const Mode* mode = nullptr;
+    for (const Mode& m : kModes)
+        if (m.versus) mode = &m;
+    assert(mode && mode->rules.b2bCharging && mode->rules.openerPhase == 14 && !mode->undo && !mode->bestFile);
+    Play play;
+    play.mode = mode;
+    play.botPreset = 2;
+    play.restart(core::Handling{}, 11, 0);
+    play.versus->waitForBot = true;
+    assert(play.versus->bot.queue == play.game.queue);  // one seed for both, as in League
+    size_t playAllocations = 0;
+    uint64_t now = playScriptedRound(play, playAllocations);
     const core::Game& bot = play.versus->bot;
     std::printf("versus round: %llu frames, you %d pieces %d attack %d received, bot %d pieces %d attack %d received, %s topped out\n", static_cast<unsigned long long>(play.game.frame), play.game.stats.pieces, play.game.stats.attack,
                 play.game.stats.garbageReceived, bot.stats.pieces, bot.stats.attack, bot.stats.garbageReceived, play.game.toppedOut ? "you" : "the bot");
@@ -1581,6 +1588,7 @@ void testVersusRound() {
     assert(play.versus->roundOver);
     play.stepTo(now + kRoundCardNs);
     assert(!play.versus->roundOver && !play.started && play.game.stats.pieces == 0 && play.versus->match.wins == match.wins);
+    assert(play.rounds.size() == 1 && play.rounds[0].seed == 11 && !play.rounds[0].botInputs.empty() && play.recording.botInputs.empty());
     play.stepTo(now + kRoundCardNs + kCountdownNs + 10 * kTickNs);
     assert(play.started && play.game.frame > 0 && play.versus->bot.frame == play.game.frame);
 
@@ -1649,6 +1657,51 @@ void testVersusOptions() {
         assert(versus.toYou.empty());
     }
     assert(versus.bot.stats.attack > 0);
+}
+
+// A round saved with its match, loaded, and played back ends in the same state on both sides.
+void testVersusReplay() {
+    const Mode* mode = nullptr;
+    for (const Mode& m : kModes)
+        if (m.versus) mode = &m;
+    Play play;
+    play.mode = mode;
+    play.botPreset = 3;
+    play.versusOptions.multiplier = 1.5;
+    play.versusOptions.delayMs = 200;
+    play.restart(core::Handling{}, 21, 0);
+    play.versus->waitForBot = true;
+    size_t playAllocations = 0;
+    playScriptedRound(play, playAllocations);
+    assert(play.versus->roundOver && play.replayable() && playAllocations == 0);
+    const core::Game you = play.game, bot = play.versus->bot;
+    assert(!play.recording.botInputs.empty() && bot.stats.garbageReceived > 0);
+
+    const std::string path = (std::filesystem::temp_directory_path() / "stacklab-match-test.json").string();
+    std::vector<Replay> rounds = {play.recording};
+    rounds[0].botPreset = "Advanced";
+    saveMatch(rounds, path);
+    std::vector<Replay> loaded;
+    assert(loadMatch(path, loaded) && loaded.size() == 1 && loaded[0].botPreset == "Advanced");
+    assert(loaded[0].versus.multiplier == 1.5 && loaded[0].versus.delayMs == 200 && loaded[0].botInputs.size() == play.recording.botInputs.size());
+    std::filesystem::remove(path);
+
+    play.versusOptions = {};  // the replay's own options are used
+    play.startPlayback(loaded[0], 0);
+    uint64_t now = 0;
+    size_t playbackAllocations = 0;
+    while (!play.over && play.game.frame < you.frame + 60) {
+        now += kTickNs;
+        const size_t before = allocations;
+        play.stepTo(now);
+        playbackAllocations += allocations - before;
+    }
+    const core::Game& bot2 = play.versus->bot;
+    std::printf("versus replay: %llu frames, you %d pieces, bot %d pieces %zu inputs, the same\n", static_cast<unsigned long long>(you.frame), you.stats.pieces, bot.stats.pieces, loaded[0].botInputs.size());
+    assert(play.over && playbackAllocations == 0);
+    assert(play.game.frame == you.frame && play.game.board.cells == you.board.cells && play.game.stats.attack == you.stats.attack && play.game.stats.pieces == you.stats.pieces);
+    assert(bot2.frame == bot.frame && bot2.board.cells == bot.board.cells && bot2.stats.attack == bot.stats.attack && bot2.stats.garbageReceived == bot.stats.garbageReceived);
+    assert(play.game.toppedOut == you.toppedOut && bot2.toppedOut == bot.toppedOut);
 }
 
 // The presets in file order, and each bot keeping to its PPS cap with no ticks lost between pieces.
@@ -1763,5 +1816,6 @@ int main() {
     testReplayRoundTrip();
     testVersusOptions();
     testBotPresets();
+    testVersusReplay();
     return 0;
 }
