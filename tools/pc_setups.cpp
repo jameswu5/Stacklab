@@ -121,9 +121,10 @@ std::vector<Bits> place(Bits board, Piece piece, int lines) {
     return out;
 }
 
+thread_local std::unordered_map<uint64_t, std::vector<Bits>> childCache;
+
 const std::vector<Bits>& children(Bits board, Piece piece, int lines) {
-    thread_local std::unordered_map<uint64_t, std::vector<Bits>> cache;
-    if (cache.size() > 1'000'000) cache.clear();  // keeps memory down
+    auto& cache = childCache;
     const uint64_t key = board | uint64_t(piece) << 40 | uint64_t(lines) << 44;
     auto found = cache.find(key);
     if (found != cache.end()) return found->second;
@@ -206,28 +207,78 @@ void buildClearable(int upTo) {
     }
 }
 
-// Every piece order, as base-8 digits with the first piece lowest, that clears `board` in `n` placements.
-void finishes(Bits board, int n, int seq, int depth, std::bitset<1 << 18>& out) {
-    const int lines = linesFor(board, n);
-    for (int p = 1; p <= 7; p++)
-        for (Bits child : children(board, Piece(p), lines)) {
-            const int next = seq | p << (3 * depth);
-            if (n == 1) {
-                if (child == 0) out.set(next);
-            } else if (n - 1 >= int(clearable.size()) || isClearable(child, n - 1)) {
-                finishes(child, n - 1, next, depth + 1, out);
-            }
-        }
+// A set of piece orders n long: bit i is the order whose digits in base 7 are its pieces less
+// one, the first piece the most significant. Orders starting with the same piece are one block.
+using Orders = std::vector<uint64_t>;
+
+int pow7(int n) { return n ? 7 * pow7(n - 1) : 1; }
+
+// dst |= src << shift
+void orShifted(Orders& dst, const Orders& src, size_t shift) {
+    const size_t words = shift / 64, bits = shift % 64;
+    for (size_t i = 0; i < src.size(); i++) {
+        if (!src[i]) continue;
+        dst[i + words] |= src[i] << bits;
+        if (bits && i + words + 1 < dst.size()) dst[i + words + 1] |= src[i] >> (64 - bits);
+    }
 }
 
-// The piece orders a queue and hold can place, `n` long.
+// For the built levels, worked out once, in the order of clearable[n]; above them,
+// remembered per thread and only trimmed between setups, since the search holds references.
+std::vector<std::vector<Orders>> builtWins;
+thread_local std::array<std::unordered_map<Bits, Orders>, 7> winMemo;
+constexpr std::array<size_t, 7> kWinMemoCap{0, 0, 0, 0, 800'000, 100'000, 0};  // about 0.5 GB per thread
+
+void trimMemos() {
+    for (int n = 0; n < 7; n++)
+        if (winMemo[n].size() > kWinMemoCap[n]) winMemo[n].clear();
+    if (childCache.size() > 1'000'000) childCache.clear();
+}
+
+Orders workOutWins(Bits board, int n);
+
+// The piece orders that clear `board` in `n` placements.
+const Orders& wins(Bits board, int n) {
+    if (n < int(builtWins.size())) {
+        static const std::array<Orders, 4> none{Orders(1), Orders(1), Orders(1), Orders(6)};
+        auto it = std::lower_bound(clearable[n].begin(), clearable[n].end(), board);
+        return it != clearable[n].end() && *it == board ? builtWins[n][it - clearable[n].begin()] : none[n];
+    }
+    auto& memo = winMemo[n];
+    auto found = memo.find(board);
+    if (found != memo.end()) return found->second;
+    return memo.emplace(board, workOutWins(board, n)).first->second;
+}
+
+Orders workOutWins(Bits board, int n) {
+    Orders result((pow7(n) + 63) / 64);
+    if (n == 0) {
+        result[0] = board == 0;
+        return result;
+    }
+    const int lines = linesFor(board, n);
+    for (int p = 1; p <= 7; p++)
+        for (Bits child : children(board, Piece(p), lines)) orShifted(result, wins(child, n - 1), size_t(p - 1) * pow7(n - 1));
+    return result;
+}
+
+void buildWins() {
+    for (int n = 0; n < int(clearable.size()); n++) {
+        std::vector<Orders> level;
+        for (Bits board : clearable[n]) level.push_back(workOutWins(board, n));
+        builtWins.push_back(std::move(level));
+        childCache.clear();
+    }
+}
+
+// The piece orders a queue and hold can place, `n` long, numbered as in Orders.
 template <typename F>
-void orders(Piece hold, const Piece* queue, int n, int seq, int depth, F&& found) {
-    if (depth == n) return found(seq);
+void orders(Piece hold, const Piece* queue, int n, int seq, F&& found) {
+    if (n == 0) return found(seq);
     const Piece current = queue[0];
-    orders(hold, queue + 1, n, seq | int(current) << (3 * depth), depth + 1, found);
-    if (hold == Piece::None) orders(current, queue + 2, n, seq | int(queue[1]) << (3 * depth), depth + 1, found);
-    else if (hold != current) orders(current, queue + 1, n, seq | int(hold) << (3 * depth), depth + 1, found);
+    orders(hold, queue + 1, n - 1, seq * 7 + int(current) - 1, found);
+    if (hold == Piece::None) orders(current, queue + 2, n - 1, seq * 7 + int(queue[1]) - 1, found);
+    else if (hold != current) orders(current, queue + 1, n - 1, seq * 7 + int(hold) - 1, found);
 }
 
 struct Setup {
@@ -259,14 +310,14 @@ int queueLength() { return residue == 0 ? 4 : 3 + residue; }
 
 // How many of the queues clear this setup.
 int hits(const Setup& setup, const std::vector<Queue>& queues) {
+    trimMemos();
     const int n = placementsLeft(setup.hold);
-    std::bitset<1 << 18> wins;
-    finishes(setup.board, n, 0, 0, wins);
-    if (wins.none()) return 0;
+    const Orders& clears = wins(setup.board, n);
+    if (std::all_of(clears.begin(), clears.end(), [](uint64_t w) { return !w; })) return 0;
     int count = 0;
     for (const auto& queue : queues) {
         bool won = false;
-        orders(setup.hold, queue.data(), n, 0, 0, [&](int seq) { won = won || wins[seq]; });
+        orders(setup.hold, queue.data(), n, 0, [&](int seq) { won = won || (clears[seq / 64] >> (seq % 64) & 1); });
         count += won;
     }
     return count;
@@ -322,7 +373,7 @@ int factorial(int n) { return n <= 1 ? 1 : n * factorial(n - 1); }
 // piece then in hold. Orders are numbered start by start, each start's in lexicographic order, so
 // the orders that begin with a given piece are one block and can be worked out once.
 void buildable(const std::vector<int>& tiling, const std::vector<Start>& from, std::vector<std::pair<int, Piece>>& out) {
-    using Orders = std::bitset<5040>;
+    using BagOrders = std::bitset<5040>;
     const int k = int(tiling.size());
     const int all = (1 << k) - 1;
     std::array<int8_t, 128 * 8> reach;  // placed tiles * 8 + tile: whether it can lock there, -1 unknown
@@ -348,12 +399,12 @@ void buildable(const std::vector<int>& tiling, const std::vector<Start>& from, s
         return known == 1;
     };
     // The orders of the pieces not yet drawn that finish the tiling from here.
-    std::unordered_map<uint32_t, Orders> memo;
-    auto finish = [&](auto& self, int placed, Piece hold, uint8_t drawn, int depth) -> const Orders& {
+    std::unordered_map<uint32_t, BagOrders> memo;
+    auto finish = [&](auto& self, int placed, Piece hold, uint8_t drawn, int depth) -> const BagOrders& {
         const uint32_t key = placed | uint32_t(hold) << 7 | uint32_t(drawn) << 11;
         auto found = memo.find(key);
         if (found != memo.end()) return found->second;
-        Orders result;
+        BagOrders result;
         if (depth == 7) {
             if (placed == all) result.set(0);
         } else {
@@ -362,7 +413,7 @@ void buildable(const std::vector<int>& tiling, const std::vector<Start>& from, s
             for (int p = 1; p <= 7; p++) {
                 if (drawn >> p & 1) continue;
                 auto then = [&](int nowPlaced, Piece nowHeld) {
-                    const Orders& rest = self(self, nowPlaced, nowHeld, drawn | 1 << p, depth + 1);
+                    const BagOrders& rest = self(self, nowPlaced, nowHeld, drawn | 1 << p, depth + 1);
                     if (rest.any()) result |= rest << (rank * width);
                 };
                 auto put = [&](Piece piece, Piece held) {
@@ -391,7 +442,7 @@ void buildable(const std::vector<int>& tiling, const std::vector<Start>& from, s
             if (left[p] > 0) held = Piece(p);
         }
         if (!fits) continue;
-        const Orders& orders = finish(finish, 0, from[s].hold, from[s].used, residue);
+        const BagOrders& orders = finish(finish, 0, from[s].hold, from[s].used, residue);
         for (int j = 0; j < perStart; j++)
             if (orders[j]) out.push_back({int(s) * perStart + j, held});
     }
@@ -409,8 +460,7 @@ std::string draw(const Setup& s) {
     return out;
 }
 
-// The setups one order reaches, walked forwards with hold and no shortcuts, kept if a piece
-// could still clear them. For checking what the tilings leave out.
+// The setups one order reaches, walked forwards with hold and no shortcuts.
 std::unordered_set<Setup, SetupHash> walkOrder(const Start& start, const std::array<Piece, 7>& order) {
     std::vector<Setup> states{{0, start.hold}};
     for (int depth = residue; depth < 7; depth++) {
@@ -419,30 +469,37 @@ std::unordered_set<Setup, SetupHash> walkOrder(const Start& start, const std::ar
         for (const Setup& s : states) {
             const int placed = depth - residue + (residue > 0) - (s.hold != Piece::None);
             const int lines = linesFor(s.board, 10 - placed);
-            for (Bits child : place(s.board, p, lines)) next.push_back({child, s.hold});
+            for (Bits child : children(s.board, p, lines)) next.push_back({child, s.hold});
             if (s.hold == Piece::None) next.push_back({s.board, p});
             else
-                for (Bits child : place(s.board, s.hold, lines)) next.push_back({child, p});
+                for (Bits child : children(s.board, s.hold, lines)) next.push_back({child, p});
         }
         std::sort(next.begin(), next.end(), [](const Setup& a, const Setup& b) { return a.board != b.board ? a.board < b.board : a.hold < b.hold; });
         next.erase(std::unique(next.begin(), next.end()), next.end());
         states = std::move(next);
     }
-    std::unordered_set<Setup, SetupHash> out;
-    for (const Setup& s : states) {
-        const int n = placementsLeft(s.hold);
-        bool can = n < int(clearable.size()) && isClearable(s.board, n);
-        for (int p = 1; p <= 7 && !can && n == int(clearable.size()); p++)
-            for (Bits child : place(s.board, Piece(p), linesFor(s.board, n))) can = can || isClearable(child, n - 1);
-        if (can) out.insert(s);
+    return {states.begin(), states.end()};
+}
+
+// Order `index` of the bag, numbered as buildable numbers them.
+std::array<Piece, 7> decodeOrder(const Start& start, int index) {
+    std::array<Piece, 7> order{};
+    std::vector<int> left;
+    for (int p = 1; p <= 7; p++)
+        if (!(start.used >> p & 1)) left.push_back(p);
+    for (int depth = residue, rest = index; depth < 7; depth++) {
+        const int width = factorial(6 - depth);
+        order[depth] = Piece(left[rest / width]);
+        left.erase(left.begin() + rest / width);
+        rest %= width;
     }
-    return out;
+    return order;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    int check = 0, verify = 0, top = 20;
+    int check = 0, verify = 0, top = 20, every = 1;
     const char* cache = nullptr;
     const char* save = nullptr;
     for (int i = 1; i < argc; i++) {
@@ -453,9 +510,10 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--residue") && i + 1 < argc) residue = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--cache") && i + 1 < argc) cache = argv[++i];
         else if (!std::strcmp(argv[i], "--save") && i + 1 < argc) save = argv[++i];
+        else if (!std::strcmp(argv[i], "--every") && i + 1 < argc) every = std::atoi(argv[++i]);
     }
-    if (residue < 0 || residue > 1) {
-        std::fprintf(stderr, "residues 0 and 1 only for now\n");
+    if (residue < 0 || residue > 3 || residue == 2) {
+        std::fprintf(stderr, "residues 0, 1 and 3 only for now\n");
         return 1;
     }
     const auto queues = allQueues(queueLength());
@@ -485,6 +543,10 @@ int main(int argc, char** argv) {
             std::fclose(out);
         }
     }
+
+    auto built = std::chrono::steady_clock::now();
+    buildWins();
+    std::fprintf(stderr, "win sets for the built levels (%.0f s)\n", seconds(built));
 
     // 1. Setup boards: 7 tiles from clearable[3] (residue 0, hold empty), or 6 tiles a placement
     // before it. There are too many of the second to hold at once, so they come in parts.
@@ -538,6 +600,32 @@ int main(int argc, char** argv) {
         for (int t = 0; t < kThreads; t++) threads.emplace_back(work, std::cref(boards), pieces, t);
         for (auto& thread : threads) thread.join();
     };
+    // With few setup pieces, every order is walked forwards instead, which also finds setups
+    // whose pieces clear a line. --every K walks every Kth order only, to size a run.
+    if (residue == 3) {
+        std::atomic<int> walked = 0;
+        auto walkAll = [&](int first) {
+            for (int o = first; o < orderCount; o += kThreads * every) {
+                const Start& start = from[o / perStart];
+                for (const Setup& setup : walkOrder(start, decodeOrder(start, o % perStart))) {
+                    std::unique_lock guard(lock);
+                    auto known = rate.find(setup);
+                    if (known == rate.end()) {
+                        guard.unlock();
+                        const int h = hits(setup, queues);
+                        guard.lock();
+                        known = rate.emplace(setup, h).first;
+                    }
+                    if (known->second) reached[setup].push_back(uint16_t(o));
+                }
+                if (++walked % 200 == 0) std::fprintf(stderr, "%d orders, %zu setups (%.0f s)\n", walked.load(), rate.size(), seconds(clock));
+            }
+        };
+        std::vector<std::thread> threads;
+        for (int t = 0; t < kThreads; t++) threads.emplace_back(walkAll, t * every);
+        for (auto& thread : threads) thread.join();
+        for (auto& [setup, list] : reached) std::sort(list.begin(), list.end());
+    }
     size_t candidates = 0;
     if (residue == 0) {
         std::vector<Bits> seven;
@@ -547,7 +635,7 @@ int main(int argc, char** argv) {
         run(seven, 7);
     }
     constexpr int kParts = 8;
-    for (int part = 0; part < kParts; part++) {
+    for (int part = 0; residue < 2 && part < kParts; part++) {
         std::vector<Bits> six;
         for (Bits b : clearable[3]) before(b, 3, [&](Bits board) {
             if (std::popcount(board) == 24 && std::hash<uint64_t>()(board) * 0x9E3779B97F4A7C15 >> 61 == uint64_t(part)) six.push_back(board);
@@ -626,16 +714,7 @@ int main(int argc, char** argv) {
     for (int v = 0; v < verify; v++) {
         const int index = int(rng() % orderCount);
         const Start& start = from[index / perStart];
-        std::array<Piece, 7> order{};
-        std::vector<int> left;
-        for (int p = 1; p <= 7; p++)
-            if (!(start.used >> p & 1)) left.push_back(p);
-        for (int depth = residue, rest = index % perStart; depth < 7; depth++) {
-            const int width = factorial(6 - depth);
-            order[depth] = Piece(left[rest / width]);
-            left.erase(left.begin() + rest / width);
-            rest %= width;
-        }
+        const auto order = decodeOrder(start, index % perStart);
         clock = std::chrono::steady_clock::now();
         const auto walked = walkOrder(start, order);
         // Only setups with a PC count: the tilings keep no others.
