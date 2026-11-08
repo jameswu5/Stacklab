@@ -37,7 +37,9 @@ std::vector<core::Piece> dealResidue(core::Game& game, int residue, uint32_t see
 }
 
 void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runStartNs) {
-    game = core::Game(mode->rules, handling, seed);
+    core::Ruleset rules = mode->rules;
+    if (mode->versus) rules.garbageMultiplier = versusOptions.multiplier;
+    game = core::Game(rules, handling, seed);
     if (mode->garbageRows > 0) game.fillGarbage(mode->garbageRows);
     if (drill) setUpDrill(game, *drill);
     std::vector<core::Piece> dealt;
@@ -54,6 +56,7 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     if (mode->versus) {
         if (!versus) versus = std::make_unique<Versus>();
         versus->pps = botPps;
+        versus->options = versusOptions;
         versus->match = {};
         versus->startRound(seed);
     }

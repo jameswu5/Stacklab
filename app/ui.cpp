@@ -591,7 +591,9 @@ void Ui::coachRows(const PcView& pc, float y, bool over) {
 void Ui::drawPlay(const PlayView& view) {
     const Palette& colors = palette();
     const core::Game& game = *view.game;
-    topBar(view.drill ? view.drill->name.c_str() : view.mode->name);
+    char title[64];
+    std::snprintf(title, sizeof title, view.replay ? "%s - Replay" : "%s", view.drill ? view.drill->name.c_str() : view.mode->name);
+    topBar(title);
 
     card(kLeftX, kRowY, kColumnW, 127, "HOLD");
     preview(game.hold, kLeftX + kColumnW / 2, kRowY + 77, kHoldCell);
@@ -814,19 +816,20 @@ void Ui::drawVersus(const VersusView& view) {
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {
     const Palette& colors = palette();
     topBar("Settings");
-    constexpr float width = 560, rowH = 30, x = (1440 - width) / 2, firstRow = kRowY + 20;
-    fill(x, kRowY, width, 788, colors.card, 24);
+    constexpr float width = 560, height = 808, rowH = 26, headingH = 30, x = (1440 - width) / 2, firstRow = kRowY + 16;
+    fill(x, kRowY, width, height, colors.card, 24);
     for (int row = 0; row < kRowCount; row++) {
-        float y = firstRow + row * rowH;
+        float y = firstRow + row * rowH + (row >= RowBotDelay ? headingH : 0);
+        if (row == RowBotDelay) label("VERSUS", x + 24, y - 10);
         if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 12);
-        text(FontRow, rowLabel(row).c_str(), x + 24, y + 21, colors.muted);
+        text(FontRow, rowLabel(row).c_str(), x + 24, y + 18, colors.muted);
         std::string value = capturing && row == selected ? "Press a key" : rowValue(settings, row);
-        text(FontValue, value.c_str(), x + width - 24, y + 21, colors.text, Align::Right);
+        text(FontValue, value.c_str(), x + width - 24, y + 18, colors.text, Align::Right);
     }
     const char* hint = selected >= RowBindFirst && selected < RowVsync ? "Enter adds a key, Backspace clears, Esc goes back"
                        : selected == RowProfile                       ? "Left and right switch, Enter copies to a new profile, Esc goes back"
                                                                       : "Left and right change, Esc goes back";
-    text(FontSmall, hint, 720, kRowY + 788 - 32, colors.muted, Align::Center);
+    text(FontSmall, hint, 720, kRowY + height - 13, colors.muted, Align::Center);
 }
 
 void Ui::drawOverlay(const char* frameLine, const char* inputLine, const char* presentLine) {

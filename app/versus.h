@@ -9,6 +9,7 @@
 #include <span>
 #include <vector>
 
+#include "app/settings.h"
 #include "core/game.h"
 #include "modes/modes.h"
 
@@ -45,6 +46,7 @@ public:
 
     core::Game bot{kVersusRules, core::Handling{}, 1};
     double pps = 1;  // the most pieces a second the bot starts
+    VersusOptions options;
     Match match;
     bool roundOver = false;
     uint64_t roundEndNs = 0;
@@ -75,4 +77,5 @@ private:
     int planTicks_ = 0, planAt_ = 0;
     std::array<int, 2> sends_{}, received_{};  // each side's sends so far, and the last of the other's it has been given
     std::array<int, 2> acked_{};               // the last of `received_` passed back to the sender
+    std::vector<std::pair<uint64_t, core::GarbageEvent>> held_;  // sent to the bot, and the bot frame it sees them on
 };

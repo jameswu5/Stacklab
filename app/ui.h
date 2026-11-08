@@ -52,6 +52,7 @@ struct PlayView {
     uint64_t filled = 0;           // a bit per target already placed
     const ai::FaultStats* faults = nullptr;  // null if the mode can't judge finesse
     const PcView* pc = nullptr;              // null without the PC coach
+    bool replay = false;                     // a replay is playing, which the top bar says
 };
 
 struct VersusView {

@@ -32,12 +32,20 @@ struct Profile {
     }};
 };
 
+// Versus options from BRIEF.md section 8 that the app applies.
+struct VersusOptions {
+    int delayMs = 0;                  // the bot sees garbage sent to it this long after
+    bool toYou = true, toBot = true;  // garbage on, each way
+    double multiplier = 1;            // both sides' attack
+};
+
 struct Settings {
     std::vector<Profile> profiles = {Profile{}};
     int active = 0;
     bool vsync = false;
     bool overlay = false;
     bool dark = false;
+    VersusOptions versus;
 
     Profile& profile() { return profiles[active]; }
     const Profile& profile() const { return profiles[active]; }
@@ -83,7 +91,7 @@ bool loadReplay(const std::string& path, Replay& replay);
 void saveReplay(const Replay& replay, const std::string& path);
 
 // The settings screen is a flat list of rows.
-enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowSafelock, RowIrs, RowIhs, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, kRowCount };
+enum Row { RowProfile, RowDas, RowArr, RowSdf, RowDcd, RowSafelock, RowIrs, RowIhs, RowBindFirst, RowVsync = RowBindFirst + kBindCount, RowOverlay, RowTheme, RowBotDelay, RowToYou, RowToBot, RowMultiplier, kRowCount };
 
 std::string rowLabel(int row);
 std::string rowValue(const Settings& settings, int row);

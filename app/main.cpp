@@ -63,6 +63,7 @@ void applyPresentMode(App& app) {
 }
 
 void restart(App& app, uint64_t timeNs) {
+    app.play.versusOptions = app.settings.versus;
     app.play.restart(app.settings.profile().handling, static_cast<uint32_t>(SDL_GetPerformanceCounter()), timeNs + kCountdownNs);
 }
 
@@ -275,7 +276,7 @@ void drawFrame(App& app, Ui& ui) {
                 pcView = play.coach->view(play.shown, play.mode->goalLines, play.over);
                 pc = &pcView;
             }
-            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, play.playback ? app.playbackHistory : app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc});
+            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, play.playback ? app.playbackHistory : app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc, play.playback != nullptr});
         }
     }
     if (app.settings.overlay) {
