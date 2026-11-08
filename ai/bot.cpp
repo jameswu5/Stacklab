@@ -31,24 +31,32 @@ uint64_t hashOf(const std::array<uint16_t, core::kBoardHeight>& rows, core::Piec
 
 }  // namespace
 
-bool loadBotWeights(const std::string& path, BotWeights& w) {
+bool loadBot(const std::string& path, Bot& bot) {
     std::ifstream file(path);
     if (!file) return false;
-    const std::pair<const char*, double*> names[] = {
+    BotWeights& w = bot.weights;
+    const std::pair<const char*, double*> weights[] = {
         {"holes", &w.holes}, {"height", &w.height}, {"danger", &w.danger}, {"bumpiness", &w.bumpiness}, {"well", &w.well},
-        {"tSlot", &w.tSlot}, {"attack", &w.attack}, {"b2b", &w.b2b}, {"wasted", &w.wasted},
+        {"tSlot", &w.tSlot}, {"attack", &w.attack}, {"b2b", &w.b2b}, {"wasted", &w.wasted}, {"pps", &bot.pps}, {"mistakes", &bot.mistakes},
     };
+    const std::pair<const char*, int*> counts[] = {{"width", &bot.width}, {"depth", &bot.depth}};
     for (std::string line; std::getline(file, line);) {
         std::istringstream in(line.substr(0, line.find('#')));
         std::string name;
         double value;
         if (!(in >> name)) continue;
         if (!(in >> value)) return false;
-        const auto found = std::find_if(std::begin(names), std::end(names), [&](const auto& n) { return name == n.first; });
-        if (found == std::end(names)) return false;
-        *found->second = value;
+        const auto weight = std::find_if(std::begin(weights), std::end(weights), [&](const auto& n) { return name == n.first; });
+        const auto count = std::find_if(std::begin(counts), std::end(counts), [&](const auto& n) { return name == n.first; });
+        if (weight != std::end(weights)) {
+            *weight->second = value;
+        } else if (count != std::end(counts)) {
+            *count->second = static_cast<int>(value);
+        } else {
+            return false;
+        }
     }
-    return true;
+    return bot.width > 0 && bot.depth >= 0 && bot.pps >= 0 && bot.mistakes >= 0;
 }
 
 float Bot::evaluate(const Node& node) const {
@@ -168,27 +176,38 @@ void Bot::expand(const Node& node, const core::Game& game, bool atRoot) {
     for (const Placement& p : search_.placements) addChild(node, p, piece, node.current, peek(after), after + 1, atRoot, true);
 }
 
-bool Bot::choose(const core::Game& game, BotChoice& choice) {
-    rules_ = &game.rules;
-    queue_.assign(game.queue.begin(), game.queue.begin() + std::min<size_t>(game.rules.previews, game.queue.size()));
+bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bool>* cancel) {
+    // The PPS cap waits before moving, as long as the piece is in the air. The wait is
+    // judged from the last plan's length, so placements come about 1/pps apart.
+    core::Game now = game;
+    int waited = 0;
+    if (pps > 0) {
+        const int wait = static_cast<int>(std::lround(core::kTicksPerSecond / pps)) - lastTicks_;
+        for (; waited < wait && std::floor(now.falling.y) > now.ghost().y; waited++) now.tick({});
+    }
+
+    rules_ = &now.rules;
+    queue_.assign(now.queue.begin(), now.queue.begin() + std::min<size_t>(now.rules.previews, now.queue.size()));
     roots_.clear();
     beam_.clear();
 
     Node start{};
     for (int y = 0; y < core::kBoardHeight; y++)
         for (int x = 0; x < core::kBoardWidth; x++)
-            if (game.board.at(x, y) != core::Piece::None) start.rows[y] |= 1 << x;
-    start.current = game.falling.piece;
-    start.hold = game.hold;
-    start.b2b = static_cast<int8_t>(std::clamp(game.stats.b2b, -1, 127));
-    start.combo = static_cast<int8_t>(std::clamp(game.stats.combo, -1, 127));
+            if (now.board.at(x, y) != core::Piece::None) start.rows[y] |= 1 << x;
+    start.current = now.falling.piece;
+    start.hold = now.hold;
+    start.b2b = static_cast<int8_t>(std::clamp(now.stats.b2b, -1, 127));
+    start.combo = static_cast<int8_t>(std::clamp(now.stats.combo, -1, 127));
     beam_.push_back(start);
 
     std::unordered_set<uint64_t> seen;
-    for (int depth = 0; !beam_.empty(); depth++) {
+    for (int d = 0; !beam_.empty() && (depth == 0 || d < depth); d++) {
         children_.clear();
-        for (const Node& node : beam_)
-            if (node.current != core::Piece::None) expand(node, game, depth == 0);
+        for (const Node& node : beam_) {
+            if (cancel && cancel->load(std::memory_order_relaxed)) return false;
+            if (node.current != core::Piece::None) expand(node, now, d == 0);
+        }
         if (children_.empty()) break;
         std::sort(children_.begin(), children_.end(), [](const Node& a, const Node& b) { return a.score > b.score; });
         beam_.clear();
@@ -198,8 +217,8 @@ bool Bot::choose(const core::Game& game, BotChoice& choice) {
             if (!seen.insert(hashOf(child.rows, child.current, child.hold, child.next)).second) continue;
             beam_.push_back(child);
             Root& root = roots_[child.root];
-            if (root.depth < depth) {  // the beam is best first, so this is the root's best at this depth
-                root.depth = depth;
+            if (root.depth < d) {  // the beam is best first, so this is the root's best at this depth
+                root.depth = d;
                 root.score = child.score;
             }
         }
@@ -212,15 +231,22 @@ bool Bot::choose(const core::Game& game, BotChoice& choice) {
     std::sort(order_.begin(), order_.end(), [&](int a, int b) {
         return roots_[a].depth != roots_[b].depth ? roots_[a].depth > roots_[b].depth : roots_[a].score > roots_[b].score;
     });
+    // A mistake swaps in one of the next few choices.
+    if (mistakes > 0 && order_.size() > 1 && rng.nextFloat() < mistakes) {
+        std::swap(order_[0], order_[1 + rng.next() % std::min<size_t>(order_.size() - 1, 7)]);
+    }
     for (size_t i = 0; i < order_.size() && i < 32; i++) {
         const Root& root = roots_[order_[i]];
-        const core::Piece piece = root.hold ? (game.hold != core::Piece::None ? game.hold : queue_[0]) : game.falling.piece;
-        search_.run(game.board, root.hold ? core::spawnFalling(piece) : game.falling, game.rules);
+        const core::Piece piece = root.hold ? (now.hold != core::Piece::None ? now.hold : queue_[0]) : now.falling.piece;
+        search_.run(now.board, root.hold ? core::spawnFalling(piece) : now.falling, now.rules);
         choice.hold = root.hold;
         choice.placement = root.placement;
         choice.cells = search_.cells(root.placement);
         choice.moves = search_.inputs(root.placement);
-        if (plan(game, choice)) return true;
+        if (!plan(now, choice)) continue;
+        lastTicks_ = static_cast<int>(choice.inputs.size());
+        choice.inputs.insert(choice.inputs.begin(), waited, {});
+        return true;
     }
     return false;
 }

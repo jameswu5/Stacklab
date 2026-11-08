@@ -4,30 +4,45 @@
 
 #include "ai/bot.h"
 
+static int spins = 0, softDrops = 0, placements = 0;
+
+static void play(ai::Bot& bot, uint32_t seed, int pieces) {
+    core::Game game(core::Ruleset{}, core::Handling{}, seed);
+    game.fillGarbage(6);  // a messy start, for tucks and spins
+    for (int piece = 0; piece < pieces && !game.toppedOut; piece++) {
+        ai::BotChoice choice;
+        assert(bot.choose(game, choice));
+        bool locked = false;
+        for (const auto& tick : choice.inputs) {
+            assert(!locked);
+            const auto& locks = game.tick(tick);
+            if (locks.empty()) continue;
+            assert(locks[0].cells == choice.cells);
+            assert(locks[0].spin == choice.placement.spin);
+            locked = true;
+        }
+        assert(locked);
+        placements++;
+        spins += choice.placement.spin != core::Spin::None;
+        for (ai::Move move : choice.moves) softDrops += move == ai::Move::SoftDrop;
+    }
+    assert(!game.toppedOut);
+}
+
 int main() {
     ai::Bot bot;
-    assert(ai::loadBotWeights("data/bot/default.txt", bot.weights));
-    int spins = 0, softDrops = 0;
-    for (uint32_t seed = 1; seed <= 4; seed++) {
-        core::Game game(core::Ruleset{}, core::Handling{}, seed);
-        game.fillGarbage(6);  // a messy start, for tucks and spins
-        for (int piece = 0; piece < 150 && !game.toppedOut; piece++) {
-            ai::BotChoice choice;
-            assert(bot.choose(game, choice));
-            bool locked = false;
-            for (const auto& tick : choice.inputs) {
-                assert(!locked);
-                const auto& locks = game.tick(tick);
-                if (locks.empty()) continue;
-                assert(locks[0].cells == choice.cells);
-                assert(locks[0].spin == choice.placement.spin);
-                locked = true;
-            }
-            assert(locked);
-            spins += choice.placement.spin != core::Spin::None;
-            for (ai::Move move : choice.moves) softDrops += move == ai::Move::SoftDrop;
-        }
-        assert(!game.toppedOut);
-    }
-    std::printf("bot_test: 600 placements, %d spins, %d soft drops\n", spins, softDrops);
+    assert(ai::loadBot("data/bot/default.txt", bot));
+    for (uint32_t seed = 1; seed <= 4; seed++) play(bot, seed, 150);
+
+    // A slow, sloppy bot: its waits let gravity act before it moves.
+    bot.pps = 1.5;
+    bot.mistakes = 0.3;
+    play(bot, 5, 100);
+
+    std::atomic<bool> cancel = true;
+    core::Game game(core::Ruleset{}, core::Handling{}, 1);
+    ai::BotChoice choice;
+    assert(!bot.choose(game, choice, &cancel));
+
+    std::printf("bot_test: %d placements, %d spins, %d soft drops\n", placements, spins, softDrops);
 }

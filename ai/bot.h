@@ -4,6 +4,7 @@
 // so it can't break the rules.
 #pragma once
 
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -24,24 +25,27 @@ struct BotWeights {
     double wasted = -1.5;     // per line cleared without sending anything
 };
 
-// `name value` lines; `#` starts a comment. False if the file can't be read or a name isn't known.
-bool loadBotWeights(const std::string& path, BotWeights& weights);
 
 struct BotChoice {
     bool hold = false;  // press hold first
     Placement placement{};
     std::array<core::Cell, 4> cells{};  // where it locks, before lines clear
     std::vector<Move> moves;            // from where the piece is; a hard drop follows
-    std::vector<std::vector<core::InputEvent>> inputs;  // one tick's key events each, through the hard drop
+    std::vector<std::vector<core::InputEvent>> inputs;  // one tick's key events each: the PPS cap's wait, then through the hard drop
 };
 
 class Bot {
 public:
     BotWeights weights;
-    int width = 48;  // states kept at each depth
+    int width = 48;       // states kept at each depth
+    int depth = 0;        // pieces looked ahead, the falling one included; 0 for all that are visible
+    double pps = 0;       // pieces a second at most; 0 for no cap
+    double mistakes = 0;  // the share of placements that take one of the next few choices instead
+    core::Rng rng{1};     // for mistakes
 
-    // False when nothing can be placed, or no plan tried landed where it meant to.
-    bool choose(const core::Game& game, BotChoice& choice);
+    // Call it on a copy of the game, on any thread, when a piece has just spawned. False when
+    // nothing can be placed, no plan tried lands where it meant to, or `cancel` was set.
+    bool choose(const core::Game& game, BotChoice& choice, const std::atomic<bool>* cancel = nullptr);
 
 private:
     struct Node {
@@ -70,6 +74,11 @@ private:
     std::vector<int> order_;
     std::vector<core::Piece> queue_;
     const core::Ruleset* rules_ = nullptr;
+    int lastTicks_ = 0;  // the last plan's length, without its wait
 };
+
+// A data file of `name value` lines, `#` starting a comment: BotWeights' names, and width,
+// depth, pps and mistakes. False if it can't be read, a name isn't known or a value is out of range.
+bool loadBot(const std::string& path, Bot& bot);
 
 }  // namespace ai

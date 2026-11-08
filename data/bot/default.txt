@@ -1,4 +1,4 @@
-# Hand-set weights for ai::Bot, not tuned yet. See BotWeights in ai/bot.h for what each means.
+# Settings for ai::Bot, read by ai::loadBot. Weights are hand-set, not tuned yet; see ai/bot.h.
 holes -4
 height -0.3
 danger -1
@@ -8,3 +8,4 @@ tSlot 2.5
 attack 2
 b2b 1.5
 wasted -1.5
+width 48
