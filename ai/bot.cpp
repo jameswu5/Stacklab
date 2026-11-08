@@ -1,5 +1,7 @@
 #include "ai/bot.h"
 
+#include "ai/pc_solver.h"  // kPcAirRows
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -164,7 +166,18 @@ void Bot::expand(const Node& node, const core::Game& game, bool atRoot) {
             if (node.rows[y] >> x & 1) board.at(x, y) = core::Piece::Garbage;
     auto peek = [&](int i) { return i < static_cast<int>(queue_.size()) ? queue_[i] : core::Piece::None; };
 
-    search_.run(board, atRoot ? game.falling : core::spawnFalling(node.current), *rules_);
+    // As in the PC solver: this far above the stack, a piece has the same choices as from the
+    // spawn, for far fewer states. choose finds the inputs from where the piece really is.
+    int top = 0;
+    for (int y = 0; y < core::kBoardHeight; y++)
+        if (node.rows[y]) top = y + 1;
+    auto lowered = [&](core::Falling start) {
+        start.y = std::min(start.y, static_cast<double>(top + kPcAirRows));
+        start.highestY = std::min(start.highestY, static_cast<int>(start.y));
+        return start;
+    };
+
+    search_.run(board, lowered(atRoot ? game.falling : core::spawnFalling(node.current)), *rules_);
     for (const Placement& p : search_.placements) addChild(node, p, node.current, node.hold, peek(node.next), node.next + 1, atRoot, false);
 
     if (!rules_->allowHold || (atRoot && game.holdUsed)) return;
@@ -172,7 +185,7 @@ void Bot::expand(const Node& node, const core::Game& game, bool atRoot) {
     const core::Piece piece = empty ? peek(node.next) : node.hold;
     if (piece == core::Piece::None || piece == node.current) return;
     const int after = empty ? node.next + 1 : node.next;
-    search_.run(board, core::spawnFalling(piece), *rules_);
+    search_.run(board, lowered(core::spawnFalling(piece)), *rules_);
     for (const Placement& p : search_.placements) addChild(node, p, piece, node.current, peek(after), after + 1, atRoot, true);
 }
 
@@ -239,10 +252,14 @@ bool Bot::choose(const core::Game& game, BotChoice& choice, const std::atomic<bo
         const Root& root = roots_[order_[i]];
         const core::Piece piece = root.hold ? (now.hold != core::Piece::None ? now.hold : queue_[0]) : now.falling.piece;
         search_.run(now.board, root.hold ? core::spawnFalling(piece) : now.falling, now.rules);
+        const auto found = std::find_if(search_.placements.begin(), search_.placements.end(), [&](const Placement& p) {
+            return p.rot == root.placement.rot && p.x == root.placement.x && p.y == root.placement.y && p.spin == root.placement.spin;
+        });
+        if (found == search_.placements.end()) continue;
         choice.hold = root.hold;
-        choice.placement = root.placement;
-        choice.cells = search_.cells(root.placement);
-        choice.moves = search_.inputs(root.placement);
+        choice.placement = *found;
+        choice.cells = search_.cells(*found);
+        choice.moves = search_.inputs(*found);
         if (!plan(now, choice)) continue;
         lastTicks_ = static_cast<int>(choice.inputs.size());
         choice.inputs.insert(choice.inputs.begin(), waited, {});
@@ -292,8 +309,9 @@ bool Bot::plan(const core::Game& game, BotChoice& choice) {
                 tick({{core::Action::SoftDrop, false, 0}});
                 break;
             case Move::Down:
-                // ponytail: waits for gravity, since instant soft drop can't go one row; slow at low gravity
-                for (int from = row(); !locked && row() == from;) tick({});
+                // ponytail: waits for gravity, since instant soft drop can't go one row; slow at low gravity.
+                // A second without falling gives up, and the miss sends choose to its next choice.
+                for (int from = row(), i = 0; !locked && row() == from && i < core::kTicksPerSecond; i++) tick({});
                 break;
         }
     }

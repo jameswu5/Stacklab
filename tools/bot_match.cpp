@@ -159,7 +159,9 @@ int main(int argc, char** argv) {
     std::vector<Result> results(games);
     std::atomic<int> nextGame = 0;
     std::vector<std::thread> threads;
-    for (unsigned t = 0; t < std::max(1u, std::thread::hardware_concurrency()); t++) {
+    // Threads from BOT_THREADS, 3 by default to share the machine.
+    const int threadCount = std::getenv("BOT_THREADS") ? std::max(1, std::atoi(std::getenv("BOT_THREADS"))) : 3;
+    for (int t = 0; t < threadCount; t++) {
         threads.emplace_back([&] {
             for (int i; (i = nextGame++) < games;) results[i] = mode == "versus" ? versus(seed + i / 2, a, b, i % 2) : solo(seed + i, a, apm);
         });
