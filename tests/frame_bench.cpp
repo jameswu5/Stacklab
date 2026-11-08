@@ -9,6 +9,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <random>
@@ -220,7 +221,9 @@ int main(int argc, char** argv) {
         std::sort(v.begin(), v.end());
         return v[std::min(v.size() - 1, static_cast<size_t>(p * v.size()))];
     };
-    std::printf("%s, %d runs: %d reached 40 lines, %d topped out, %d PCs, %d lines\n", style.c_str(), runs, finished, toppedOut, pcs, lines);
+    double load[3] = {};
+    getloadavg(load, 3);  // a loaded machine stalls frames on its own, so say how loaded it was
+    std::printf("%s, %d runs: %d reached 40 lines, %d topped out, %d PCs, %d lines; load average %.1f %.1f %.1f at the end\n", style.c_str(), runs, finished, toppedOut, pcs, lines, load[0], load[1], load[2]);
     std::printf("frames %zu: median %.2f ms, p99 %.2f, p99.9 %.2f, worst %.2f; over 16.7 ms: %zu\n", stats.frames.size(), pct(stats.frames, 0.5), pct(stats.frames, 0.99), pct(stats.frames, 0.999), pct(stats.frames, 1),
                 static_cast<size_t>(std::count_if(stats.frames.begin(), stats.frames.end(), [](double ms) { return ms > 16.7; })));
     std::printf("frames with a solve running %zu: median %.2f ms, p99.9 %.2f, worst %.2f\n", stats.busyFrames.size(), pct(stats.busyFrames, 0.5), pct(stats.busyFrames, 0.999), pct(stats.busyFrames, 1));
