@@ -76,3 +76,6 @@ CLAUDE.md
 # TETR.IO replays include usernames, so they stay local
 replays/
 /replay-archive/
+
+# four.lol's setups, made by tools/four_lol_setups.py, are for personal use only
+data/four-lol/

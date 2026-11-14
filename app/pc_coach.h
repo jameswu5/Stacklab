@@ -36,6 +36,22 @@ struct PcProgress {
     void note(const core::LockResult& lock, int placed);
 };
 
+// A four.lol perfect-clear setup, from data/four-lol/pc-setups.json, which
+// tools/four_lol_setups.py makes. The data is for personal use, so it isn't in git.
+struct PcSetup {
+    int residue = 0;
+    std::string name, chance, condition;  // condition is four.lol's text, shown as it is
+    std::array<core::Piece, 40> cells{};  // 4 rows of 10, y up from the floor; Garbage where four.lol draws gray
+    std::array<int, 8> pieces{};  // needed on hand, by core::Piece: the board's, plus any the condition says to keep
+    uint8_t holds = 0;            // a bit per piece the attempt may start with in hold; 0 is any
+};
+
+std::vector<PcSetup> loadPcSetups(const std::string& path);  // empty if the file is missing or damaged
+
+// The setup is for this residue and start hold, has no empty cell where the board has a
+// block, and `have` (by core::Piece, the pieces placed in the attempt included) covers it.
+bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const core::Board& board, const std::array<int, 8>& have);
+
 // What the stats card shows. A plain value, so drawing can't touch the worker's data.
 struct PcView {
     const char* status = "";
@@ -45,6 +61,8 @@ struct PcView {
     bool showHint = false;  // the overlay
     core::Piece hintPiece = core::Piece::None;
     std::array<core::Cell, 4> hintCells{};
+    char setupLine[48] = "";  // practice: how to ask for a setup, why there's none, or the shown one's chance
+    const PcSetup* setup = nullptr;  // drawn on the board, with its name and condition on the card
     int pcs = 0, streak = 0, bestPcs = 0;
     int goal = kPcGoal;
     char residue[2] = "";  // takes the streak's row: the bag residue, or ? until asked for
@@ -77,6 +95,8 @@ public:
     std::string path;      // where record is saved; empty saves nothing
     std::string hintKey;   // the hint key's name, to say how to ask
     std::string bagKey;    // likewise for the residue
+    std::string setupKey;  // and for a setup
+    std::span<const PcSetup> setups;  // empty without the setups file
     PcStyle style = PcStyle::Coach;
     std::vector<core::Piece> seen;  // every piece shown so far, in the order they came
 
@@ -88,6 +108,8 @@ public:
     void poll();  // takes the worker's latest answer, if any
     void take(const PcAnswer& answer);  // an answer that isn't about the latest question is dropped
     void toggleHint() { hintWanted_ = !hintWanted_; }
+    // Practice: shows the next setup that fits, and none after the last. Allocates nothing.
+    void nextSetup(const core::Game& game);
     void save();  // adds this run to the record, once
     void discard() { saved_ = true; }  // a replay of a run already counted: saves nothing
 
@@ -116,4 +138,8 @@ private:
     bool saved_ = true;
     bool nullified_ = false;  // undo was used in this run
     int placedBefore_ = 0;    // pieces the run starts as having placed
+    core::Piece startHold_ = core::Piece::None;
+    bool setupAsked_ = false;
+    int setupShown_ = -1;  // into setups, or none
+    int setupNumber_ = 0, setupCount_ = 0;  // "1 of 3"
 };

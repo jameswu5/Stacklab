@@ -42,6 +42,7 @@ struct App {
     std::vector<RunResult> playbackHistory;  // the session with the replay's run last, for its results
     bool hasBestReplay = false;  // the mode's best run was saved as a replay
     std::vector<BotPreset> presets;
+    std::vector<PcSetup> pcSetups;  // four.lol's, for PC practice; empty without the file
 
     uint64_t frameNs = 0, worstFrameNs = 0;
 };
@@ -91,6 +92,8 @@ void startRun(App& app, const Drill* drill, uint64_t timeNs) {
         app.play.coach->record = loadPcRecord(app.play.coach->path);
         app.play.coach->hintKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindHint);
         app.play.coach->bagKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindBag);
+        app.play.coach->setupKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindSetup);
+        app.play.coach->setups = app.pcSetups;
     }
 }
 
@@ -172,6 +175,8 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
         if (key.down) app.play.undo(key.timestamp);
     } else if (bind == BindHint) {
         if (key.down && app.play.mode->pcFile) app.play.coach->toggleHint();
+    } else if (bind == BindSetup) {
+        if (key.down && app.play.mode->pcStyle == PcStyle::Practice && !app.play.over) app.play.coach->nextSetup(app.play.game);
     } else if (bind == BindBag) {
         if (key.down && app.play.mode->pcFile) app.play.coach->progress.residueShown = true;
     } else {
@@ -319,6 +324,7 @@ int main(int, char**) {
     app.settingsPath = app.prefPath + "settings.json";
     app.settings = loadSettings(app.settingsPath);
     app.presets = botPresets();
+    app.pcSetups = loadPcSetups(std::string(SDL_GetBasePath()) + "data/four-lol/pc-setups.json");
     for (size_t i = 0; i < app.presets.size(); i++)
         if (app.presets[i].name == app.settings.botPreset) app.play.botPreset = static_cast<int>(i);
     for (int i = 0; i < kModeCount; i++)
