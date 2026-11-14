@@ -133,12 +133,31 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        const std::array<double, kModeCount> bests{60.824};
-        ui.drawMenu(dark ? kModeCount - 1 : 0, bests, 3, {"3 PPS", "", 3});
+        const std::array<double, kModeCount> bests{60.824, 0, 41.5};
+        const BotPreset bot{"3 PPS", "", 3};
+        const MenuView menus[] = {{nullptr, 1, 1, bests, 3, &bot}, {&kMenu[3], 1, 0, bests, 3, &bot}, {&kMenu[2], 0, 0, bests, 3, &bot}};
+        const char* names[] = {"menu", "menu-pc", "menu-setups"};
+        for (int i = 0; i < 3; i++) {
+            ui.beginFrame();
+            ui.drawMenu(menus[i]);
+            SDL_FlushRenderer(renderer);
+            SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
+            SDL_SavePNG(menuPixels, (std::string(argv[1]) + "/" + names[i] + (dark ? "-dark.png" : "-light.png")).c_str());
+            SDL_DestroySurface(menuPixels);
+        }
+        // Dig 18 part way: 7 cleared, so 10 rows are still on the board, 3 of them risen.
+        core::Game dig(kModes[2].rules, {}, 3);
+        dig.fillGarbage(10);
+        for (int x = 0; x < 6; x++) dig.board.at(x, 10) = core::Piece::L;
+        dig.stats.garbageCleared = 7;
+        dig.stats.pieces = 21;
+        dig.frame = 600;
+        ui.beginFrame();
+        ui.drawPlay({&kModes[2], &dig, dig.seconds(), false, nullptr, "", 41.5, {}, nullptr, 0, &faults});
         SDL_FlushRenderer(renderer);
-        SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
-        SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-dark.png" : "/menu-light.png")).c_str());
-        SDL_DestroySurface(menuPixels);
+        SDL_Surface* digPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(digPixels, (std::string(argv[1]) + (dark ? "/dig-18-dark.png" : "/dig-18-light.png")).c_str());
+        SDL_DestroySurface(digPixels);
     }
 
     // A session in both themes: a topped out run, a new best, then the latest run.
@@ -170,15 +189,6 @@ int main(int argc, char** argv) {
     SDL_SavePNG(statsPixels, (std::string(argv[1]) + "/all-stats.png").c_str());
     SDL_DestroySurface(statsPixels);
 
-    // Blitz, whose results have no finesse, and a levels mode that lists finesse, which shows "-".
-    Mode levelsWithFinesse = kModes[1];
-    levelsWithFinesse.stats |= StatFinesse;
-    ui.beginFrame();
-    ui.drawPlay({&levelsWithFinesse, &game, game.seconds(), false, nullptr, "", 0, {}});
-    SDL_FlushRenderer(renderer);
-    SDL_Surface* levelsPixels = SDL_RenderReadPixels(renderer, nullptr);
-    SDL_SavePNG(levelsPixels, (std::string(argv[1]) + "/levels-finesse.png").c_str());
-    SDL_DestroySurface(levelsPixels);
 
     // Lines left under a stack tall enough to cover part of it, then at the start of a run.
     core::Game tall = sampleGame();
@@ -202,7 +212,7 @@ int main(int argc, char** argv) {
     }
 
     // The coach mid-run with a hint, then just after a placement killed the PC, then its results.
-    const Mode& coachMode = kModes[6];
+    const Mode& coachMode = kModes[4];
     PcView coached;
     coached.status = "PC ready";
     std::snprintf(coached.hintLine, sizeof coached.hintLine, "Hold first, then place the T");
@@ -280,7 +290,7 @@ int main(int argc, char** argv) {
     auto practiceShot = [&](const PcView& pc, const char* name, bool dark) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&kModes[7], &practiceGame, practiceGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &pc});
+        ui.drawPlay({&kModes[5], &practiceGame, practiceGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &pc});
         SDL_FlushRenderer(renderer);
         SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(pixels, (std::string(argv[1]) + "/" + name + (dark ? "-dark.png" : "-light.png")).c_str());
@@ -297,7 +307,8 @@ int main(int argc, char** argv) {
         shot(undone, false, "undone", dark);
     }
 
-    // A drill with one target placed, with the list of drills, in both themes.
+    // A drill with one target placed, in both themes.
+    const Mode drillMode = {.name = "Drill", .blurb = "", .rules = {}, .undo = true};
     std::vector<Drill> drills(2);
     drills[0].name = "First steps 1";
     drills[0].blurb = "A sample: lay a flat base, in any order";
@@ -313,17 +324,11 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         ui.dark = dark;
         ui.beginFrame();
-        ui.drawPlay({&kModes[5], &drillGame, 2.5, false, dark ? "Missed" : nullptr, dark ? "R to retry, Q to undo" : "", 0, {}, &drills[0], 1, dark ? &afterMiss : &faults});
+        ui.drawPlay({&drillMode, &drillGame, 2.5, false, dark ? "Missed" : nullptr, dark ? "R to retry, Q to undo" : "", 0, {}, &drills[0], 1, dark ? &afterMiss : &faults});
         SDL_FlushRenderer(renderer);
         SDL_Surface* drillPixels = SDL_RenderReadPixels(renderer, nullptr);
         SDL_SavePNG(drillPixels, (std::string(argv[1]) + (dark ? "/drill-dark.png" : "/drill-light.png")).c_str());
         SDL_DestroySurface(drillPixels);
-        ui.beginFrame();
-        ui.drawDrills(1, drills, dark ? "broken.json: the board blocks the spawn" : nullptr);
-        SDL_FlushRenderer(renderer);
-        SDL_Surface* listPixels = SDL_RenderReadPixels(renderer, nullptr);
-        SDL_SavePNG(listPixels, (std::string(argv[1]) + (dark ? "/drills-dark.png" : "/drills-light.png")).c_str());
-        SDL_DestroySurface(listPixels);
     }
 
     // Versus mid-round with clears named and garbage on its way, then a round's card and the match's results.
@@ -394,7 +399,7 @@ int main(int argc, char** argv) {
         game.frame++;
         ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults});
         ui.drawPlay({&coachMode, &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &killed});
-        ui.drawPlay({&kModes[7], &practiceGame, practiceGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &setupShown});
+        ui.drawPlay({&kModes[5], &practiceGame, practiceGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &setupShown});
         ui.drawVersus({&versusMode, &you, &versus, false, "Set", "", matches});
     };
     for (int i = 0; i < 10; i++) {

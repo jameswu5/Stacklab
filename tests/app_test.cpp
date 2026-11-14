@@ -570,10 +570,14 @@ struct DrillPlayer {
 // Garbage rows from the floor up, and the hole in row y.
 int garbageHeight(const core::Board& board) {
     int y = 0;
-    while (std::count(&board.at(0, y), &board.at(0, y) + core::kBoardWidth, core::Piece::Garbage) > 0) y++;
+    while (std::count(board.cells.begin() + y * core::kBoardWidth, board.cells.begin() + (y + 1) * core::kBoardWidth, core::Piece::Garbage) > 0) y++;
     return y;
 }
-int holeAt(const core::Board& board, int y) { return static_cast<int>(std::find(&board.at(0, y), &board.at(0, y) + core::kBoardWidth, core::Piece::None) - &board.at(0, y)); }
+int holeAt(const core::Board& board, int y) {
+    int x = 0;
+    while (board.at(x, y) != core::Piece::None) x++;
+    return x;
+}
 
 // Dig 10 starts as it always has, and 18 is a cheese race: 10 rows on the board, then one
 // rising from the floor for each garbage line cleared until 18 have been placed.
