@@ -1,0 +1,18 @@
+name LST coach
+# The 3 PPS preset's weights, with the LST loop's (ai/lst.h): each board on the way that the loop
+# can't go on from costs lst, and a clear other than a TSD or a quad costs notTsd per line.
+# Self-play, 3 games of 350 pieces from k40LRules seeds 1-3:
+#   never broken, 55 TSDs from 150 Ts (0.37 per T), 73 quads down the well, search about 22 ms a piece.
+holes -0.5
+height -0.2213
+danger -1.578
+bumpiness -0.8
+well 0.4845
+tSlot 5
+attack 1.789
+b2b 2.548
+wasted -2.169
+lst -100
+notTsd -20
+width 48
+depth 0
