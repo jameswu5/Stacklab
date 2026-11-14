@@ -283,6 +283,8 @@ int main(int argc, char** argv) {
     PcView setupAsk = setupShown;
     setupAsk.setup = nullptr;
     std::snprintf(setupAsk.setupLine, sizeof setupAsk.setupLine, "G for a setup");
+    PcView setupBroken = setupAsk;
+    std::snprintf(setupBroken.setupLine, sizeof setupBroken.setupLine, "Setup broken");
     core::Game practiceGame(core::Ruleset{}, core::Handling{}, 1);
     practiceGame.falling.piece = core::Piece::None;  // as if between pieces, so it doesn't sit over the top bar
     for (const core::Cell c : {core::Cell{0, 0}, {1, 0}, {2, 0}, {0, 1}}) practiceGame.board.at(c.x, c.y) = core::Piece::J;
@@ -299,6 +301,7 @@ int main(int argc, char** argv) {
     for (bool dark : {false, true}) {
         practiceShot(setupShown, "practice-setup", dark);
         practiceShot(setupAsk, "practice-setup-ask", dark);
+        practiceShot(setupBroken, "practice-setup-broken", dark);
     }
     for (bool dark : {false, true}) {
         shot(practice, false, "practice", dark);

@@ -9,6 +9,9 @@ setup per block. Each is 4 rows of 10, top row first: piece letters, X for gray,
 `need` lists pieces the condition says must be on hand besides the board's ("Hold J",
 "I on hold", the 5th PC's carried pair), and `hold` the pieces the attempt may start with
 in hold (3rd PC's "(held) piece: S/Z"). Both are empty when the text doesn't say.
+four.lol mostly draws one side, so each setup is followed by its mirror: columns flipped,
+L/J and S/Z swapped in the board and the text, same chance. A mirror that matches an
+existing setup is dropped, as is a setup drawn twice.
 data/four-lol/ is gitignored: four.lol's content is for personal use only.
 """
 import json
@@ -51,6 +54,20 @@ def pieces(block):
     return len(letters) // 4 if all(n % 4 == 0 for n in counts.values()) else None
 
 
+SWAP = str.maketrans("LJSZ", "JLZS")
+
+
+def mirror(setup):
+    """Swaps letters only in words made of piece letters, so "Hold L" changes and "PCO" doesn't."""
+    text = re.sub(r"\b[IJLOSTZ]+\b", lambda m: m.group().translate(SWAP), setup["condition"])
+    return dict(setup, name=setup["name"] + " (mirrored)", condition=text, board=[row[::-1].translate(SWAP) for row in setup["board"]],
+                need=setup["need"].translate(SWAP), hold="".join(sorted(setup["hold"].translate(SWAP))))
+
+
+def key(setup):
+    return setup["residue"], tuple(setup["board"]), setup["need"], setup["hold"]
+
+
 def one(pattern, text):
     found = set(re.findall(pattern, text))
     return found.pop() if len(found) == 1 else ""
@@ -77,6 +94,14 @@ def main(source, target):
                 board = ["." * 10] * (4 - len(part)) + part
                 out.append({"residue": entry["residue"], "name": name, "chance": entry["chance"] or "",
                             "condition": shown, "board": board, "need": need, "hold": hold})
+    keys = {key(setup) for setup in out}
+    both, kept = [], set()
+    for setup in out:
+        for each in (setup, mirror(setup)):
+            if key(each) not in kept and (each is setup or key(each) not in keys):
+                kept.add(key(each))
+                both.append(each)
+    out = both
     with open(target, "w") as file:
         json.dump(out, file, indent=1, ensure_ascii=False)
     print(f"{len(out)} setups written to {target}")

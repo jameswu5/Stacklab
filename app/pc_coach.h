@@ -4,12 +4,14 @@
 #pragma once
 
 #include <array>
+#include <bitset>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "ai/move_search.h"
 #include "ai/pc_solver.h"
 #include "app/settings.h"
 #include "core/game.h"
@@ -42,15 +44,23 @@ struct PcSetup {
     int residue = 0;
     std::string name, chance, condition;  // condition is four.lol's text, shown as it is
     std::array<core::Piece, 40> cells{};  // 4 rows of 10, y up from the floor; Garbage where four.lol draws gray
-    std::array<int, 8> pieces{};  // needed on hand, by core::Piece: the board's, plus any the condition says to keep
+    std::array<int, 8> need{};    // by core::Piece: pieces the condition says to keep on hand besides the board's
     uint8_t holds = 0;            // a bit per piece the attempt may start with in hold; 0 is any
 };
 
 std::vector<PcSetup> loadPcSetups(const std::string& path);  // empty if the file is missing or damaged
 
-// The setup is for this residue and start hold, has no empty cell where the board has a
-// block, and `have` (counts by core::Piece) covers its pieces.
-bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const core::Board& board, const std::array<int, 8>& have);
+constexpr size_t kMaxPcSetups = 512;  // ponytail: more in the file are ignored; the mirrored file has 377
+
+// The setup is for this residue and start hold, the board's blocks in its rows are its own
+// pieces or on its gray, and its gray is all there.
+bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const core::Board& board);
+
+// The setup can still be built from the query's position, in its queue's order with one hold:
+// every piece goes to its own cells and can reach them (ai::MoveSearch), or waits in hold,
+// and the pieces the condition keeps are on hand at the end. Pieces past the previews are
+// unordered: the rest of the bag, or the whole next bag. Line clears aren't played out.
+bool pcSetupBuildable(const PcSetup& setup, const ai::PcQuery& query, ai::MoveSearch& search);
 
 // What the stats card shows. A plain value, so drawing can't touch the worker's data.
 struct PcView {
@@ -109,7 +119,7 @@ public:
     void take(const PcAnswer& answer);  // an answer that isn't about the latest question is dropped
     void toggleHint() { hintWanted_ = !hintWanted_; }
     // Practice: shows the next setup that fits, and none after the last. Allocates nothing.
-    void nextSetup(const core::Game& game);
+    void nextSetup();
     void save();  // adds this run to the record, once
     void discard() { saved_ = true; }  // a replay of a run already counted: saves nothing
 
@@ -123,6 +133,8 @@ public:
 private:
     void noteSeen(const core::Game& game);
     void ask(const core::Game& game);
+    void takeSetups(const std::bitset<kMaxPcSetups>& fits);
+    bool setupBuilt(const core::Board& board) const;
 
     std::unique_ptr<PcWorker> worker_;
     uint64_t askId_ = 0;
@@ -143,4 +155,7 @@ private:
     bool setupAsked_ = false;
     int setupShown_ = -1;  // into setups, or none
     int setupNumber_ = 0, setupCount_ = 0;  // "1 of 3"
+    std::bitset<kMaxPcSetups> setupFits_;  // the worker's latest answer
+    bool setupBroken_ = false;  // a placement broke the shown setup, and none other fits
+    bool setupDone_ = false;    // the shown setup is built, so pieces past it can't break it
 };
