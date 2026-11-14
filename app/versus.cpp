@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <atomic>
+#include <cstdio>
 #include <string>
 #include <thread>
 
@@ -16,6 +17,8 @@ namespace {
 struct BotRequest {
     uint64_t id = 0;
     int preset = 0;
+    bool sampled = false;  // play with trBot's settings
+    TrBot trBot;
     core::Game game{kVersusRules, core::Handling{}, 1};  // constructed, so copying into it doesn't allocate
 };
 
@@ -23,8 +26,8 @@ struct BotRequest {
 
 class BotWorker {
 public:
-    BotWorker() {
-        for (const BotPreset& preset : botPresets()) {
+    explicit BotWorker(const std::vector<BotPreset>& presets) {
+        for (const BotPreset& preset : presets) {
             bots_.emplace_back();
             if (!preset.path.empty()) ai::loadBot(preset.path, bots_.back());
             bots_.back().pps = preset.pps;
@@ -63,6 +66,12 @@ private:
             if (stop_) return;
             if (!requests_.take()) continue;
             const BotRequest& request = requests_.latest();
+            if (request.sampled) {
+                ai::Bot& bot = bots_[request.preset];
+                bot.weights = request.trBot.weights;
+                bot.pps = request.trBot.pps;
+                bot.mistakes = request.trBot.mistakes;
+            }
             BotPlan& answer = answers_.next();
             answer.id = request.id;
             answer.ok = bots_[request.preset].choose(request.game, choice_) && choice_.inputs.size() <= kBotPlanTicks;
@@ -88,17 +97,32 @@ private:
 
 std::vector<BotPreset> botPresets() {
     std::vector<BotPreset> presets;
+    const std::string dir = std::string(SDL_GetBasePath()) + "data/bot/";
     std::error_code error;
-    for (const auto& entry : std::filesystem::directory_iterator(std::string(SDL_GetBasePath()) + "data/bot/presets", error)) {
+    for (const auto& entry : std::filesystem::directory_iterator(dir + "presets", error)) {
         ai::Bot bot;
         if (entry.path().extension() == ".txt" && ai::loadBot(entry.path().string(), bot)) presets.push_back({bot.name, entry.path().string(), bot.pps});
     }
     std::sort(presets.begin(), presets.end(), [](const BotPreset& a, const BotPreset& b) { return a.path < b.path; });
     if (presets.empty()) presets.push_back({"Bot", "", 1});  // the bot's own fallbacks
+    TrField field;
+    ai::Bot base;
+    if (!loadTrField(dir + "tr-field.json", field) || !ai::loadBot(dir + "presets/" + kTrBase, base)) return presets;
+    // Every 1,000 TR, then every 500 from 20,000, where the ladder's ranks are closer together.
+    for (int tr = 1000; tr <= 25000; tr += tr < 20000 ? 1000 : 500) {
+        char name[32];
+        std::snprintf(name, sizeof name, "TR %gk", tr / 1000.0);
+        presets.push_back({name, dir + "presets/" + kTrBase, field.medianPps(tr), tr});
+    }
     return presets;
 }
 
-Versus::Versus() : worker_(std::make_unique<BotWorker>()) {
+Versus::Versus() : presets_(botPresets()) {
+    const std::string dir = std::string(SDL_GetBasePath()) + "data/bot/";
+    loadTrField(dir + "tr-field.json", field_);
+    ai::Bot base;
+    if (ai::loadBot(dir + "presets/" + kTrBase, base)) baseWeights_ = base.weights;
+    worker_ = std::make_unique<BotWorker>(presets_);
     toYou.reserve(256);
     toBot.reserve(256);
     held_.reserve(256);
@@ -121,6 +145,15 @@ void Versus::startRound(uint32_t seed) {
     asking_ = hasNext_ = false;
     plan_.ticks = planAt_ = 0;
     playbackAt_ = 0;
+    const BotPreset& p = presets_[preset];
+    if (p.tr > 0) {
+        std::mt19937 rng(seed);
+        player = field_.sample(p.tr, rng);
+        trBot_ = field_.bot(player, baseWeights_, rng);
+        std::snprintf(label, sizeof label, "%s: %.2f PPS, APP %.2f", p.name.c_str(), player.pps, player.app);
+    } else {
+        std::snprintf(label, sizeof label, "%s", p.name.c_str());
+    }
 }
 
 void Versus::send(int from, std::span<const core::LockResult> locks) {
@@ -166,6 +199,8 @@ void Versus::afterYourTick(std::span<const core::LockResult> locks, uint64_t fra
         BotRequest& request = worker_->next();
         request.id = ++askId_;
         request.preset = preset;
+        request.sampled = presets_[preset].tr > 0;
+        request.trBot = trBot_;
         request.game = bot;
         for (int t = planAt_; t < plan_.ticks && request.game.tick(std::span(plan_.events[t].data(), plan_.counts[t])).empty(); t++) {}
         foreseenBoard_ = request.game.board;

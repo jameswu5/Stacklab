@@ -1789,16 +1789,18 @@ void testVersusReplay() {
     assert(play.game.toppedOut == you.toppedOut && bot2.toppedOut == bot.toppedOut);
 }
 
-// The presets in file order, and each bot keeping to its PPS cap with no ticks lost between pieces.
+// The presets in file order then the TR players, and each bot keeping to its PPS cap with no ticks lost between pieces.
 void testBotPresets() {
     const std::vector<BotPreset> presets = botPresets();
-    assert(presets.size() == 7 && presets[0].name == "Beginner" && presets[5].name == "3 PPS" && presets[5].pps == 3);
+    assert(presets.size() > 7 && presets[0].name == "Beginner" && presets[5].name == "3 PPS" && presets[5].pps == 3 && presets[6].tr == 0);
     for (int i = 0; i < static_cast<int>(presets.size()); i++) {
+        if (presets[i].tr != 0 && presets[i].tr != 20500) continue;  // one TR player is enough here
         Versus versus;
         versus.preset = i;
         versus.waitForBot = true;
         versus.options.toYou = versus.options.toBot = false;
         versus.startRound(9);
+        const double cap = presets[i].tr ? versus.player.pps : presets[i].pps;
         // Timed from the first lock to the 41st, so the start's wait doesn't count.
         uint64_t firstLock = 0;
         for (uint64_t f = 0; versus.bot.stats.pieces < 41 && !versus.bot.toppedOut; f++) {
@@ -1806,9 +1808,36 @@ void testBotPresets() {
             if (versus.bot.stats.pieces == 1 && firstLock == 0) firstLock = versus.bot.frame;
         }
         const double pps = 40.0 * core::kTicksPerSecond / (versus.bot.frame - firstLock);
-        std::printf("preset %s: %.2f PPS, cap %.1f\n", presets[i].name.c_str(), pps, presets[i].pps);
-        assert(!versus.bot.toppedOut && pps > presets[i].pps * 0.97 && pps < presets[i].pps * 1.03);
+        std::printf("preset %s: %.2f PPS, cap %.2f\n", versus.label, pps, cap);
+        assert(!versus.bot.toppedOut && pps > cap * 0.97 && pps < cap * 1.03);
     }
+}
+
+// Players drawn at a TR match the ladder there, PPS and APP pulling against each other, and
+// map to the bot's mistakes through its APP table.
+void testTrField() {
+    TrField field;
+    assert(loadTrField("data/bot/tr-field.json", field) && field.bands.size() == 30);
+    std::mt19937 rng(1);
+    constexpr int n = 4000;
+    double sum[2] = {}, sq[2] = {}, cross = 0;
+    for (int i = 0; i < n; i++) {
+        const TrPlayer p = field.sample(20213, rng);  // the 20,000-20,500 band's median TR, where its log mean is 2.114 PPS and APP 0.653
+        const double v[2] = {std::log(p.pps), std::log(p.app)};
+        for (int k = 0; k < 2; k++) sum[k] += v[k], sq[k] += v[k] * v[k];
+        cross += v[0] * v[1];
+    }
+    const double mean[2] = {sum[0] / n, sum[1] / n};
+    const double r = (cross / n - mean[0] * mean[1]) / std::sqrt((sq[0] / n - mean[0] * mean[0]) * (sq[1] / n - mean[1] * mean[1]));
+    std::printf("TR 20,213: median PPS %.3f, APP %.3f, r %.2f\n", std::exp(mean[0]), std::exp(mean[1]), r);
+    assert(std::abs(std::exp(mean[0]) - 2.114) < 0.03 && std::abs(std::exp(mean[1]) - 0.653) < 0.015 && r < -0.4);
+    // Clamped past both ends, and the APP table read backwards, after the style's cost.
+    assert(std::abs(field.medianPps(0) - field.medianPps(403)) < 1e-9 && field.medianPps(30000) > 3.5);
+    const ai::BotWeights base;
+    assert(std::abs(field.bot({2, 0.65, 2}, base, rng).mistakes - 0.1) < 1e-9);
+    assert(field.bot({2, 0.99, 2}, base, rng).mistakes == 0 && field.bot({1, 0.1, 2}, base, rng).mistakes == 0.35);
+    const TrBot bot = field.bot({2.5, 0.7, 2}, base, rng);
+    assert(bot.pps == 2.5 && bot.weights.holes != base.holes && std::abs(bot.weights.holes / base.holes - 1) <= 0.2);
 }
 
 void testReplayRoundTrip() {
@@ -1909,6 +1938,7 @@ int main() {
     testPcPractice();
     testPcSetups();
     testBagCount();
+    testTrField();
     testBotPresets();  // first of the versus tests, which index the presets
     testPlayDoesNotAllocate(kModes[4]);
     testPlayDoesNotAllocate(kModes[3]);

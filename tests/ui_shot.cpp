@@ -134,10 +134,10 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         ui.beginFrame();
         const std::array<double, kModeCount> bests{60.824, 0, 41.5};
-        const BotPreset bot{"3 PPS", "", 3};
-        const MenuView menus[] = {{nullptr, 1, 1, bests, 3, &bot}, {&kMenu[3], 1, 0, bests, 3, &bot}, {&kMenu[2], 0, 0, bests, 3, &bot}};
-        const char* names[] = {"menu", "menu-pc", "menu-setups"};
-        for (int i = 0; i < 3; i++) {
+        const BotPreset bot{"3 PPS", "", 3}, trBot{"TR 20.5k", "", 2.17, 20500};
+        const MenuView menus[] = {{nullptr, 1, 1, bests, 3, &bot}, {&kMenu[3], 1, 0, bests, 3, &bot}, {&kMenu[2], 0, 0, bests, 3, &bot}, {nullptr, 4, 1, bests, 3, &trBot}};
+        const char* names[] = {"menu", "menu-pc", "menu-setups", "menu-versus"};
+        for (int i = 0; i < 4; i++) {
             ui.beginFrame();
             ui.drawMenu(menus[i]);
             SDL_FlushRenderer(renderer);
@@ -378,19 +378,19 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         versus.roundOver = false;
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "3 PPS"});
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "TR 20.5k: 2.08 PPS, APP 0.64"});
         save("versus");
         versus.roundOver = true;
         versus.lastWinner = 0;
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "3 PPS"});
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "TR 20.5k: 2.08 PPS, APP 0.64"});
         save("versus-round");
         versus.match.wins = {7, 4};
         versus.match.rounds = 11;
         versus.match.totals[0] = {402, 260, 31, 255.4};
         versus.match.totals[1] = {380, 199, 22, 255.4};
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches, "3 PPS"});
+        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches, "TR 20.5k: 2.08 PPS, APP 0.64"});
         save("versus-results");
         versus.match.wins = {3, 2};
     }

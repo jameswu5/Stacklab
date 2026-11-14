@@ -261,7 +261,7 @@ void drawFrame(App& app, Ui& ui) {
         }
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
         if (play.mode->versus) {
-            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), play.playback ? app.playbackHistory : app.history, app.presets[play.botPreset].name.c_str(), play.playback != nullptr});
+            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), play.playback ? app.playbackHistory : app.history, play.playback ? app.presets[play.botPreset].name.c_str() : play.versus->label, play.playback != nullptr});
         } else {
             PcView pcView;
             const PcView* pc = nullptr;
