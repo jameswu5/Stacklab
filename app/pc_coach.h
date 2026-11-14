@@ -50,7 +50,7 @@ struct PcSetup {
 
 std::vector<PcSetup> loadPcSetups(const std::string& path);  // empty if the file is missing or damaged
 
-constexpr size_t kMaxPcSetups = 512;  // ponytail: more in the file are ignored; the mirrored file has 377
+constexpr size_t kMaxPcSetups = 512;  // ponytail: more in the file are ignored; the mirrored file has 361
 
 // The setup is for this residue and start hold, the board's blocks in its rows are its own
 // pieces or on its gray, and its gray is all there.
