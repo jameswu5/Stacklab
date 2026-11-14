@@ -1,6 +1,7 @@
 #include "app/pc_coach.h"
 
 #include <algorithm>
+#include <bit>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -15,6 +16,14 @@ namespace {
 struct PcRequest {
     uint64_t id = 0;
     ai::PcQuery query;
+    std::span<const PcSetup> setups;  // practice only: those to check
+    int residue = 0;
+    core::Piece startHold = core::Piece::None;
+};
+
+struct SetupAnswer {
+    uint64_t id = 0;
+    std::bitset<kMaxPcSetups> fits;
 };
 
 }  // namespace
@@ -49,6 +58,8 @@ public:
         return true;
     }
 
+    const SetupAnswer* pollSetups() { return setupAnswers_.take() ? &setupAnswers_.latest() : nullptr; }
+
 private:
     void wake() {
         wakes_.fetch_add(1);
@@ -57,6 +68,7 @@ private:
 
     void run() {
         ai::PcSolver solver;
+        ai::MoveSearch search;
         uint32_t seenWakes = 0;
         while (true) {
             wakes_.wait(seenWakes);
@@ -66,6 +78,18 @@ private:
             const PcRequest& request = requests_.latest();
             cancel_ = false;
             if (stop_) return;  // its cancel may just have been cleared
+            // Setups first: they're quick, and the solver can take a while.
+            if (!request.setups.empty()) {
+                SetupAnswer& found = setupAnswers_.next();
+                found.id = request.id;
+                found.fits.reset();
+                for (size_t i = 0; i < std::min(request.setups.size(), kMaxPcSetups) && !cancel_; i++) {
+                    const PcSetup& setup = request.setups[i];
+                    found.fits[i] = pcSetupFits(setup, request.residue, request.startHold, request.query.board) && pcSetupBuildable(setup, request.query, search);
+                }
+                if (cancel_) continue;
+                setupAnswers_.publish();
+            }
             const ai::PcResult result = solver.solve(request.query, &cancel_);
             if (cancel_) continue;  // newer request is waiting, and this answer would be dropped
             PcAnswer& answer = answers_.next();
@@ -82,6 +106,7 @@ private:
 
     Latest<PcRequest> requests_;
     Latest<PcAnswer> answers_;
+    Latest<SetupAnswer> setupAnswers_;
     std::atomic<bool> cancel_{false}, stop_{false};
     std::atomic<uint32_t> wakes_{0};
     std::thread thread_;  // last, so everything it uses exists first
@@ -118,12 +143,9 @@ std::vector<PcSetup> loadPcSetups(const std::string& path) {
                 for (int x = 0; x < 10; x++) {
                     const core::Piece piece = pieceFromLetter(board[row][x]);
                     setup.cells[(3 - row) * 10 + x] = piece;
-                    if (piece != core::Piece::Garbage) setup.pieces[static_cast<int>(piece)]++;
                 }
             }
-            setup.pieces[0] = 0;
-            for (int& cells : setup.pieces) cells /= 4;
-            for (char letter : entry.at("need").get<std::string>()) setup.pieces[static_cast<int>(pieceFromLetter(letter))]++;
+            for (char letter : entry.at("need").get<std::string>()) setup.need[static_cast<int>(pieceFromLetter(letter))]++;
             for (char letter : entry.at("hold").get<std::string>()) setup.holds |= 1 << static_cast<int>(pieceFromLetter(letter));
             setups.push_back(std::move(setup));
         }
@@ -133,15 +155,88 @@ std::vector<PcSetup> loadPcSetups(const std::string& path) {
     return setups;
 }
 
-bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const core::Board& board, const std::array<int, 8>& have) {
+bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const core::Board& board) {
     if (setup.residue != residue) return false;
     if (setup.holds && !(setup.holds >> static_cast<int>(startHold) & 1)) return false;
-    for (int i = 1; i < 8; i++)
-        if (setup.pieces[i] > have[i]) return false;
     for (int y = 0; y < core::kBoardHeight; y++)
         for (int x = 0; x < core::kBoardWidth; x++)
-            if (board.at(x, y) != core::Piece::None && (y >= 4 || setup.cells[y * 10 + x] == core::Piece::None)) return false;
+            if (board.at(x, y) != core::Piece::None && (y >= 4 || (setup.cells[y * 10 + x] != board.at(x, y) && setup.cells[y * 10 + x] != core::Piece::Garbage)))
+                return false;
+    // ponytail: gray must be on the board already, so setups drawn on carried-over blocks never show from practice's empty start
+    for (int i = 0; i < 40; i++)
+        if (setup.cells[i] == core::Piece::Garbage && board.cells[i] == core::Piece::None) return false;
     return true;
+}
+
+namespace {
+
+// A depth-first search over the queue: each piece either takes cells of its own letter that
+// it can reach, or swaps with hold.
+struct SetupBuild {
+    const PcSetup& setup;
+    const ai::PcQuery& query;
+    ai::MoveSearch& search;
+    core::Board board;
+    std::array<core::Piece, 16> order{};  // the previews, and the bag's last piece when it's the only one left
+    int known = 0;
+    uint8_t pool = 0;  // bits by core::Piece: may come after order, in any order
+
+    core::Piece at(int next) const { return next < known ? order[next] : core::Piece::None; }
+
+    // `next` indexes order: the piece after `current`. A current of None is past what's known.
+    bool from(core::Piece current, int next, core::Piece hold, bool canHold) {
+        std::array<int, 8> cells{};
+        for (int i = 0; i < 40; i++)
+            if (setup.cells[i] != core::Piece::Garbage && board.cells[i] == core::Piece::None) cells[static_cast<int>(setup.cells[i])]++;
+        cells[0] = 0;
+        if (current == core::Piece::None || std::all_of(cells.begin(), cells.end(), [](int n) { return n == 0; })) {
+            // What's still wanted, the setup's pieces and the ones to keep, must be on hand or to come.
+            std::array<int, 8> hand{};
+            hand[static_cast<int>(hold)]++;
+            hand[static_cast<int>(current)]++;
+            for (int k = next; k < known; k++) hand[static_cast<int>(order[k])]++;
+            for (int piece = 1; piece < 8; piece++)
+                if ((cells[piece] + 3) / 4 + setup.need[piece] > hand[piece] + (pool >> piece & 1)) return false;
+            return true;
+        }
+        if (cells[static_cast<int>(current)] > 0) {
+            search.run(board, core::spawnFalling(current), query.rules);
+            std::array<uint64_t, 8> masks{};  // distinct cell sets, as symmetric rotations repeat them
+            int count = 0;
+            for (const ai::Placement& placement : search.placements) {
+                uint64_t mask = 0;
+                bool own = true;
+                for (const core::Cell& cell : search.cells(placement)) {
+                    const int i = cell.y * 10 + cell.x;
+                    own = own && cell.y < 4 && setup.cells[i] == current && board.cells[i] == core::Piece::None;
+                    if (own) mask |= uint64_t{1} << i;
+                }
+                if (own && count < 8 && std::find(masks.begin(), masks.begin() + count, mask) == masks.begin() + count) masks[count++] = mask;
+            }
+            for (int k = 0; k < count; k++) {
+                for (int i = 0; i < 40; i++)
+                    if (masks[k] >> i & 1) board.cells[i] = current;
+                if (from(at(next), next + 1, hold, true)) return true;
+                for (int i = 0; i < 40; i++)
+                    if (masks[k] >> i & 1) board.cells[i] = core::Piece::None;
+            }
+        }
+        if (!canHold) return false;
+        if (hold == core::Piece::None) return from(at(next), next + 1, current, false);
+        return from(hold, next, current, false);
+    }
+};
+
+}  // namespace
+
+bool pcSetupBuildable(const PcSetup& setup, const ai::PcQuery& query, ai::MoveSearch& search) {
+    SetupBuild build{setup, query, search, query.board};
+    for (core::Piece piece : query.queue)
+        if (build.known < 15) build.order[build.known++] = piece;
+    if (std::popcount(query.bagLeft) == 1) build.order[build.known++] = static_cast<core::Piece>(std::countr_zero(query.bagLeft));
+    // ponytail: unordered past what's known, so a setup can fit that some orders of the pool can't build
+    build.pool = std::popcount(query.bagLeft) >= 2 ? query.bagLeft : 0xFE;
+    return build.from(query.current, 0, query.hold, !query.holdUsed);
 }
 
 void PcProgress::note(const core::LockResult& lock, int placed) {
@@ -195,6 +290,8 @@ void PcCoach::start(const core::Game& game, std::span<const core::Piece> dealtBe
     attemptStart_ = dealtBefore.size();
     setupAsked_ = false;
     setupShown_ = -1;
+    setupFits_.reset();
+    setupBroken_ = setupDone_ = false;
     ask(game);
 }
 
@@ -204,6 +301,7 @@ void PcCoach::rollback(const PcProgress& saved, const core::Game& game) {
     killedBy_ = nullptr;
     hintWanted_ = false;
     lastPieces_ = -1;  // the next answer is a new starting point, so it blames nothing
+    setupDone_ = setupShown_ >= 0 && setupBuilt(game.board);
     ask(game);
 }
 
@@ -240,6 +338,9 @@ void PcCoach::ask(const core::Game& game) {
     PcRequest& request = worker_->next();
     request.id = askId_;
     fillQuery(game, request.query);
+    request.setups = style == PcStyle::Practice ? setups : std::span<const PcSetup>{};
+    request.residue = progress.phase;
+    request.startHold = startHold_;
     worker_->ask();
 }
 
@@ -250,43 +351,54 @@ void PcCoach::afterTick(std::span<const core::LockResult> locks, const core::Gam
     if (!locks.empty()) {
         killedBy_ = nullptr;
         hintWanted_ = false;
+        if (setupShown_ >= 0 && setupBuilt(game.board)) setupDone_ = true;
     }
     if (game.stats.pieces != askedPieces_ || game.falling.piece != askedCurrent_ || game.hold != askedHold_ || game.holdUsed != askedHoldUsed_) ask(game);
 }
 
-// A setup of n pieces is buildable with one hold slot when its pieces are among the first
-// n + 1 of the attempt: hold at its start, then the pieces as dealt. Only what's known now
-// counts: those dealt, the previews and the rest of the bag, up to the 10 placed and 1 held.
-void PcCoach::nextSetup(const core::Game& game) {
-    setupAsked_ = true;
-    std::array<core::Piece, 11> order{};
-    int known = 0;
-    if (startHold_ != core::Piece::None) order[known++] = startHold_;
-    for (size_t i = attemptStart_; i < seen.size() && known < 11; i++) order[known++] = seen[i];
-    const uint8_t left = ai::pcBagLeft(seen);  // ponytail: unordered, so with 2 or more unseen any of them counts as next
-    for (int piece = 1; piece < 8 && known < 11; piece++)
-        if (left >> piece & 1) order[known++] = static_cast<core::Piece>(piece);
+bool PcCoach::setupBuilt(const core::Board& board) const {
+    const PcSetup& setup = setups[setupShown_];
+    for (int i = 0; i < 40; i++)
+        if (setup.cells[i] != core::Piece::None && setup.cells[i] != core::Piece::Garbage && board.cells[i] != setup.cells[i]) return false;
+    return true;
+}
 
+// The worker checks every setup after each lock or hold. The shown one stays while it can
+// still be built; else the next that can, or "Setup broken". Once built, pieces past it
+// (and the lines they clear) can't break it.
+void PcCoach::takeSetups(const std::bitset<kMaxPcSetups>& fits) {
+    setupFits_ = fits;
+    const int count = static_cast<int>(std::min(setups.size(), kMaxPcSetups));
+    if (setupShown_ < 0 ? setupAsked_ && !setupBroken_ : !setupDone_ && !fits[setupShown_]) {
+        const int from = setupShown_;
+        setupShown_ = -1;
+        for (int k = 1; k <= count && setupShown_ < 0; k++)
+            if (fits[(from + k + count) % count]) setupShown_ = (from + k + count) % count;
+        setupBroken_ = from >= 0 && setupShown_ < 0;
+    }
+    setupCount_ = setupNumber_ = 0;
+    for (int i = 0; i < count; i++) {
+        setupCount_ += fits[i];
+        if (i <= setupShown_) setupNumber_ += fits[i];
+    }
+}
+
+void PcCoach::nextSetup() {
+    const int count = static_cast<int>(std::min(setups.size(), kMaxPcSetups));
     const int shown = setupShown_;
     setupShown_ = -1;
-    setupCount_ = setupNumber_ = 0;
-    for (int i = 0; i < static_cast<int>(setups.size()); i++) {
-        int pieces = 0;
-        for (int n : setups[i].pieces) pieces += n;
-        std::array<int, 8> have{};
-        for (int k = 0; k < std::min(pieces + 1, known); k++) have[static_cast<int>(order[k])]++;
-        if (!pcSetupFits(setups[i], progress.phase, startHold_, game.board, have)) continue;
-        setupCount_++;
-        if (i <= shown || setupShown_ >= 0) continue;
-        setupShown_ = i;
-        setupNumber_ = setupCount_;
-    }
-    if (setupShown_ < 0 && setupCount_ > 0) setupAsked_ = false;  // past the last: hidden again
+    setupAsked_ = true;
+    setupBroken_ = setupDone_ = false;
+    for (int i = shown + 1; i < count && setupShown_ < 0; i++)
+        if (setupFits_[i]) setupShown_ = i;
+    if (setupShown_ < 0 && setupFits_.any()) setupAsked_ = false;  // past the last: hidden again
+    takeSetups(setupFits_);
 }
 
 void PcCoach::poll() {
     PcAnswer answer;
     if (worker_->poll(answer)) take(answer);
+    if (const SetupAnswer* found = worker_->pollSetups(); found && found->id == askId_) takeSetups(found->fits);
 }
 
 void PcCoach::take(const PcAnswer& answer) {
@@ -321,6 +433,8 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
             std::snprintf(out.setupLine, sizeof out.setupLine, "%s%s%d of %d", out.setup->chance.c_str(), out.setup->chance.empty() ? "" : ", ", setupNumber_, setupCount_);
         } else if (!setupAsked_) {
             std::snprintf(out.setupLine, sizeof out.setupLine, "%s for a setup", setupKey.c_str());
+        } else if (setupBroken_) {
+            std::snprintf(out.setupLine, sizeof out.setupLine, "Setup broken");
         } else {
             std::snprintf(out.setupLine, sizeof out.setupLine, setups.empty() ? "No setups file" : "No setup fits");
         }

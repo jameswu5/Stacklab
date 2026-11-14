@@ -73,6 +73,8 @@ void startRun(App& app, const Mode& mode, uint64_t timeNs) {
     app.play.best = app.bests[&mode - kModes];
     app.hasBestReplay = mode.bestFile && loadReplay(bestReplayPath(app.play.bestPath), app.replay);  // one too old to play back isn't offered
     app.screen = Screen::Play;
+    if (mode.pcFile && !app.play.coach) app.play.coach = std::make_unique<PcCoach>();
+    if (mode.pcFile) app.play.coach->setups = app.pcSetups;  // before the run starts, as its first question checks them
     restart(app, timeNs);
     if (mode.pcFile) {
         app.play.coach->path = app.prefPath + mode.pcFile;
@@ -80,7 +82,6 @@ void startRun(App& app, const Mode& mode, uint64_t timeNs) {
         app.play.coach->hintKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindHint);
         app.play.coach->bagKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindBag);
         app.play.coach->setupKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindSetup);
-        app.play.coach->setups = app.pcSetups;
     }
 }
 
@@ -154,7 +155,7 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
     } else if (bind == BindHint) {
         if (key.down && app.play.mode->pcFile) app.play.coach->toggleHint();
     } else if (bind == BindSetup) {
-        if (key.down && app.play.mode->pcStyle == PcStyle::Practice && !app.play.over) app.play.coach->nextSetup(app.play.game);
+        if (key.down && app.play.mode->pcStyle == PcStyle::Practice && !app.play.over) app.play.coach->nextSetup();
     } else if (bind == BindBag) {
         if (key.down && app.play.mode->pcFile) app.play.coach->progress.residueShown = true;
     } else {

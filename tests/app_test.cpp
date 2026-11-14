@@ -1362,8 +1362,8 @@ void testPcPractice() {
     p.coach().progress = {};
 }
 
-// four.lol setup hints, on a hand-made file: residue, hold, pieces on hand and board fit,
-// then cycling through what fits in PC practice.
+// four.lol setup hints, on a hand-made file: residue, hold and board fit, then whether the
+// queue can build them, and PC practice's hint following placements.
 void testPcSetups() {
     using core::Piece;
     const std::string path = (std::filesystem::temp_directory_path() / "stacklab_pc_setups.json").string();
@@ -1383,59 +1383,110 @@ void testPcSetups() {
     std::filesystem::remove(path);
     assert(setups.size() == 3 && setups[0].name == "O, keep I" && setups[0].chance == "90%");
     assert(setups[0].cells[0] == Piece::O && setups[0].cells[11] == Piece::O && setups[0].cells[20] == Piece::None);
-    assert(setups[0].pieces[static_cast<int>(Piece::O)] == 1 && setups[0].pieces[static_cast<int>(Piece::I)] == 1);
-    assert(setups[2].cells[3] == Piece::Garbage && setups[2].pieces[static_cast<int>(Piece::J)] == 1);
+    assert(setups[0].need[static_cast<int>(Piece::I)] == 1 && setups[0].need[static_cast<int>(Piece::O)] == 0);
+    assert(setups[2].cells[3] == Piece::Garbage);
 
-    auto have = [](std::initializer_list<Piece> pieces) {
-        std::array<int, 8> counts{};
-        for (Piece piece : pieces) counts[static_cast<int>(piece)]++;
-        return counts;
-    };
     core::Board empty;
-    assert(pcSetupFits(setups[0], 0, Piece::None, empty, have({Piece::O, Piece::I})));
-    assert(!pcSetupFits(setups[0], 0, Piece::None, empty, have({Piece::O, Piece::T})));  // nothing to keep in hold
-    assert(!pcSetupFits(setups[0], 1, Piece::None, empty, have({Piece::O, Piece::I})));  // another residue
+    assert(pcSetupFits(setups[0], 0, Piece::None, empty));
+    assert(!pcSetupFits(setups[0], 1, Piece::None, empty));  // another residue
     core::Board flat;
     for (int x = 0; x < 4; x++) flat.at(x, 0) = Piece::I;
-    assert(!pcSetupFits(setups[0], 0, Piece::None, flat, have({Piece::O, Piece::I})));  // a block where it's empty
-    assert(pcSetupFits(setups[1], 0, Piece::None, flat, have({Piece::I})));
+    assert(!pcSetupFits(setups[0], 0, Piece::None, flat));  // a block where it's empty
+    assert(pcSetupFits(setups[1], 0, Piece::None, flat));
+    flat.at(0, 0) = Piece::L;
+    assert(!pcSetupFits(setups[1], 0, Piece::None, flat));  // another piece in its cells
+    flat.at(0, 0) = Piece::I;
     flat.at(0, 4) = Piece::T;
-    assert(!pcSetupFits(setups[1], 0, Piece::None, flat, have({Piece::I})));  // above its rows
-    assert(pcSetupFits(setups[2], 2, Piece::S, empty, have({Piece::J})));
-    assert(!pcSetupFits(setups[2], 2, Piece::J, empty, have({Piece::J})));  // starts with the wrong piece in hold
+    assert(!pcSetupFits(setups[1], 0, Piece::None, flat));  // above its rows
+    core::Board gray;
+    for (int x = 3; x < 7; x++) gray.at(x, 0) = Piece::Garbage;
+    assert(pcSetupFits(setups[2], 2, Piece::S, gray));
+    assert(!pcSetupFits(setups[2], 2, Piece::S, empty));  // its gray isn't there
+    assert(!pcSetupFits(setups[2], 2, Piece::J, gray));  // starts with the wrong piece in hold
 
-    // In PC practice, a setup of n pieces fits when they're among the attempt's first n + 1.
+    // In queue order with one hold, keeping what the condition says.
+    ai::MoveSearch search;
+    ai::PcQuery query;
+    query.current = Piece::O;
+    query.queue = {Piece::I, Piece::T};
+    query.bagLeft = 0;
+    assert(pcSetupBuildable(setups[0], query, search));
+    query.current = Piece::I;
+    query.queue = {Piece::T, Piece::O};
+    assert(!pcSetupBuildable(setups[0], query, search));  // the T can't wait while the I does
+    query.holdUsed = true;
+    query.current = Piece::T;
+    query.queue = {Piece::O};
+    assert(!pcSetupBuildable(setups[0], query, search));  // T can't go to hold again
+    query.holdUsed = false;
+    query.queue = {Piece::O, Piece::J};
+    query.bagLeft = 1 << static_cast<int>(Piece::I) | 1 << static_cast<int>(Piece::S);
+    assert(pcSetupBuildable(setups[0], query, search));  // the I may come after the previews
+
+    // The owner's case: residue 0, hold empty, queue L I J T O Z S. The drawn PCO puts L on top
+    // of J and O, and I must wait in hold, so it can't be built; the mirrored one can.
+    {
+        std::ofstream(path) << R"json([
+ {"residue": 0, "name": "PCO", "chance": "84.64%", "condition": "I on hold", "need": "I", "hold": "",
+  "board": ["LLL.....SS", "LOO....SST", "JOO...ZZTT", "JJJ....ZZT"]},
+ {"residue": 0, "name": "PCO (mirrored)", "chance": "84.64%", "condition": "I on hold", "need": "I", "hold": "",
+  "board": ["ZZ.....JJJ", "TZZ....OOJ", "TTSS...OOL", "TSS....LLL"]},
+ {"residue": 0, "name": "L dropped", "chance": "", "condition": "", "need": "", "hold": "",
+  "board": ["..........", "..........", ".....L....", "...LLL...."]}
+])json";
+    }
+    const std::vector<PcSetup> pco = loadPcSetups(path);
+    std::filesystem::remove(path);
+    assert(pco.size() == 3);
     CoachPlayer p;
     p.play.mode = &kModes[5];
     p.play.residue = 0;
     p.play.restart({}, 1, p.now);
-    const core::Game& game = p.play.game;
-    auto oneOf = [](Piece piece, const char* name) {
-        PcSetup setup;
-        setup.name = name;
-        setup.pieces[static_cast<int>(piece)] = 1;
-        for (int x = 0; x < 4; x++) setup.cells[x] = piece;
-        return setup;
+    auto owners = [&] {
+        core::Game& game = p.play.game;
+        game.board = {};
+        game.hold = Piece::None;
+        game.queue = {Piece::I, Piece::J, Piece::T, Piece::O, Piece::Z, Piece::S};
+        game.respawn(Piece::L);
+        p.coach().start(game);
+        p.waitForAnswer();  // setups are answered before the solver
     };
-    const std::vector<PcSetup> made = {oneOf(game.falling.piece, "first"), oneOf(game.queue[1], "third"), oneOf(game.queue[0], "second")};
-    p.coach().setups = made;
+    p.coach().setups = pco;
     p.coach().setupKey = "G";
+    owners();
     assert(std::string(p.view().setupLine) == "G for a setup" && !p.view().setup);
     const size_t before = allocations;
-    p.coach().nextSetup(game);
-    assert(p.view().setup == &made[0] && std::string(p.view().setupLine) == "1 of 2");
-    p.coach().nextSetup(game);
-    assert(p.view().setup == &made[2] && std::string(p.view().setupLine) == "2 of 2");
-    p.coach().nextSetup(game);
+    p.coach().nextSetup();
+    assert(p.view().setup == &pco[1] && std::string(p.view().setupLine) == "84.64%, 1 of 2");
+    p.coach().nextSetup();
+    assert(p.view().setup == &pco[2] && std::string(p.view().setupLine) == "2 of 2");
+    p.coach().nextSetup();
     assert(!p.view().setup && std::string(p.view().setupLine) == "G for a setup");  // past the last
     assert(allocations == before);
-    p.play.game.board.at(9, 0) = Piece::Garbage;
-    p.coach().nextSetup(p.play.game);
-    assert(!p.view().setup && std::string(p.view().setupLine) == "No setup fits");
-    p.play.restart({}, 1, p.now);
-    assert(std::string(p.view().setupLine) == "G for a setup");
+
+    // A lock that breaks the shown setup moves on to the next that still fits.
+    p.coach().nextSetup();
+    assert(p.view().setup == &pco[1]);
+    p.tap(BindHardDrop);
+    p.waitForAnswer();
+    assert(p.view().setup == &pco[2] && std::string(p.view().setupLine) == "1 of 1");
+    // Built, so later pieces don't break it.
+    p.tap(BindHardDrop);
+    p.waitForAnswer();
+    assert(p.view().setup == &pco[2]);
+
+    // With none left, it says so.
+    owners();
+    p.coach().nextSetup();
+    assert(p.view().setup == &pco[1]);
+    p.move(ai::Move::DasLeft);
+    p.tap(BindHardDrop);
+    p.waitForAnswer();
+    assert(!p.view().setup && std::string(p.view().setupLine) == "Setup broken");
+    p.coach().nextSetup();
+    assert(std::string(p.view().setupLine) == "No setup fits");
     p.coach().setups = {};
-    p.coach().nextSetup(p.play.game);
+    p.coach().nextSetup();
     assert(std::string(p.view().setupLine) == "No setups file");
 }
 
