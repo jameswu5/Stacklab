@@ -27,6 +27,8 @@ struct BotWeights {
     double incoming = 0;  // per queued line not yet cancelled, times the highest column
     double surge = 0;     // per level of B2B above the surge's charge point, when the rules charge it
     double combo = 0;     // per level of the combo
+    double lst = 0;       // per board on the way that the LST loop can't go on from (ai/lst.h); only data/bot/lst.txt sets it
+    double notTsd = 0;    // per line of a clear that's neither a T-spin double nor a quad; likewise
 };
 
 
@@ -40,6 +42,13 @@ struct BotChoice {
 
 class Bot {
 public:
+    struct Root {
+        bool hold;
+        Placement placement;
+        int depth = -1;  // the deepest the beam kept a state from this, and that state's score
+        float score = 0;
+    };
+
     std::string name;  // for menus
     BotWeights weights;
     int width = 48;       // states kept at each depth
@@ -51,6 +60,8 @@ public:
     // Call it on a copy of the game, on any thread, when a piece has just spawned. False when
     // nothing can be placed, no plan tried lands where it meant to, or `cancel` was set.
     bool choose(const core::Game& game, BotChoice& choice, const std::atomic<bool>* cancel = nullptr);
+    // The last choose's first placements, each with how far and how well its best line went.
+    const std::vector<Root>& roots() const { return roots_; }
 
 private:
     struct Node {
@@ -62,13 +73,6 @@ private:
         int16_t sent;  // lines sent on the way, which cancel incoming garbage
         float reward, score;
     };
-    struct Root {
-        bool hold;
-        Placement placement;
-        int depth = -1;  // the deepest the beam kept a state from this, and that state's score
-        float score = 0;
-    };
-
     void expand(const Node& node, const core::Game& game, bool atRoot);
     void addChild(const Node& parent, const Placement& placement, core::Piece piece, core::Piece hold, core::Piece current, int next, bool atRoot, bool held);
     float evaluate(const Node& node) const;

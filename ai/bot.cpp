@@ -1,5 +1,6 @@
 #include "ai/bot.h"
 
+#include "ai/lst.h"
 #include "ai/pc_solver.h"  // kPcAirRows
 
 #include <algorithm>
@@ -40,7 +41,7 @@ bool loadBot(const std::string& path, Bot& bot) {
     const std::pair<const char*, double*> weights[] = {
         {"holes", &w.holes}, {"height", &w.height}, {"danger", &w.danger}, {"bumpiness", &w.bumpiness}, {"well", &w.well},
         {"tSlot", &w.tSlot}, {"attack", &w.attack}, {"b2b", &w.b2b}, {"wasted", &w.wasted},
-        {"incoming", &w.incoming}, {"surge", &w.surge}, {"combo", &w.combo}, {"pps", &bot.pps}, {"mistakes", &bot.mistakes},
+        {"incoming", &w.incoming}, {"surge", &w.surge}, {"combo", &w.combo}, {"lst", &w.lst}, {"notTsd", &w.notTsd}, {"pps", &bot.pps}, {"mistakes", &bot.mistakes},
     };
     const std::pair<const char*, int*> counts[] = {{"width", &bot.width}, {"depth", &bot.depth}};
     for (std::string line; std::getline(file, line);) {
@@ -155,6 +156,8 @@ void Bot::addChild(const Node& parent, const Placement& placement, core::Piece p
         child.combo = -1;
     }
     child.reward += static_cast<float>(weights.attack * sent + (sent == 0 ? weights.wasted * lines : 0));
+    if (weights.lst != 0 && !lstAlive(child.rows)) child.reward += static_cast<float>(weights.lst);
+    if (weights.notTsd != 0 && lines > 0 && lines < 4 && !(piece == core::Piece::T && spun && lines == 2)) child.reward += static_cast<float>(weights.notTsd * lines);
     child.sent = static_cast<int16_t>(std::min(child.sent + sent, 1000.0));
 
     child.current = current;

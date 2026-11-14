@@ -12,7 +12,7 @@ add_compile_options(-Wall -Wextra)
 add_library(core core/game.cpp core/fumen.cpp)
 target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR})
 
-add_library(ai ai/move_search.cpp ai/finesse.cpp ai/pc_solver.cpp ai/bot.cpp)
+add_library(ai ai/move_search.cpp ai/finesse.cpp ai/pc_solver.cpp ai/bot.cpp ai/lst.cpp)
 target_link_libraries(ai PUBLIC core)
 
 find_package(SDL3 REQUIRED)
@@ -48,6 +48,10 @@ add_test(NAME pc_test COMMAND pc_test)
 add_executable(bot_test tests/bot_test.cpp)
 target_link_libraries(bot_test PRIVATE ai)
 add_test(NAME bot_test COMMAND bot_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads data/bot
+
+add_executable(lst_test tests/lst_test.cpp)
+target_link_libraries(lst_test PRIVATE ai)
+add_test(NAME lst_test COMMAND lst_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads data/bot
 
 add_executable(bot_match tools/bot_match.cpp)
 target_link_libraries(bot_match PRIVATE ai)
@@ -91,6 +95,7 @@ target_compile_options(fumen_test PRIVATE -UNDEBUG)
 target_compile_options(ai_test PRIVATE -UNDEBUG)
 target_compile_options(pc_test PRIVATE -UNDEBUG)
 target_compile_options(bot_test PRIVATE -UNDEBUG)
+target_compile_options(lst_test PRIVATE -UNDEBUG)
 target_compile_options(app_test PRIVATE -UNDEBUG)
 target_compile_options(replay_parity PRIVATE -UNDEBUG)
 
