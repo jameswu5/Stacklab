@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "ai/finesse.h"
+#include "app/lst_coach.h"
 #include "app/pc_coach.h"
 #include "app/settings.h"
 #include "app/versus.h"
@@ -53,6 +54,7 @@ struct PlayView {
     const ai::FaultStats* faults = nullptr;  // null if the mode can't judge finesse
     const PcView* pc = nullptr;              // null without the PC coach
     bool replay = false;                     // a replay is playing, which the top bar says
+    const LstView* lst = nullptr;            // null without the LST coach
 };
 
 struct MenuView {
@@ -130,6 +132,7 @@ private:
     void preview(core::Piece piece, float centerX, float centerY, float cell);
     void statRow(float x, float y, float w, const char* name, const char* value);
     void coachRows(const PcView& pc, float y, bool over);
+    void lstRows(const LstView& lst, float y, bool over);
     int wrapped(FontId id, const char* text, float x, float baseline, float width, float lineHeight, int maxLines, Color color);
     void results(const PlayView& view);
     void sessionCard(const PlayView& view);

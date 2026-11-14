@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ai/finesse.h"
+#include "app/lst_coach.h"
 #include "app/pc_coach.h"
 #include "app/settings.h"
 #include "app/timing.h"
@@ -59,6 +60,7 @@ struct Play {
 
     std::unique_ptr<PcCoach> coach;  // made by the first run of a mode with the coach
     int residue = 0;                 // the bag residue PC practice starts from
+    std::unique_ptr<LstCoach> lst;   // made by the first LST coach run
 
     std::unique_ptr<Versus> versus;  // made by the first versus match
     int botPreset = 0;               // into botPresets(), chosen on the menu
@@ -81,6 +83,7 @@ struct Play {
         uint64_t filled;
         ai::FaultStats faults;
         PcProgress pc;
+        LstProgress lst;
     };
     std::vector<UndoSlot> undoSlots;
     int undoCount = 0, undoNewest = 0;

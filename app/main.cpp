@@ -83,6 +83,10 @@ void startRun(App& app, const Mode& mode, uint64_t timeNs) {
         app.play.coach->bagKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindBag);
         app.play.coach->setupKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindSetup);
     }
+    if (mode.lst) {
+        app.play.lst->hintKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindHint);
+        app.play.lst->undoKey = rowValue(app.settings, static_cast<int>(RowBindFirst) + BindUndo);
+    }
 }
 
 // Up and down choose a row, left and right a row's setting, Enter opens it, and Esc leaves a sub-menu.
@@ -154,6 +158,7 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
         if (key.down) app.play.undo(key.timestamp);
     } else if (bind == BindHint) {
         if (key.down && app.play.mode->pcFile) app.play.coach->toggleHint();
+        if (key.down && app.play.mode->lst) app.play.lst->toggleHint();
     } else if (bind == BindSetup) {
         if (key.down && app.play.mode->pcStyle == PcStyle::Practice && !app.play.over) app.play.coach->nextSetup();
     } else if (bind == BindBag) {
@@ -269,7 +274,9 @@ void drawFrame(App& app, Ui& ui) {
                 pcView = play.coach->view(play.shown, play.mode->goalLines, play.over);
                 pc = &pcView;
             }
-            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, play.playback ? app.playbackHistory : app.history, play.drill, play.filled, &play.faults, pc, play.playback != nullptr});
+            LstView lstView;
+            if (play.mode->lst) lstView = play.lst->view(play.shown, play.over);
+            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, play.playback ? app.playbackHistory : app.history, play.drill, play.filled, &play.faults, pc, play.playback != nullptr, play.mode->lst ? &lstView : nullptr});
         }
     }
     if (app.settings.overlay) {

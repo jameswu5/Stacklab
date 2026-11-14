@@ -33,6 +33,7 @@ struct Mode {
     const char* pcFile = nullptr;  // turns on the PC coach, and holds its record under the pref path
     PcStyle pcStyle = PcStyle::Coach;
     bool versus = false;  // you against the bot, first to kVersusRounds rounds
+    bool lst = false;     // the LST coach (app/lst_coach.h)
 
     int goalProgress(const core::Stats& stats) const { return garbageRows > 0 ? stats.garbageCleared : stats.lines; }
 };
@@ -107,6 +108,11 @@ inline const Mode kModes[] = {
      .rules = kVersusRules,
      .stats = 0,
      .versus = true},
+    {.name = "LST coach",
+     .blurb = "Endless LST stacking, with the bot judging each placement",
+     .rules = k40LRules,
+     .undo = true,
+     .lst = true},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));
 
@@ -126,7 +132,7 @@ struct MenuRow {
 inline const MenuRow kMenu[] = {
     {nullptr, nullptr, {kModes, 1}},
     {"Dig", nullptr, {kModes + 1, 3}},
-    {"Setups", "Openers and stacking setups to learn", {}, true},
+    {"Setups", "Openers and stacking setups to learn", {kModes + 8, 1}, true},
     {"Perfect Clear", "A coach, practice from a bag residue, and bag counting", {kModes + 4, 3}, true},
     {nullptr, nullptr, {kModes + 7, 1}},
     {"Settings", "Handling, keys and display", {}},

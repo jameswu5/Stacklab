@@ -387,7 +387,7 @@ void testMenu() {
         assert(std::string(kMenu[row].name ? kMenu[row].name : mode->name) == names[row]);
     }
     assert(kMenu[1].modes.size() == 3 && kMenu[1].mode(2) == &kModes[3] && kModes[3].goalLines == 100);
-    assert(kMenu[2].sub && kMenu[2].modes.empty() && !kMenu[2].mode(0));
+    assert(kMenu[2].sub && kMenu[2].modes.size() == 1 && &kMenu[2].modes[0] == &kModes[8] && kModes[8].lst && kModes[8].undo && kModes[8].goalLines == 0);
     assert(kMenu[3].sub && kMenu[3].modes.size() == 3 && &kMenu[3].modes[0] == &kModes[4] && kMenu[3].modes[1].pcStyle == PcStyle::Practice && kMenu[3].modes[2].pcStyle == PcStyle::Count);
     assert(kMenu[4].mode(0)->versus && !kMenu[5].sub && !kMenu[5].mode(0));
 }
@@ -1015,6 +1015,86 @@ ai::PcResult planPc(const std::vector<core::Piece>& pieces, size_t next, core::P
     query.rules = kCoachMode.rules;
     ai::PcSolver solver;
     return solver.solve(query, nullptr, 2'000'000);
+}
+
+// The LST coach through Play: the bot's own hints are fine, a TSD counts, a block in the
+// well is fatal, and undo takes it all back.
+void testLstCoach() {
+    const Mode& mode = kModes[8];
+    CoachPlayer p;
+    p.play.mode = &mode;
+    p.play.restart({}, 1, p.now);
+    LstCoach& lst = *p.play.lst;
+    lst.undoKey = "Z";
+    auto view = [&] { return lst.view(p.play.game, p.play.over); };
+    auto wait = [&] {
+        for (int i = 0; i < 60000 && !lst.answered(); i++) {
+            lst.poll();
+            if (!lst.answered()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(lst.answered());
+    };
+    // Plays the hint as key presses.
+    auto followHint = [&] {
+        wait();
+        lst.toggleHint();
+        const LstView hint = view();
+        assert(hint.showHint);
+        if (std::string(hint.hintLine).starts_with("Hold")) p.tap(BindHold);
+        assert(p.play.game.falling.piece == hint.hintPiece);
+        ai::MoveSearch search;
+        search.run(p.play.game.board, p.play.game.falling, p.play.game.rules);
+        for (const ai::Placement& placement : search.placements) {
+            auto cells = search.cells(placement);
+            if (!std::is_permutation(cells.begin(), cells.end(), hint.hintCells.begin(), [](core::Cell a, core::Cell b) { return a.x == b.x && a.y == b.y; })) continue;
+            p.place({hint.hintPiece, false, cells, search.inputs(placement)});
+            return;
+        }
+        assert(false);
+    };
+
+    p.now = p.play.startNs;
+    p.play.stepTo(p.now);
+    assert(std::string(view().status) == "Thinking" && !view().callout[0]);
+    for (int i = 0; i < 8; i++) {
+        followHint();
+        assert(!view().showHint);  // gone once the piece locks
+        wait();
+        assert(view().verdict == LstVerdict::Fine && std::string(view().callout) == "Fine");
+        assert(std::string(view().status) == "Alive");
+    }
+
+    // A ready slot and a T: the hint is the TSD, which counts as a TSD and a loop.
+    p.play.restart({}, 1, p.now);
+    p.now = p.play.startNs;
+    p.play.stepTo(p.now);
+    const char* ready[] = {"#.........", "#.........", "##........", "#...######", "##.#######", "##.#######"};
+    for (int y = 0; y < 6; y++)
+        for (int x = 0; x < 10; x++)
+            if (ready[5 - y][x] == '#') p.play.game.board.at(x, y) = core::Piece::Garbage;
+    p.play.game.respawn(core::Piece::T);
+    lst.start(p.play.game);
+    p.play.saveUndo();
+    followHint();
+    assert(p.play.game.stats.lines == 2 && lst.progress.tsds == 1 && lst.progress.loops == 1);
+    wait();
+    assert(view().verdict == LstVerdict::Fine && view().tsds == 1 && view().b2b == 0);
+
+    // One left of the spawn puts a block in the well: fatal at once, without the worker.
+    const LstProgress before = lst.progress;
+    p.tap(BindLeft);
+    p.tap(BindHardDrop);
+    assert(view().verdict == LstVerdict::Fatal && std::string(view().status) == "Broken");
+    assert(std::string(view().callout) == "Fatal, the loop broke: Z to undo");
+    wait();
+    assert(view().verdict == LstVerdict::Fatal);
+
+    // Undo goes back: no callout, alive, the counts as they were.
+    p.play.undo(p.now);
+    p.play.stepTo(p.now);
+    wait();
+    assert(!view().callout[0] && std::string(view().status) == "Alive");
+    assert(lst.progress.tsds == before.tsds && lst.progress.loops == before.loops);
 }
 
 void testPcCoachRules() {
@@ -1933,6 +2013,8 @@ int main() {
     testPlayDoesNotAllocate(kModes[0]);
     const Mode withUndo = {.name = "Undo", .blurb = "", .rules = {}, .undo = true};
     testPlayDoesNotAllocate(withUndo);
+    testLstCoach();
+    testPlayDoesNotAllocate(kModes[8]);
     testPcCoachRules();
     testPcCoachRun();
     testPcPractice();
