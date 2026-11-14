@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <new>
 #include <string>
 #include <vector>
@@ -252,6 +253,60 @@ int main(int argc, char** argv) {
         shot(thinking, false, "possible", dark);
         shot(finished, true, "results", dark);
     }
+    // The LST coach: a slot ready with the T's hint, then a placement that broke the loop, then results.
+    const Mode& lstMode = kModes[8];
+    core::Game lstGame(lstMode.rules, core::Handling{}, 1);
+    {
+        const char* rows[] = {"L.........", "LL........", "L...SSOOJJ", "JJ.SSZOOJT", "IZ.ZZTTTIT", "IZ.LLLOOIT"};  // top first
+        for (int y = 0; y < 6; y++)
+            for (int x = 0; x < 10; x++)
+                if (rows[5 - y][x] != '.') lstGame.board.at(x, y) = static_cast<core::Piece>(std::strchr(" IJLOSTZ", rows[5 - y][x]) - " IJLOSTZ");
+        lstGame.respawn(core::Piece::T);
+        lstGame.falling.y = 15;
+        lstGame.hold = core::Piece::I;
+        lstGame.stats.lines = 26;
+        lstGame.stats.pieces = 72;
+        lstGame.stats.keys = 230;
+        lstGame.frame = 2400;
+    }
+    LstView lstFine;
+    lstFine.status = "Alive";
+    lstFine.verdict = LstVerdict::Fine;
+    std::snprintf(lstFine.callout, sizeof lstFine.callout, "Fine");
+    std::snprintf(lstFine.hintLine, sizeof lstFine.hintLine, "Place the T");
+    lstFine.showHint = true;
+    lstFine.hintPiece = core::Piece::T;
+    lstFine.hintCells = {{{1, 3}, {2, 3}, {3, 3}, {2, 2}}};
+    lstFine.tsds = 4;
+    lstFine.b2b = 3;
+    lstFine.loops = 4;
+    LstView lstWorse = lstFine;
+    lstWorse.verdict = LstVerdict::Worse;
+    std::snprintf(lstWorse.callout, sizeof lstWorse.callout, "Worse than the best: Z to undo");
+    std::snprintf(lstWorse.hintLine, sizeof lstWorse.hintLine, "H for a hint");
+    lstWorse.showHint = false;
+    LstView lstFatal = lstWorse;
+    lstFatal.status = "Broken";
+    lstFatal.verdict = LstVerdict::Fatal;
+    std::snprintf(lstFatal.callout, sizeof lstFatal.callout, "Fatal, the loop broke: Z to undo");
+    lstFatal.loops = 0;
+    const std::vector<RunResult> lstHistory = {{&lstMode, 92.3, runStats, true, false}};
+    auto lstShot = [&](const LstView& lst, bool over, const char* name, bool dark) {
+        ui.dark = dark;
+        ui.beginFrame();
+        ui.drawPlay({&lstMode, &lstGame, lstGame.seconds(), over, nullptr, "R to retry, Escape for the menu", 0, lstHistory, nullptr, 0, &faults, nullptr, false, &lst});
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* lstPixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(lstPixels, (std::string(argv[1]) + "/lst-" + name + (dark ? "-dark.png" : "-light.png")).c_str());
+        SDL_DestroySurface(lstPixels);
+    };
+    for (bool dark : {false, true}) {
+        lstShot(lstFine, false, "hint", dark);
+        lstShot(lstWorse, false, "worse", dark);
+        lstShot(lstFatal, false, "fatal", dark);
+        lstShot(lstFatal, true, "results", dark);
+    }
+
     // PC practice mid-run and its results, then Bag count, then a run that used undo.
     PcView practice = thinking;
     practice.goal = 1;
@@ -404,6 +459,7 @@ int main(int argc, char** argv) {
         ui.drawPlay({&coachMode, &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &killed});
         ui.drawPlay({&kModes[5], &practiceGame, practiceGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &setupShown});
         ui.drawVersus({&versusMode, &you, &versus, false, "Set", "", matches});
+        ui.drawPlay({&lstMode, &lstGame, lstGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, nullptr, false, &lstFine});
     };
     for (int i = 0; i < 10; i++) {
         draw(i % 2);

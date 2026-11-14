@@ -447,6 +447,9 @@ void Ui::results(const PlayView& view) {
             std::snprintf(buffer, sizeof buffer, "%d: %d of %d", phase, view.pc->tally.successes[phase], view.pc->tally.attempts[phase]);
             text(FontSmall, buffer, x + 24 + (phase % 2) * 126, y + 44 + (phase / 2) * 20.0f, colors.text);
         }
+    } else if (view.lst) {
+        std::snprintf(buffer, sizeof buffer, "%d", view.lst->tsds);
+        statRow(x + 24, y, width - 48, "TSDs", buffer);
     } else {
         formatTime(buffer, view.best);
         statRow(x + 24, y, width - 48, "Best", view.best > 0 ? buffer : "-");
@@ -598,6 +601,30 @@ void Ui::coachRows(const PcView& pc, float y, bool over) {
     }
 }
 
+// As the PC coach's rows: the same lines whatever the answers, so the card doesn't jump.
+void Ui::lstRows(const LstView& lst, float y, bool over) {
+    const Palette& colors = palette();
+    const float x = kLeftX + 20, width = kColumnW - 40;
+    if (!over) {
+        fill(x, y, width, 1, colors.line);
+        text(FontValue, lst.status, x, y + 24, colors.text);
+        if (lst.callout[0]) {
+            const core::Piece tint = lst.verdict == LstVerdict::Fine ? core::Piece::S : lst.verdict == LstVerdict::Worse ? core::Piece::L : core::Piece::Z;
+            fill(kLeftX + 10, y + 49, kColumnW - 20, 22, colors.pieces[static_cast<int>(tint)], 8, 0.22f);
+            text(FontSmall, lst.callout, x, y + 64, colors.text);
+        }
+        text(FontSmall, lst.hintLine, x, y + 86, colors.muted);
+        y += 98;
+    }
+    char buffer[32];
+    std::snprintf(buffer, sizeof buffer, "%d", lst.tsds);
+    statRow(x, y, width, "TSDs", buffer);
+    std::snprintf(buffer, sizeof buffer, "%d", lst.b2b);
+    statRow(x, y + 38, width, "B2B", buffer);
+    std::snprintf(buffer, sizeof buffer, "%d", lst.loops);
+    statRow(x, y + 76, width, "Loops", buffer);
+}
+
 void Ui::drawPlay(const PlayView& view) {
     const Palette& colors = palette();
     const core::Game& game = *view.game;
@@ -610,7 +637,7 @@ void Ui::drawPlay(const PlayView& view) {
 
     int statCount = 0;
     for (const auto& row : kStatRows) statCount += (view.mode->stats & row.stat) != 0;
-    const float coachHeight = !view.pc ? 0 : view.over ? 106 : 204 + (view.pc->setupLine[0] ? kSetupRowsH : 0);
+    const float coachHeight = view.lst ? (view.over ? 114 : 212) : !view.pc ? 0 : view.over ? 106 : 204 + (view.pc->setupLine[0] ? kSetupRowsH : 0);
     card(kLeftX, 215, kColumnW, 131 + statCount * 38.0f + coachHeight, "TIME");
     char buffer[32];
     formatTime(buffer, view.seconds);
@@ -628,6 +655,7 @@ void Ui::drawPlay(const PlayView& view) {
         rowY += 38;
     }
     if (view.pc) coachRows(*view.pc, rowY, view.over);
+    if (view.lst) lstRows(*view.lst, rowY, view.over);
 
     fill(kBoardCardX, kRowY, 408, 788, colors.card, 28);
     boardX_ = kBoardX, boardY_ = kBoardY, cell_ = kCell;
@@ -655,6 +683,9 @@ void Ui::drawPlay(const PlayView& view) {
     }
     if (view.pc && view.pc->showHint) {
         for (const core::Cell& c : view.pc->hintCells) block(c.x, c.y, colors.pieces[static_cast<int>(view.pc->hintPiece)], colors.ghostAlpha);
+    }
+    if (view.lst && view.lst->showHint) {
+        for (const core::Cell& c : view.lst->hintCells) block(c.x, c.y, colors.pieces[static_cast<int>(view.lst->hintPiece)], colors.ghostAlpha);
     }
     if (!view.over) falling(game);
 

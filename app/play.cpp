@@ -56,6 +56,10 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
         coach->style = mode->pcStyle;
         coach->start(game, dealt);
     }
+    if (mode->lst) {
+        if (!lst) lst = std::make_unique<LstCoach>();
+        lst->start(game);
+    }
     if (mode->versus) {
         if (!versus) versus = std::make_unique<Versus>();
         versus->preset = botPreset;
@@ -91,7 +95,7 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     if (mode->undo) {
         if (undoSlots.empty()) {
             undoSlots.reserve(kUndoDepth);
-            for (int i = 0; i < kUndoDepth; i++) undoSlots.push_back({core::Game(core::Ruleset{}, core::Handling{}, 1), 0, {}, {}});
+            for (int i = 0; i < kUndoDepth; i++) undoSlots.push_back({core::Game(core::Ruleset{}, core::Handling{}, 1), 0, {}, {}, {}});
         }
         for (UndoSlot& slot : undoSlots) slot.game.queue.reserve(game.queue.capacity());  // a drill's queue can be long
         undoCount = 0;
@@ -105,6 +109,7 @@ void Play::saveUndo() {
     undoSlots[undoNewest].filled = filled;
     undoSlots[undoNewest].faults = faults;
     if (mode->pcFile) undoSlots[undoNewest].pc = coach->progress;
+    if (mode->lst) undoSlots[undoNewest].lst = lst->progress;
     undoCount = std::min(undoCount + 1, kUndoDepth);
 }
 
@@ -141,6 +146,7 @@ void Play::undo(uint64_t timeNs) {
     game.respawn(game.falling.piece);
     finesse.restart(game);
     if (mode->pcFile) coach->rollback(undoSlots[undoNewest].pc, game);
+    if (mode->lst) lst->rollback(undoSlots[undoNewest].lst, game);
     startNs = timeNs - (game.frame * 1'000'000'000 + core::kTicksPerSecond - 1) / core::kTicksPerSecond;
     // The slot remembers the keys held back then. At subframe 0 these release
     // them before a charged move can act.
@@ -183,6 +189,7 @@ void Play::stepTo(uint64_t nowNs) {
     if (mode->versus && versus->roundOver && !over && nowNs >= versus->roundEndNs + kRoundCardNs) nextRound(nowNs);
     if (!started && nowNs >= startNs) begin();
     if (mode->pcFile) coach->poll();
+    if (mode->lst) lst->poll();
     uint64_t target = tickAt(nowNs > startNs ? nowNs - startNs : 0).tick;
     while (!over && !missed && !(mode->versus && versus->roundOver) && game.frame < target) {
         auto due = this->due();
@@ -236,6 +243,7 @@ void Play::stepTo(uint64_t nowNs) {
             }
             if (over) coach->save();  // the run has ended, so file work can't disturb play
         }
+        if (mode->lst) lst->afterTick(locks, game);
         if (mode->undo && !locks.empty()) saveUndo();
     }
 }
