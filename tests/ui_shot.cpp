@@ -255,6 +255,41 @@ int main(int argc, char** argv) {
     bagCount.pcs = 4;
     PcView undone = killed;
     undone.nullified = true;
+    // A made-up setup, two pieces in, with a long condition to wrap.
+    PcSetup setup;
+    setup.name = "Sample setup with a long name / Hold T";
+    setup.condition = "the 5 pieces are IJLOS (no T, no Z); Hold T; with a condition long enough that it has to be cut short somewhere on the card";
+    {
+        using enum core::Piece;
+        constexpr const char* rows[4] = {"LLL.....SS", "LOO....SST", "JOO...ZZTT", "JJJ....ZZT"};
+        for (int row = 0; row < 4; row++)
+            for (int x = 0; x < 10; x++) setup.cells[(3 - row) * 10 + x] = std::array{None, L, S, T, O, J, Z}[std::string(".LSTOJZ").find(rows[row][x])];
+    }
+    PcView setupShown = thinking;
+    setupShown.goal = 1;
+    setupShown.residue[0] = '0';
+    setupShown.setup = &setup;
+    std::snprintf(setupShown.setupLine, sizeof setupShown.setupLine, "84.64%%, 1 of 3");
+    PcView setupAsk = setupShown;
+    setupAsk.setup = nullptr;
+    std::snprintf(setupAsk.setupLine, sizeof setupAsk.setupLine, "G for a setup");
+    core::Game practiceGame(core::Ruleset{}, core::Handling{}, 1);
+    practiceGame.falling.piece = core::Piece::None;  // as if between pieces, so it doesn't sit over the top bar
+    for (const core::Cell c : {core::Cell{0, 0}, {1, 0}, {2, 0}, {0, 1}}) practiceGame.board.at(c.x, c.y) = core::Piece::J;
+    for (const core::Cell c : {core::Cell{8, 3}, {9, 3}, {7, 2}, {8, 2}}) practiceGame.board.at(c.x, c.y) = core::Piece::S;
+    auto practiceShot = [&](const PcView& pc, const char* name, bool dark) {
+        ui.dark = dark;
+        ui.beginFrame();
+        ui.drawPlay({&kModes[7], &practiceGame, practiceGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &pc});
+        SDL_FlushRenderer(renderer);
+        SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_SavePNG(pixels, (std::string(argv[1]) + "/" + name + (dark ? "-dark.png" : "-light.png")).c_str());
+        SDL_DestroySurface(pixels);
+    };
+    for (bool dark : {false, true}) {
+        practiceShot(setupShown, "practice-setup", dark);
+        practiceShot(setupAsk, "practice-setup-ask", dark);
+    }
     for (bool dark : {false, true}) {
         shot(practice, false, "practice", dark);
         shot(practice, true, "practice-results", dark);
@@ -359,6 +394,7 @@ int main(int argc, char** argv) {
         game.frame++;
         ui.drawPlay({&kModes[0], &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults});
         ui.drawPlay({&coachMode, &game, game.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &killed});
+        ui.drawPlay({&kModes[7], &practiceGame, practiceGame.seconds(), false, nullptr, "", 0, {}, nullptr, 0, &faults, &setupShown});
         ui.drawVersus({&versusMode, &you, &versus, false, "Set", "", matches});
     };
     for (int i = 0; i < 10; i++) {

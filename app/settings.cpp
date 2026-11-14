@@ -13,8 +13,8 @@ using nlohmann::json;
 
 namespace {
 
-constexpr const char* kBindKeys[kBindCount] = {"left", "right", "softDrop", "hardDrop", "cw", "ccw", "180", "hold", "retry", "menu", "undo", "hint", "bag"};
-constexpr const char* kBindNames[kBindCount] = {"Move left", "Move right", "Soft drop", "Hard drop", "Rotate CW", "Rotate CCW", "Rotate 180", "Hold", "Retry", "Menu", "Undo", "PC hint", "Bag residue"};
+constexpr const char* kBindKeys[kBindCount] = {"left", "right", "softDrop", "hardDrop", "cw", "ccw", "180", "hold", "retry", "menu", "undo", "hint", "bag", "setup"};
+constexpr const char* kBindNames[kBindCount] = {"Move left", "Move right", "Soft drop", "Hard drop", "Rotate CW", "Rotate CCW", "Rotate 180", "Hold", "Retry", "Menu", "Undo", "PC hint", "Bag residue", "Setup hint"};
 
 // A missing or damaged file reads as null, which leaves the defaults in place.
 json readJson(const std::string& path) {
@@ -59,7 +59,7 @@ Profile profileFromJson(const json& value) {
             if (code > 0 && code < SDL_SCANCODE_COUNT) profile.keys[bind].push_back(static_cast<SDL_Scancode>(code));
     }
     // A file from before these existed keeps its keys: their defaults can't take one.
-    for (Bind added : {BindUndo, BindHint, BindBag}) {
+    for (Bind added : {BindUndo, BindHint, BindBag, BindSetup}) {
         if (keys.contains(kBindKeys[added])) continue;
         for (int bind = 0; bind < kBindCount; bind++)
             for (SDL_Scancode key : profile.keys[bind])

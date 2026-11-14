@@ -139,6 +139,10 @@ void testSettings() {
     { std::ofstream(path) << R"({"profiles": [{"keys": {"hint": [5]}}]})"; }
     assert(loadSettings(path).profile().keys[BindHint] == std::vector{SDL_SCANCODE_B});
     assert(loadSettings(path).profile().keys[BindBag].empty());  // and the bag key's default is taken there
+    { std::ofstream(path) << R"({"profiles": [{"keys": {"left": [4]}}]})"; }
+    assert(loadSettings(path).profile().keys[BindSetup] == std::vector{SDL_SCANCODE_G});
+    { std::ofstream(path) << R"({"profiles": [{"keys": {"hold": [10]}}]})"; }  // G
+    assert(loadSettings(path).profile().keys[BindSetup].empty());
 
     // A damaged file reads as defaults.
     { std::ofstream(path) << "{ not json"; }
@@ -1405,6 +1409,83 @@ void testPcPractice() {
     p.coach().progress = {};
 }
 
+// four.lol setup hints, on a hand-made file: residue, hold, pieces on hand and board fit,
+// then cycling through what fits in PC practice.
+void testPcSetups() {
+    using core::Piece;
+    const std::string path = (std::filesystem::temp_directory_path() / "stacklab_pc_setups.json").string();
+    std::filesystem::remove(path);
+    assert(loadPcSetups(path).empty());
+    {
+        std::ofstream(path) << R"([
+ {"residue": 0, "name": "O, keep I", "chance": "90%", "condition": "Hold I", "need": "I", "hold": "",
+  "board": ["..........", "..........", "OO........", "OO........"]},
+ {"residue": 0, "name": "Flat I", "chance": "", "condition": "", "need": "", "hold": "",
+  "board": ["..........", "..........", "..........", "IIII......"]},
+ {"residue": 2, "name": "J on gray", "chance": "", "condition": "", "need": "", "hold": "TS",
+  "board": ["..........", "..........", "J.........", "JJJXXXX..."]}
+])";
+    }
+    const std::vector<PcSetup> setups = loadPcSetups(path);
+    std::filesystem::remove(path);
+    assert(setups.size() == 3 && setups[0].name == "O, keep I" && setups[0].chance == "90%");
+    assert(setups[0].cells[0] == Piece::O && setups[0].cells[11] == Piece::O && setups[0].cells[20] == Piece::None);
+    assert(setups[0].pieces[static_cast<int>(Piece::O)] == 1 && setups[0].pieces[static_cast<int>(Piece::I)] == 1);
+    assert(setups[2].cells[3] == Piece::Garbage && setups[2].pieces[static_cast<int>(Piece::J)] == 1);
+
+    auto have = [](std::initializer_list<Piece> pieces) {
+        std::array<int, 8> counts{};
+        for (Piece piece : pieces) counts[static_cast<int>(piece)]++;
+        return counts;
+    };
+    core::Board empty;
+    assert(pcSetupFits(setups[0], 0, Piece::None, empty, have({Piece::O, Piece::I})));
+    assert(!pcSetupFits(setups[0], 0, Piece::None, empty, have({Piece::O, Piece::T})));  // nothing to keep in hold
+    assert(!pcSetupFits(setups[0], 1, Piece::None, empty, have({Piece::O, Piece::I})));  // another residue
+    core::Board flat;
+    for (int x = 0; x < 4; x++) flat.at(x, 0) = Piece::I;
+    assert(!pcSetupFits(setups[0], 0, Piece::None, flat, have({Piece::O, Piece::I})));  // a block where it's empty
+    assert(pcSetupFits(setups[1], 0, Piece::None, flat, have({Piece::I})));
+    flat.at(0, 4) = Piece::T;
+    assert(!pcSetupFits(setups[1], 0, Piece::None, flat, have({Piece::I})));  // above its rows
+    assert(pcSetupFits(setups[2], 2, Piece::S, empty, have({Piece::J})));
+    assert(!pcSetupFits(setups[2], 2, Piece::J, empty, have({Piece::J})));  // starts with the wrong piece in hold
+
+    // In PC practice, a setup of n pieces fits when they're among the attempt's first n + 1.
+    CoachPlayer p;
+    p.play.mode = &kModes[7];
+    p.play.residue = 0;
+    p.play.restart({}, 1, p.now);
+    const core::Game& game = p.play.game;
+    auto oneOf = [](Piece piece, const char* name) {
+        PcSetup setup;
+        setup.name = name;
+        setup.pieces[static_cast<int>(piece)] = 1;
+        for (int x = 0; x < 4; x++) setup.cells[x] = piece;
+        return setup;
+    };
+    const std::vector<PcSetup> made = {oneOf(game.falling.piece, "first"), oneOf(game.queue[1], "third"), oneOf(game.queue[0], "second")};
+    p.coach().setups = made;
+    p.coach().setupKey = "G";
+    assert(std::string(p.view().setupLine) == "G for a setup" && !p.view().setup);
+    const size_t before = allocations;
+    p.coach().nextSetup(game);
+    assert(p.view().setup == &made[0] && std::string(p.view().setupLine) == "1 of 2");
+    p.coach().nextSetup(game);
+    assert(p.view().setup == &made[2] && std::string(p.view().setupLine) == "2 of 2");
+    p.coach().nextSetup(game);
+    assert(!p.view().setup && std::string(p.view().setupLine) == "G for a setup");  // past the last
+    assert(allocations == before);
+    p.play.game.board.at(9, 0) = Piece::Garbage;
+    p.coach().nextSetup(p.play.game);
+    assert(!p.view().setup && std::string(p.view().setupLine) == "No setup fits");
+    p.play.restart({}, 1, p.now);
+    assert(std::string(p.view().setupLine) == "G for a setup");
+    p.coach().setups = {};
+    p.coach().nextSetup(p.play.game);
+    assert(std::string(p.view().setupLine) == "No setups file");
+}
+
 // Bag count has no solver and hides the residue until asked, and the badge ends a run early.
 void testBagCount() {
     const Mode& count = kModes[8];
@@ -1810,6 +1891,7 @@ int main() {
     testPcCoachRules();
     testPcCoachRun();
     testPcPractice();
+    testPcSetups();
     testBagCount();
     testBotPresets();  // first of the versus tests, which index the presets
     testPlayDoesNotAllocate(kModes[6]);

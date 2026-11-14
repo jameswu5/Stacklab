@@ -125,6 +125,7 @@ private:
     void preview(core::Piece piece, float centerX, float centerY, float cell);
     void statRow(float x, float y, float w, const char* name, const char* value);
     void coachRows(const PcView& pc, float y, bool over);
+    int wrapped(FontId id, const char* text, float x, float baseline, float width, float lineHeight, int maxLines, Color color);
     void results(const PlayView& view);
     void sessionCard(const PlayView& view);
     void versusSide(const core::Game& game, const Callout& callout, const char* name, float x, bool live, const char* banner);

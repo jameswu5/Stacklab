@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include <thread>
 
 #include "app/latest.h"
@@ -84,6 +87,63 @@ private:
     std::thread thread_;  // last, so everything it uses exists first
 };
 
+namespace {
+
+constexpr const char* kNames = " IJLOSTZ";
+
+core::Piece pieceFromLetter(char letter) {
+    if (letter == 'X') return core::Piece::Garbage;
+    const char* at = letter ? std::strchr(kNames + 1, letter) : nullptr;
+    return at ? static_cast<core::Piece>(at - kNames) : core::Piece::None;
+}
+
+}  // namespace
+
+std::vector<PcSetup> loadPcSetups(const std::string& path) {
+    std::ifstream in(path);
+    const nlohmann::json file = nlohmann::json::parse(in, nullptr, false);
+    std::vector<PcSetup> setups;
+    if (!file.is_array()) return setups;
+    try {
+        for (const nlohmann::json& entry : file) {
+            PcSetup setup;
+            setup.residue = entry.at("residue").get<int>();
+            setup.name = entry.at("name").get<std::string>();
+            setup.chance = entry.at("chance").get<std::string>();
+            setup.condition = entry.at("condition").get<std::string>();
+            const auto board = entry.at("board").get<std::vector<std::string>>();
+            if (board.size() != 4) return {};
+            for (int row = 0; row < 4; row++) {
+                if (board[row].size() != 10) return {};
+                for (int x = 0; x < 10; x++) {
+                    const core::Piece piece = pieceFromLetter(board[row][x]);
+                    setup.cells[(3 - row) * 10 + x] = piece;
+                    if (piece != core::Piece::Garbage) setup.pieces[static_cast<int>(piece)]++;
+                }
+            }
+            setup.pieces[0] = 0;
+            for (int& cells : setup.pieces) cells /= 4;
+            for (char letter : entry.at("need").get<std::string>()) setup.pieces[static_cast<int>(pieceFromLetter(letter))]++;
+            for (char letter : entry.at("hold").get<std::string>()) setup.holds |= 1 << static_cast<int>(pieceFromLetter(letter));
+            setups.push_back(std::move(setup));
+        }
+    } catch (const nlohmann::json::exception&) {
+        return {};
+    }
+    return setups;
+}
+
+bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const core::Board& board, const std::array<int, 8>& have) {
+    if (setup.residue != residue) return false;
+    if (setup.holds && !(setup.holds >> static_cast<int>(startHold) & 1)) return false;
+    for (int i = 1; i < 8; i++)
+        if (setup.pieces[i] > have[i]) return false;
+    for (int y = 0; y < core::kBoardHeight; y++)
+        for (int x = 0; x < core::kBoardWidth; x++)
+            if (board.at(x, y) != core::Piece::None && (y >= 4 || setup.cells[y * 10 + x] == core::Piece::None)) return false;
+    return true;
+}
+
 void PcProgress::note(const core::LockResult& lock, int placed) {
     if (!attempted) tally.attempts[phase]++;
     attempted = true;
@@ -131,6 +191,10 @@ void PcCoach::start(const core::Game& game, std::span<const core::Piece> dealtBe
     lastStatus_ = ai::PcStatus::Unknown;
     killedBy_ = nullptr;
     hintWanted_ = false;
+    startHold_ = game.hold;
+    attemptStart_ = dealtBefore.size();
+    setupAsked_ = false;
+    setupShown_ = -1;
     ask(game);
 }
 
@@ -190,6 +254,36 @@ void PcCoach::afterTick(std::span<const core::LockResult> locks, const core::Gam
     if (game.stats.pieces != askedPieces_ || game.falling.piece != askedCurrent_ || game.hold != askedHold_ || game.holdUsed != askedHoldUsed_) ask(game);
 }
 
+// A setup of n pieces is buildable with one hold slot when its pieces are among the first
+// n + 1 of the attempt: hold at its start, then the pieces as dealt. Only what's known now
+// counts: those dealt, the previews and the rest of the bag, up to the 10 placed and 1 held.
+void PcCoach::nextSetup(const core::Game& game) {
+    setupAsked_ = true;
+    std::array<core::Piece, 11> order{};
+    int known = 0;
+    if (startHold_ != core::Piece::None) order[known++] = startHold_;
+    for (size_t i = attemptStart_; i < seen.size() && known < 11; i++) order[known++] = seen[i];
+    const uint8_t left = ai::pcBagLeft(seen);  // ponytail: unordered, so with 2 or more unseen any of them counts as next
+    for (int piece = 1; piece < 8 && known < 11; piece++)
+        if (left >> piece & 1) order[known++] = static_cast<core::Piece>(piece);
+
+    const int shown = setupShown_;
+    setupShown_ = -1;
+    setupCount_ = setupNumber_ = 0;
+    for (int i = 0; i < static_cast<int>(setups.size()); i++) {
+        int pieces = 0;
+        for (int n : setups[i].pieces) pieces += n;
+        std::array<int, 8> have{};
+        for (int k = 0; k < std::min(pieces + 1, known); k++) have[static_cast<int>(order[k])]++;
+        if (!pcSetupFits(setups[i], progress.phase, startHold_, game.board, have)) continue;
+        setupCount_++;
+        if (i <= shown || setupShown_ >= 0) continue;
+        setupShown_ = i;
+        setupNumber_ = setupCount_;
+    }
+    if (setupShown_ < 0 && setupCount_ > 0) setupAsked_ = false;  // past the last: hidden again
+}
+
 void PcCoach::poll() {
     PcAnswer answer;
     if (worker_->poll(answer)) take(answer);
@@ -222,6 +316,14 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
     out.tally = record.tally;
     if (style == PcStyle::Practice) {
         out.goal = 1;
+        if (setupShown_ >= 0) {
+            out.setup = &setups[setupShown_];
+            std::snprintf(out.setupLine, sizeof out.setupLine, "%s%s%d of %d", out.setup->chance.c_str(), out.setup->chance.empty() ? "" : ", ", setupNumber_, setupCount_);
+        } else if (!setupAsked_) {
+            std::snprintf(out.setupLine, sizeof out.setupLine, "%s for a setup", setupKey.c_str());
+        } else {
+            std::snprintf(out.setupLine, sizeof out.setupLine, setups.empty() ? "No setups file" : "No setup fits");
+        }
         std::snprintf(out.residue, sizeof out.residue, "%d", placedBefore_ % 7);  // the one chosen, even after its PC
         if (!game.toppedOut) out.outcome = progress.pcs > 0 ? "Perfect clear" : "Over 4 lines";
     } else if (progress.pcs >= kPcGoal) {
@@ -262,7 +364,6 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
     } else if (!answered_) {
         std::snprintf(out.hintLine, sizeof out.hintLine, "Hint coming");
     } else if (answer_.hasStep) {
-        constexpr const char* kNames = " IJLOSTZ";
         const char name = kNames[static_cast<int>(answer_.piece)];
         if (answer_.hold) std::snprintf(out.hintLine, sizeof out.hintLine, "Hold first, then place the %c", name);
         else std::snprintf(out.hintLine, sizeof out.hintLine, "Place the %c", name);

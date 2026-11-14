@@ -11,7 +11,7 @@
 #include "core/game.h"
 
 // The first eight match core::Action.
-enum Bind { BindLeft, BindRight, BindSoftDrop, BindHardDrop, BindCW, BindCCW, Bind180, BindHold, BindRetry, BindMenu, BindUndo, BindHint, BindBag, kBindCount };
+enum Bind { BindLeft, BindRight, BindSoftDrop, BindHardDrop, BindCW, BindCCW, Bind180, BindHold, BindRetry, BindMenu, BindUndo, BindHint, BindBag, BindSetup, kBindCount };
 
 struct Profile {
     std::string name = "Default";
@@ -30,6 +30,7 @@ struct Profile {
         {SDL_SCANCODE_Q},
         {SDL_SCANCODE_H},
         {SDL_SCANCODE_B},
+        {SDL_SCANCODE_G},
     }};
 };
 

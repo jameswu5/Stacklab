@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 
 namespace {
@@ -32,6 +33,7 @@ constexpr float kBoardX = kBoardCardX + 14, kBoardY = kRowY + 14, kCell = 38;
 constexpr float kToggleW = 76, kToggleH = 38, kBarSide = 32;
 constexpr float kLabelTracking = 1.1f;
 constexpr float kTimeTracking = -1.32f;
+constexpr float kSetupRowsH = 108;  // PC practice's setup lines on the coach card
 constexpr float kHoldCell = 24, kNextCell = 44, kNextSlot = 144;
 
 constexpr const char* kFontFiles[] = {"PlusJakartaSans-Regular.ttf", "PlusJakartaSans-SemiBold.ttf", "PlusJakartaSans-Bold.ttf"};
@@ -558,6 +560,32 @@ void Ui::drawDrills(int selected, std::span<const Drill> drills, const char* err
     text(FontSmall, error ? error : "Up and down choose, Enter starts, Esc goes back", 720, top + height - 17, colors.muted, Align::Center);
 }
 
+// Word-wrapped, ending in "..." if it doesn't fit in maxLines. Returns the lines drawn.
+int Ui::wrapped(FontId id, const char* s, float x, float baseline, float width, float lineHeight, int maxLines, Color color) {
+    char line[160];
+    int lines = 0;
+    while (*s && lines < maxLines) {
+        size_t fit = 0;  // the most whole words that fit, but always one
+        for (size_t end = 0; end < sizeof line - 4; end++) {
+            if (s[end] != ' ' && s[end] != 0) continue;
+            std::memcpy(line, s, end);
+            line[end] = 0;
+            if (fit > 0 && textWidth(id, line) / scale_ > width) break;
+            fit = end;
+            if (!s[end]) break;
+        }
+        if (fit == 0) fit = std::min(std::strlen(s), sizeof line - 4);
+        std::memcpy(line, s, fit);
+        line[fit] = 0;
+        s += fit;
+        while (*s == ' ') s++;
+        if (*s && lines == maxLines - 1) std::strcat(line, "...");
+        text(id, line, x, baseline + lines * lineHeight, color);
+        lines++;
+    }
+    return lines;
+}
+
 // Always the same lines, so the card doesn't jump as the answers change.
 void Ui::coachRows(const PcView& pc, float y, bool over) {
     const Palette& colors = palette();
@@ -572,6 +600,20 @@ void Ui::coachRows(const PcView& pc, float y, bool over) {
         }
         text(FontSmall, pc.hintLine, x, y + 86, colors.muted);
         y += 98;
+        if (pc.setupLine[0]) {
+            constexpr float lineH = 15;
+            const float first = y + 6, credit = first + 6 * lineH;
+            if (pc.setup) {
+                float line = first + lineH * wrapped(FontSmall, pc.setup->name.c_str(), x, first, width, lineH, 2, colors.text);
+                text(FontSmall, pc.setupLine, x, line, colors.muted);
+                line += lineH;
+                wrapped(FontSmall, pc.setup->condition.c_str(), x, line, width, lineH, static_cast<int>((credit - line) / lineH), colors.muted);
+                text(FontSmall, "Setup: four.lol", x, credit, colors.muted);
+            } else {
+                text(FontSmall, pc.setupLine, x, first, colors.muted);
+            }
+            y += kSetupRowsH;
+        }
     }
     char buffer[32];
     std::snprintf(buffer, sizeof buffer, "%d / %d", pc.pcs, pc.goal);
@@ -601,7 +643,7 @@ void Ui::drawPlay(const PlayView& view) {
 
     int statCount = 0;
     for (const auto& row : kStatRows) statCount += (view.mode->stats & row.stat) != 0;
-    const float coachHeight = !view.pc ? 0 : view.over ? 106 : 204;
+    const float coachHeight = !view.pc ? 0 : view.over ? 106 : 204 + (view.pc->setupLine[0] ? kSetupRowsH : 0);
     card(kLeftX, 215, kColumnW, 131 + statCount * 38.0f + coachHeight, "TIME");
     char buffer[32];
     formatTime(buffer, view.seconds);
@@ -636,6 +678,13 @@ void Ui::drawPlay(const PlayView& view) {
             // Fainter than the ghost, so the two can't be confused.
             for (const core::Cell& c : target.cells) block(c.x, c.y, colors.pieces[static_cast<int>(target.piece)], colors.ghostAlpha * 0.5f);
         }
+    }
+    if (view.pc && view.pc->setup && !view.over) {
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 10; x++) {
+                const core::Piece piece = view.pc->setup->cells[y * 10 + x];
+                if (piece != core::Piece::None && game.board.at(x, y) == core::Piece::None) block(x, y, colors.pieces[static_cast<int>(piece)], colors.ghostAlpha);
+            }
     }
     if (view.pc && view.pc->showHint) {
         for (const core::Cell& c : view.pc->hintCells) block(c.x, c.y, colors.pieces[static_cast<int>(view.pc->hintPiece)], colors.ghostAlpha);
@@ -819,7 +868,7 @@ void Ui::drawVersus(const VersusView& view) {
 void Ui::drawSettings(const Settings& settings, int selected, bool capturing) {
     const Palette& colors = palette();
     topBar("Settings");
-    constexpr float width = 560, height = 808, rowH = 26, headingH = 30, x = (1440 - width) / 2, firstRow = kRowY + 16;
+    constexpr float width = 560, height = 808, rowH = 25, headingH = 30, x = (1440 - width) / 2, firstRow = kRowY + 16;
     fill(x, kRowY, width, height, colors.card, 24);
     for (int row = 0; row < kRowCount; row++) {
         float y = firstRow + row * rowH + (row >= RowBotDelay ? headingH : 0);
