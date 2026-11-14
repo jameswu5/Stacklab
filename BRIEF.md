@@ -125,11 +125,8 @@ struct Mode {
     int goalLines = 0;               // reaching this many lines ends the run; 0 is no goal
     const char* bestFile = nullptr;  // holds the personal best, under the pref path; null keeps none
     int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
-    int timeLimitSeconds = 0;        // reaching this ends the run, and the best is then the highest score
-    int garbageRows = 0;             // on the starting board, with a new hole every row; only lines that held garbage then count toward the goal
-    bool editable = false;           // the mouse edits the board, hold and queue, and topping out clears the board
+    int garbageRows = 0;             // a cheese race: on the board at once, refilled until goalLines are placed; only garbage lines count
     bool undo = false;               // the undo key takes back the last piece, clock included
-    bool drills = false;             // the menu opens the list of drills, and a run plays the chosen one
     const char* pcFile = nullptr;    // turns on the PC coach, and holds its record under the pref path
     PcStyle pcStyle = PcStyle::Coach;  // Coach, Practice from a chosen bag residue, or Count with no solver
 };
