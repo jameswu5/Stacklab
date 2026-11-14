@@ -60,7 +60,7 @@ add_executable(app_test tests/app_test.cpp app/play.cpp app/pc_coach.cpp app/lst
 target_link_libraries(app_test PRIVATE ai SDL3::SDL3 nlohmann_json::nlohmann_json)
 add_test(NAME app_test COMMAND app_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads tests/fixtures/drills
 
-add_executable(ui_shot tests/ui_shot.cpp app/ui.cpp app/versus.cpp app/tr_field.cpp app/settings.cpp)
+add_executable(ui_shot tests/ui_shot.cpp modes/drill.cpp app/ui.cpp app/versus.cpp app/tr_field.cpp app/settings.cpp)
 target_link_libraries(ui_shot PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)
 
 # Not a test: prints frame times in the PC coach with the solver busy.

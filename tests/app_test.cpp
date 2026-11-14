@@ -387,7 +387,7 @@ void testMenu() {
         assert(std::string(kMenu[row].name ? kMenu[row].name : mode->name) == names[row]);
     }
     assert(kMenu[1].modes.size() == 3 && kMenu[1].mode(2) == &kModes[3] && kModes[3].goalLines == 100);
-    assert(kMenu[2].sub && kMenu[2].modes.size() == 1 && &kMenu[2].modes[0] == &kModes[8] && kModes[8].lst && kModes[8].undo && kModes[8].goalLines == 0);
+    assert(kMenu[2].sub && kMenu[2].modes.size() == 2 && &kMenu[2].modes[0] == &kModes[8] && kModes[8].lst && kModes[8].undo && kModes[8].goalLines == 0);
     assert(kMenu[3].sub && kMenu[3].modes.size() == 3 && &kMenu[3].modes[0] == &kModes[4] && kMenu[3].modes[1].pcStyle == PcStyle::Practice && kMenu[3].modes[2].pcStyle == PcStyle::Count);
     assert(kMenu[4].mode(0)->versus && !kMenu[5].sub && !kMenu[5].mode(0));
 }
@@ -891,6 +891,59 @@ void testFumenDrill() {
     quiet.place(0, 4);
     quiet.play.stepShown(quiet.now);
     assert(allocations == before);
+}
+
+// Setup drills: the row under Setups, and a file as tools/four_lol_drills.py writes it, with
+// targets as cells. Made up here, since four.lol's setups aren't in the repo.
+void testSetupDrills() {
+    const Mode& mode = kModes[9];
+    assert(mode.drills && mode.undo && kMenu[2].modes.size() == 2 && &kMenu[2].modes[1] == &mode);
+
+    auto cells = [](core::Piece piece, int x) {
+        core::Falling placed;
+        placed.piece = piece;
+        placed.x = x;
+        placed.y = 1;
+        std::string out = "[";
+        for (const core::Cell& cell : placed.cells()) out += (out.size() > 1 ? ", [" : "[") + std::to_string(cell.x) + ", " + std::to_string(cell.y) + "]";
+        return out + "]";
+    };
+    auto dir = std::filesystem::temp_directory_path() / "stacklab_setup_drills";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "00.json") << R"({"name": "Sample", "blurb": "3 pieces", "board": [], "queue": {"type": "fixed", "pieces": "IOJ"}, "targets": [)"
+                                   << R"({"piece": "I", "cells": )" << cells(core::Piece::I, 0) << R"(}, {"piece": "O", "cells": )" << cells(core::Piece::O, 4)
+                                   << R"(}, {"piece": "J", "cells": )" << cells(core::Piece::J, 6) << "}]}";
+    std::ofstream(dir / "01.json") << R"({"name": "Bad", "queue": {"type": "fixed", "pieces": "I"}, "targets": [{"piece": "I", "cells": [[0, 0], [1, 0], [2, 0]]}]})";
+    const std::filesystem::path folders[] = {dir};
+    const DrillSet set = loadDrills(folders);
+    std::filesystem::remove_all(dir);
+    assert(set.drills.size() == 1 && set.errors.size() == 1 && set.drills[0].name == "Sample");
+    const Drill& drill = set.drills[0];
+
+    // Built as shown: the run ends, and playing it doesn't allocate.
+    DrillPlayer p;
+    p.play.mode = &mode;
+    p.play.drill = &drill;
+    p.play.restart({}, 1, p.now);
+    p.start();
+    const size_t before = allocations;
+    p.place(0, 0);
+    p.place(0, 4);
+    p.play.stepShown(p.now);
+    p.place(0, 6);
+    assert(allocations == before);
+    assert(p.play.over && !p.play.missed && p.play.filled == 7);
+
+    // A piece off its target pauses on the miss.
+    DrillPlayer miss;
+    miss.play.mode = &mode;
+    miss.play.drill = &drill;
+    miss.play.restart({}, 1, miss.now);
+    miss.start();
+    miss.place(0, 0);
+    miss.place(0, 0);
+    assert(miss.play.missed && !miss.play.over && miss.play.filled == 1);
 }
 
 void testFinesseInPlay() {
@@ -2009,6 +2062,7 @@ int main() {
     testDrillFiles();
     testDrillRun();
     testFumenDrill();
+    testSetupDrills();
     testFinesseInPlay();
     testPlayDoesNotAllocate(kModes[0]);
     const Mode withUndo = {.name = "Undo", .blurb = "", .rules = {}, .undo = true};

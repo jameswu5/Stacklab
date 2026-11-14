@@ -77,3 +77,9 @@ by davdav1233 and cosin307, with the setups' chances from knewjade's solution-fi
 four.lol credits them. © 2018-2022 davdav1233 and cosin307. All Rights Reserved. They're used
 privately, with credit, and aren't in this repository: `tools/four_lol_setups.py` trims a local
 copy into the gitignored `data/four-lol/`, and the app says "No setups file" without it.
+
+Setup drills use four.lol's opener pages ([Black Tea Cannon](https://four.lol/openers/black-tea-cannon),
+[TKI](https://four.lol/openers/tki), [New DT Cannon](https://four.lol/openers/new-dt-cannon),
+[MKO](https://four.lol/openers/mko), [Albatross](https://four.lol/openers/albatross)) and its
+[DPC](https://four.lol/perfect-clears/dpc) setups, likewise used privately with credit:
+`tools/four_lol_drills.py` turns a local copy into the gitignored `data/four-lol/drills/`.

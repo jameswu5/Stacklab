@@ -34,6 +34,7 @@ struct Mode {
     PcStyle pcStyle = PcStyle::Coach;
     bool versus = false;  // you against the bot, first to kVersusRounds rounds
     bool lst = false;     // the LST coach (app/lst_coach.h)
+    bool drills = false;  // plays the setup drill picked with left and right, from data/four-lol/drills
 
     int goalProgress(const core::Stats& stats) const { return garbageRows > 0 ? stats.garbageCleared : stats.lines; }
 };
@@ -113,6 +114,11 @@ inline const Mode kModes[] = {
      .rules = k40LRules,
      .undo = true,
      .lst = true},
+    {.name = "Setup drills",
+     .blurb = "Build four.lol's openers and DPC setups from a fixed queue",
+     .stats = StatPieces | StatPPS | StatKPP | StatFinesse,
+     .undo = true,
+     .drills = true},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));
 
@@ -132,7 +138,7 @@ struct MenuRow {
 inline const MenuRow kMenu[] = {
     {nullptr, nullptr, {kModes, 1}},
     {"Dig", nullptr, {kModes + 1, 3}},
-    {"Setups", "Openers and stacking setups to learn", {kModes + 8, 1}, true},
+    {"Setups", "Openers and stacking setups to learn", {kModes + 8, 2}, true},
     {"Perfect Clear", "A coach, practice from a bag residue, and bag counting", {kModes + 4, 3}, true},
     {nullptr, nullptr, {kModes + 7, 1}},
     {"Settings", "Handling, keys and display", {}},

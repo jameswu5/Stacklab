@@ -493,6 +493,7 @@ void Ui::drawMenu(const MenuView& view) {
         const char* name = menuRow && menuRow->name ? menuRow->name : mode->name;
         const char* blurb = menuRow && menuRow->blurb ? menuRow->blurb : mode->blurb;
         if (mode && mode->versus && view.bot->tr) blurb = "A new League player at this TR each round";
+        if (mode && mode->drills) blurb = view.drill ? view.drill->blurb.c_str() : "No drills folder: see tools/four_lol_drills.py";
         float y = top + 12 + row * rowH;
         if (row == view.selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
         text(FontWord, name, x + 32, y + 30, colors.text);
@@ -512,6 +513,10 @@ void Ui::drawMenu(const MenuView& view) {
         if (mode && mode->pcStyle == PcStyle::Practice) {
             std::snprintf(buffer, sizeof buffer, "< %d >", view.residue);
             setting("RESIDUE", buffer);
+        }
+        if (mode && mode->drills && view.drill) {
+            std::snprintf(buffer, sizeof buffer, "< %s >", view.drill->name.c_str());
+            setting("SETUP", buffer);
         }
         if (mode && mode->versus) {
             char label[32];
