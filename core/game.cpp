@@ -207,6 +207,20 @@ void Game::fillGarbage(int rows) {
     }
 }
 
+// Pushes the board up, and each new row's hole is away from the hole of the row above.
+void Game::raiseCheese(int rows) {
+    cheeseLeft -= rows;
+    std::copy_backward(board.cells.begin(), board.cells.end() - rows * kBoardWidth, board.cells.end());
+    for (int y = rows - 1; y >= 0; y--) {
+        const Piece* above = &board.at(0, y + 1);
+        const bool garbage = std::find(above, above + kBoardWidth, Piece::Garbage) != above + kBoardWidth;
+        const int aboveHole = static_cast<int>(std::find(above, above + kBoardWidth, Piece::None) - above);
+        int hole = static_cast<int>(std::floor(garbageRng_.nextFloat() * (garbage ? kBoardWidth - 1 : kBoardWidth)));
+        if (garbage && hole >= aboveHole) hole++;
+        for (int x = 0; x < kBoardWidth; x++) board.at(x, y) = x == hole ? Piece::None : Piece::Garbage;
+    }
+}
+
 void Game::respawn(Piece piece) {
     toppedOut = false;
     spawn(piece, true);
@@ -613,6 +627,7 @@ void Game::lock(bool hard) {
     } else {
         tankGarbage(hard);
     }
+    if (garbageCleared > 0 && cheeseLeft > 0) raiseCheese(std::min(garbageCleared, cheeseLeft));
 
     int points = kClearScores[static_cast<int>(lastSpin_)][lines];
     // Replays only pin pcB2b with allclear_b2b 1; other values are assumed to behave the same.

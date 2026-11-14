@@ -1,4 +1,5 @@
 // Self-checks for input timing, saved settings and the 40L run.
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <chrono>
@@ -355,40 +356,6 @@ void testPlayRun() {
     std::filesystem::remove(path);
 }
 
-void testBlitzEnd() {
-    std::string path = (std::filesystem::temp_directory_path() / "stacklab_best_blitz.json").string();
-    std::filesystem::remove(path);
-    const Mode row = {.name = "Timed", .blurb = "", .rules = {}, .bestFile = "", .timeLimitSeconds = 2};
-    Play play;
-    play.mode = &row;
-    play.bestPath = path;
-    play.restart({}, 1, 0);
-    play.stepTo(kTickNs * 119);
-    assert(!play.over);
-    play.game.stats.score = 500;
-    play.stepTo(kTickNs * 120);
-    assert(play.over && play.seconds() == 2);
-    assert(play.best == 500 && loadBest(path) == 500);
-
-    // The best is the highest score, not the lowest.
-    play.restart({}, 1, 0);
-    play.game.stats.score = 400;
-    play.stepTo(kTickNs * 120);
-    assert(play.over && play.best == 500 && loadBest(path) == 500);
-    play.restart({}, 1, 0);
-    play.game.stats.score = 600;
-    play.stepTo(kTickNs * 120);
-    assert(play.best == 600 && loadBest(path) == 600);
-
-    // Topping out isn't a finished run.
-    play.restart({}, 1, 0);
-    play.game.stats.score = 700;
-    play.game.toppedOut = true;
-    play.stepTo(kTickNs * 200);
-    assert(play.over && play.best == 600);
-    std::filesystem::remove(path);
-}
-
 void testDigGoal() {
     std::string path = (std::filesystem::temp_directory_path() / "stacklab_best_dig.json").string();
     std::filesystem::remove(path);
@@ -411,45 +378,18 @@ void testDigGoal() {
     std::filesystem::remove(path);
 }
 
-void testSandbox() {
-    const Mode row = {.name = "Sandbox", .blurb = "", .rules = {}, .editable = true};
-    Play play;
-    play.mode = &row;
-    play.restart({}, 1, 0);
-    play.stepTo(kTickNs * 1000);
-    assert(!play.over);
-
-    // Painting stops at the falling piece, and the next tick sees the rest.
-    const core::Cell inside = play.game.falling.cells()[0];
-    play.paint(inside.x, inside.y, core::Piece::Garbage);
-    assert(play.game.board.at(inside.x, inside.y) == core::Piece::None);
-    play.paint(0, 0, core::Piece::Garbage);
-    play.stepShown(kTickNs * 1000);
-    assert(play.shown.board.at(0, 0) == core::Piece::Garbage);
-    play.paint(0, 0, core::Piece::None);
-    assert(play.game.board.at(0, 0) == core::Piece::None);
-
-    // The queue cycles through the seven pieces, and hold through no piece as well.
-    const core::Piece first = play.game.queue[0];
-    for (int i = 0; i < 7; i++) {
-        play.cycleQueue(0);
-        assert(play.game.queue[0] != core::Piece::None && play.game.queue[0] != core::Piece::Garbage);
+// The top menu's rows, and the sub-menus' modes.
+void testMenu() {
+    const char* names[] = {"40 Lines", "Dig", "Setups", "Perfect Clear", "Versus", "Settings"};
+    assert(kMenuCount == 6);
+    for (int row = 0; row < kMenuCount; row++) {
+        const Mode* mode = kMenu[row].mode(0);
+        assert(std::string(kMenu[row].name ? kMenu[row].name : mode->name) == names[row]);
     }
-    assert(play.game.queue[0] == first);
-    assert(play.game.hold == core::Piece::None);
-    play.cycleHold();
-    assert(play.game.hold == core::Piece::I);
-    for (int i = 0; i < 7; i++) play.cycleHold();
-    assert(play.game.hold == core::Piece::None);
-
-    // Topping out clears the board and carries on, without allocating.
-    for (int x = 3; x < 7; x++) play.game.board.at(x, 21) = core::Piece::Garbage;
-    play.key(BindHardDrop, true, kTickNs * 1000 + 1);
-    size_t before = allocations;
-    play.stepTo(kTickNs * 1002);
-    assert(allocations == before);
-    assert(play.game.stats.pieces > 0 && !play.over && !play.game.toppedOut);
-    assert(play.game.board.at(3, 21) == core::Piece::None);
+    assert(kMenu[1].modes.size() == 3 && kMenu[1].mode(2) == &kModes[3] && kModes[3].goalLines == 100);
+    assert(kMenu[2].sub && kMenu[2].modes.empty() && !kMenu[2].mode(0));
+    assert(kMenu[3].sub && kMenu[3].modes.size() == 3 && &kMenu[3].modes[0] == &kModes[4] && kMenu[3].modes[1].pcStyle == PcStyle::Practice && kMenu[3].modes[2].pcStyle == PcStyle::Count);
+    assert(kMenu[4].mode(0)->versus && !kMenu[5].sub && !kMenu[5].mode(0));
 }
 
 void testUndo() {
@@ -587,7 +527,7 @@ void testDrillFiles() {
     assert(rejected(R"({"name": "no pieces", "board": "v115@9gI8AeI8AeI8AeI8KeAgH"})"));
 
     // The bundled files, and a bad next is reported without losing the drill.
-    const std::filesystem::path bundled[] = {"data/drills"};
+    const std::filesystem::path bundled[] = {"tests/fixtures/drills"};
     const DrillSet set = loadDrills(bundled);
     assert(set.errors.empty());
     assert(set.drills.size() == 2);
@@ -627,9 +567,58 @@ struct DrillPlayer {
     }
 };
 
+// Garbage rows from the floor up, and the hole in row y.
+int garbageHeight(const core::Board& board) {
+    int y = 0;
+    while (std::count(&board.at(0, y), &board.at(0, y) + core::kBoardWidth, core::Piece::Garbage) > 0) y++;
+    return y;
+}
+int holeAt(const core::Board& board, int y) { return static_cast<int>(std::find(&board.at(0, y), &board.at(0, y) + core::kBoardWidth, core::Piece::None) - &board.at(0, y)); }
+
+// Dig 10 starts as it always has, and 18 is a cheese race: 10 rows on the board, then one
+// rising from the floor for each garbage line cleared until 18 have been placed.
+void testDigRace() {
+    const Mode& ten = kModes[1];
+    const Mode& eighteen = kModes[2];
+    assert(std::string(ten.name) == "Dig 10" && std::string(eighteen.name) == "Dig 18" && std::string(kModes[3].name) == "Dig 100");
+    Play play;
+    play.mode = &ten;
+    play.restart({}, 5, 0);
+    core::Game plain(ten.rules, {}, 5);
+    plain.fillGarbage(10);
+    assert(play.game.board.cells == plain.board.cells && play.game.cheeseLeft == 0);
+
+    // Each tap clears the bottom row, with its hole filled by hand and the rest of the board left as garbage.
+    auto race = [&](uint32_t seed) {
+        DrillPlayer p;
+        p.play.mode = &eighteen;
+        p.play.restart({}, seed, p.now);
+        p.start();
+        std::vector<core::Board> boards;
+        while (!p.play.over) {
+            core::Board& board = p.play.game.board;
+            const int height = garbageHeight(board);
+            assert(height == std::min(10, 18 - p.play.game.stats.garbageCleared));
+            for (int y = 0; y + 1 < height; y++) assert(holeAt(board, y) != holeAt(board, y + 1));
+            boards.push_back(board);
+            for (core::Piece& cell : board.cells)
+                if (cell != core::Piece::Garbage) cell = core::Piece::None;
+            board.at(holeAt(board, 0), 0) = core::Piece::Garbage;
+            p.play.finesse.restart(p.play.game);
+            p.tap(BindHardDrop);
+        }
+        assert(p.play.game.stats.garbageCleared == 18 && garbageHeight(p.play.game.board) == 0 && boards.size() == 18);
+        return boards;
+    };
+    auto same = [](const std::vector<core::Board>& a, const std::vector<core::Board>& b) {
+        return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](const core::Board& x, const core::Board& y) { return x.cells == y.cells; });
+    };
+    assert(same(race(9), race(9)) && !same(race(9), race(10)));
+}
+
 void testDrillRun() {
-    const Mode row = {.name = "Drills", .blurb = "", .rules = {}, .undo = true, .drills = true};
-    const std::filesystem::path bundled[] = {"data/drills"};
+    const Mode row = {.name = "Drills", .blurb = "", .rules = {}, .undo = true};
+    const std::filesystem::path bundled[] = {"tests/fixtures/drills"};
     const DrillSet set = loadDrills(bundled);
 
     // The bundled chain, by real inputs: the first in another order, then on to the next.
@@ -791,7 +780,7 @@ void testDrillRun() {
 constexpr const char* kFumenDrill = R"({"name": "Imported", "board": "v115@9gI8AeI8AeI8AeI8Kex6IvhBT3IK4I"})";
 
 void testFumenDrill() {
-    const Mode row = {.name = "Drills", .blurb = "", .rules = {}, .undo = true, .drills = true};
+    const Mode row = {.name = "Drills", .blurb = "", .rules = {}, .undo = true};
 
     auto dir = std::filesystem::temp_directory_path() / "stacklab_fumen_drills";
     std::filesystem::remove_all(dir);
@@ -933,49 +922,9 @@ void testFinesseInPlay() {
     p.play.key(BindSoftDrop, false, p.now + 1);
     p.tap(BindHardDrop);
     assert(p.play.finesse.judged && p.play.finesse.judged->presses == 0 && p.play.faults.total == 0);
-
-    // A hidden mode judges nothing.
-    const Mode levels = {.name = "Levels", .blurb = "", .rules = {.levels = true}};
-    DrillPlayer hidden;
-    hidden.play.mode = &levels;
-    hidden.play.restart({}, 1, hidden.now);
-    hidden.start();
-    hidden.tap(BindLeft);
-    hidden.tap(BindRight);
-    hidden.tap(BindHardDrop);
-    assert(hidden.play.game.stats.pieces == 1);
-    assert(!hidden.play.finesse.judged && hidden.play.faults.total == 0 && hidden.play.faults.last == 0);
-    for (const Mode& mode : kModes)
-        if (mode.rules.levels) assert(!(mode.stats & StatFinesse));
-
-    // A Sandbox edit starts the piece's count over against the new board, which is
-    // judged as it now stands. Editing the queue or hold doesn't touch this piece.
-    const Mode sandbox = {.name = "Sandbox", .blurb = "", .rules = {}, .editable = true};
-    DrillPlayer edit;
-    edit.play.mode = &sandbox;
-    edit.play.restart({}, 1, edit.now);
-    edit.start();
-    edit.tap(BindLeft);
-    edit.play.paint(0, 0, core::Piece::Garbage);
-    edit.play.cycleQueue(0);
-    edit.play.cycleHold();
-    edit.tap(BindHardDrop);
-    assert(edit.play.finesse.judged && edit.play.finesse.judged->presses == 0);
-    assert(edit.play.game.board.at(0, 0) == core::Piece::Garbage);
-
-    // Topping out in Sandbox clears the board, and the next piece is judged on it.
-    bool cleared = false;
-    for (int i = 0; i < 60 && !cleared; i++) {
-        edit.tap(BindHardDrop);
-        cleared = edit.play.game.board.cells == core::Board{}.cells;
-    }
-    assert(cleared);
-    edit.tap(BindLeft);
-    edit.tap(BindHardDrop);
-    assert(edit.play.finesse.judged && edit.play.finesse.judged->presses == 1 && edit.play.finesse.judged->faults == 0);
 }
 
-const Mode& kCoachMode = kModes[6];
+const Mode& kCoachMode = kModes[4];
 
 // Plays a solver's steps through Play as real key presses, as tests/move_driver.h does in core.
 struct CoachPlayer {
@@ -1325,7 +1274,7 @@ void testPcCoachRun() {
 
 // Practice starts mid-bag, with everything the solver is told agreeing with a real run's.
 void testPcPractice() {
-    const Mode& practice = kModes[7];
+    const Mode& practice = kModes[5];
     assert(practice.pcStyle == PcStyle::Practice && practice.undo && practice.goalLines == 0);
     CoachPlayer p;
     p.play.mode = &practice;
@@ -1453,7 +1402,7 @@ void testPcSetups() {
 
     // In PC practice, a setup of n pieces fits when they're among the attempt's first n + 1.
     CoachPlayer p;
-    p.play.mode = &kModes[7];
+    p.play.mode = &kModes[5];
     p.play.residue = 0;
     p.play.restart({}, 1, p.now);
     const core::Game& game = p.play.game;
@@ -1488,7 +1437,7 @@ void testPcSetups() {
 
 // Bag count has no solver and hides the residue until asked, and the badge ends a run early.
 void testBagCount() {
-    const Mode& count = kModes[8];
+    const Mode& count = kModes[6];
     assert(count.pcStyle == PcStyle::Count && !count.undo && count.goalLines == 40);
     CoachPlayer p;
     p.play.mode = &count;
@@ -1809,8 +1758,8 @@ void testBotPresets() {
 
 void testReplayRoundTrip() {
     const std::string path = (std::filesystem::temp_directory_path() / "stacklab-replay-test.json").string();
-    for (const Mode* mode : {&kModes[0], &kModes[7]}) {
-        assert(mode->pcStyle == (mode == &kModes[0] ? PcStyle::Coach : PcStyle::Practice));
+    for (const Mode* mode : {&kModes[0], &kModes[5], &kModes[2]}) {
+        assert(mode->pcStyle == (mode == &kModes[5] ? PcStyle::Practice : PcStyle::Coach));
         Play play;
         play.mode = mode;
         play.residue = 3;
@@ -1852,12 +1801,26 @@ void testReplayRoundTrip() {
         assert(again.game.stats.pieces == play.game.stats.pieces && again.game.stats.lines == play.game.stats.lines && again.game.stats.keys == play.game.stats.keys && again.game.stats.score == play.game.stats.score && again.game.stats.attack == play.game.stats.attack);
         std::printf("replay of %s: %llu frames, %d pieces, %zu inputs, the same\n", mode->name, static_cast<unsigned long long>(play.game.frame), play.game.stats.pieces, play.recording.inputs.size());
     }
+
+    // Dig 18 from before it refilled doesn't load, and Dig 10, which still starts the same, does.
+    for (const char* mode : {"Dig 10", "Dig 18"}) {
+        Replay old;
+        old.mode = mode;
+        saveReplay(old, path);
+        std::string text;
+        std::getline(std::ifstream(path), text, '\0');
+        const size_t version = text.find("\"version\":2");
+        assert(version != std::string::npos);
+        text[version + 10] = '1';
+        std::ofstream(path) << text;
+        assert(loadReplay(path, old) == (old.mode == "Dig 10"));
+    }
     std::filesystem::remove(path);
     assert(!loadReplay(path, *std::make_unique<Replay>()));
 
     Play undone;
-    assert(kModes[6].undo);
-    undone.mode = &kModes[6];
+    assert(kModes[4].undo);
+    undone.mode = &kModes[4];
     undone.restart(core::Handling{}, 1, 0);
     undone.key(BindHardDrop, true, 0);
     undone.stepTo(2 * kTickNs);
@@ -1874,9 +1837,9 @@ int main() {
     testCountdown();
     testFirstPiece();
     testPlayRun();
-    testBlitzEnd();
     testDigGoal();
-    testSandbox();
+    testDigRace();
+    testMenu();
     testUndo();
     testNoGarbageRowsKeepsRng();
     testDrillFiles();
@@ -1886,15 +1849,14 @@ int main() {
     testPlayDoesNotAllocate(kModes[0]);
     const Mode withUndo = {.name = "Undo", .blurb = "", .rules = {}, .undo = true};
     testPlayDoesNotAllocate(withUndo);
-    const Mode withEdits = {.name = "Sandbox", .blurb = "", .rules = {}, .editable = true};
-    testPlayDoesNotAllocate(withEdits);
     testPcCoachRules();
     testPcCoachRun();
     testPcPractice();
     testPcSetups();
     testBagCount();
     testBotPresets();  // first of the versus tests, which index the presets
-    testPlayDoesNotAllocate(kModes[6]);
+    testPlayDoesNotAllocate(kModes[4]);
+    testPlayDoesNotAllocate(kModes[3]);
     testVersusRound();
     testReplayRoundTrip();
     testVersusOptions();

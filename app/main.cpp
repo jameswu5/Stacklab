@@ -8,7 +8,6 @@
 #include <cctype>
 #include <ctime>
 #include <cstdio>
-#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -20,7 +19,7 @@ namespace {
 
 constexpr uint64_t kUncappedFrameNs = 1'000'000'000 / 480;  // with VSync off, how often to poll and draw
 
-enum class Screen { Menu, Drills, Play, Settings };
+enum class Screen { Menu, Play, Settings };
 
 struct App {
     Settings settings;
@@ -30,10 +29,9 @@ struct App {
     Play play;
 
     Screen screen = Screen::Menu;
-    int menuRow = 0;  // a mode, or Settings after the last one
-    DrillSet drillSet;
-    std::string drillError;  // what couldn't be loaded, or empty
-    int drillRow = 0;
+    const MenuRow* sub = nullptr;  // the sub-menu open, or null for the top menu
+    int topRow = 0, subRow = 0;    // into kMenu, and into the sub-menu's modes
+    int dig = 0;                   // Dig's line count, into its row's modes
     std::array<double, kModeCount> bests{};
     std::vector<RunResult> history;  // this session's ended runs; a retried run didn't end
     int selected = 0;
@@ -69,22 +67,11 @@ void restart(App& app, uint64_t timeNs) {
     app.play.restart(app.settings.profile().handling, static_cast<uint32_t>(SDL_GetPerformanceCounter()), timeNs + kCountdownNs);
 }
 
-bool editing(const App& app) { return app.screen == Screen::Play && app.play.mode->editable; }
-
-// The left button paints garbage, and any other erases.
-void paintAt(App& app, const Ui& ui, float x, float y, SDL_MouseButtonFlags buttons) {
-    int cellX, cellY;
-    if (buttons == 0 || !ui.boardCellAt(x, y, cellX, cellY)) return;
-    app.play.paint(cellX, cellY, buttons & SDL_BUTTON_LMASK ? core::Piece::Garbage : core::Piece::None);
-}
-
-void startRun(App& app, const Drill* drill, uint64_t timeNs) {
-    const Mode& mode = kModes[app.menuRow];
+void startRun(App& app, const Mode& mode, uint64_t timeNs) {
     app.play.mode = &mode;
-    app.play.drill = drill;
     app.play.bestPath = mode.bestFile ? app.prefPath + mode.bestFile : "";
-    app.play.best = app.bests[app.menuRow];
-    app.hasBestReplay = mode.bestFile && std::filesystem::exists(bestReplayPath(app.play.bestPath));
+    app.play.best = app.bests[&mode - kModes];
+    app.hasBestReplay = mode.bestFile && loadReplay(bestReplayPath(app.play.bestPath), app.replay);  // one too old to play back isn't offered
     app.screen = Screen::Play;
     restart(app, timeNs);
     if (mode.pcFile) {
@@ -97,51 +84,42 @@ void startRun(App& app, const Drill* drill, uint64_t timeNs) {
     }
 }
 
+// Up and down choose a row, left and right a row's setting, Enter opens it, and Esc leaves a sub-menu.
 void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
     if (!key.down) return;
-    int rows = kModeCount + 1;
+    int& row = app.sub ? app.subRow : app.topRow;
+    const int rows = app.sub ? static_cast<int>(app.sub->modes.size()) : kMenuCount;
+    const Mode* mode = app.sub ? (rows > 0 ? &app.sub->modes[row] : nullptr) : kMenu[row].mode(app.dig);
+    const int step = key.scancode == SDL_SCANCODE_LEFT ? -1 : 1;
     switch (key.scancode) {
-        case SDL_SCANCODE_UP: app.menuRow = (app.menuRow + rows - 1) % rows; break;
-        case SDL_SCANCODE_DOWN: app.menuRow = (app.menuRow + 1) % rows; break;
+        case SDL_SCANCODE_UP: if (rows > 0) row = (row + rows - 1) % rows; break;
+        case SDL_SCANCODE_DOWN: if (rows > 0) row = (row + 1) % rows; break;
         case SDL_SCANCODE_LEFT:
         case SDL_SCANCODE_RIGHT:
-            if (app.menuRow < kModeCount && kModes[app.menuRow].pcStyle == PcStyle::Practice) app.play.residue = (app.play.residue + (key.scancode == SDL_SCANCODE_LEFT ? 6 : 1)) % 7;
-            if (app.menuRow < kModeCount && kModes[app.menuRow].versus) {
+            if (!app.sub && !kMenu[row].sub && kMenu[row].modes.size() > 1) {
+                const int count = static_cast<int>(kMenu[row].modes.size());
+                app.dig = (app.dig + count + step) % count;
+            }
+            if (mode && mode->pcStyle == PcStyle::Practice) app.play.residue = (app.play.residue + 7 + step) % 7;
+            if (mode && mode->versus) {
                 const int count = static_cast<int>(app.presets.size());
-                app.play.botPreset = (app.play.botPreset + (key.scancode == SDL_SCANCODE_LEFT ? count - 1 : 1)) % count;
+                app.play.botPreset = (app.play.botPreset + count + step) % count;
                 app.settings.botPreset = app.presets[app.play.botPreset].name;
             }
             break;
         case SDL_SCANCODE_RETURN:
             if (key.repeat) break;
-            if (app.menuRow == kModeCount) {
+            if (mode) {
+                startRun(app, *mode, key.timestamp);
+            } else if (!app.sub && kMenu[row].sub) {
+                app.sub = &kMenu[row];
+                app.subRow = 0;
+            } else if (!app.sub) {
                 app.screen = Screen::Settings;
-            } else if (kModes[app.menuRow].drills) {
-                app.screen = Screen::Drills;
-            } else {
-                startRun(app, nullptr, key.timestamp);
             }
             break;
-        default: break;
-    }
-}
-
-void handleDrillsKey(App& app, const SDL_KeyboardEvent& key) {
-    if (!key.down) return;
-    const auto& drills = app.drillSet.drills;
-    int rows = static_cast<int>(drills.size());
-    switch (key.scancode) {
-        case SDL_SCANCODE_UP:
-            if (rows > 0) app.drillRow = (app.drillRow + rows - 1) % rows;
-            break;
-        case SDL_SCANCODE_DOWN:
-            if (rows > 0) app.drillRow = (app.drillRow + 1) % rows;
-            break;
-        case SDL_SCANCODE_RETURN:
-            if (!key.repeat && rows > 0) startRun(app, &drills[app.drillRow], key.timestamp);
-            break;
         case SDL_SCANCODE_ESCAPE:
-            if (!key.repeat) app.screen = Screen::Menu;
+            if (!key.repeat) app.sub = nullptr;
             break;
         default: break;
     }
@@ -167,7 +145,7 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
         if (key.down) restart(app, key.timestamp);
     } else if (bind == BindMenu) {
         if (key.down) {
-            app.screen = app.play.drill ? Screen::Drills : Screen::Menu;
+            app.screen = Screen::Menu;  // the menu the run was started from
             app.play.held.fill(0);
             if (app.play.mode->pcFile) app.play.coach->save();
         }
@@ -243,7 +221,7 @@ void recordRun(App& app) {
         if (play.mode->versus) app.playbackHistory.back().rounds = play.versus->match.wins;
         return;
     }
-    double& best = app.bests[app.menuRow];
+    double& best = app.bests[play.mode - kModes];
     app.history.push_back({play.mode, play.endSeconds, play.game.stats, play.game.toppedOut, play.best != best});
     if (play.mode->versus) app.history.back().rounds = play.versus->match.wins;
     if (play.best != best && play.replayable()) app.hasBestReplay = true;
@@ -267,9 +245,7 @@ void drawFrame(App& app, Ui& ui) {
     ui.dark = app.settings.dark;
     ui.beginFrame();
     if (app.screen == Screen::Menu) {
-        ui.drawMenu(app.menuRow, app.bests, app.play.residue, app.presets[app.play.botPreset]);
-    } else if (app.screen == Screen::Drills) {
-        ui.drawDrills(app.drillRow, app.drillSet.drills, app.drillError.empty() ? nullptr : app.drillError.c_str());
+        ui.drawMenu({app.sub, app.sub ? app.subRow : app.topRow, app.dig, app.bests, app.play.residue, &app.presets[app.play.botPreset]});
     } else if (app.screen == Screen::Settings) {
         ui.drawSettings(app.settings, app.selected, app.capturing);
     } else {
@@ -292,7 +268,7 @@ void drawFrame(App& app, Ui& ui) {
                 pcView = play.coach->view(play.shown, play.mode->goalLines, play.over);
                 pc = &pcView;
             }
-            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, play.playback ? app.playbackHistory : app.history, play.drill, play.filled, play.mode->rules.levels ? nullptr : &play.faults, pc, play.playback != nullptr});
+            ui.drawPlay({play.mode, &play.shown, play.seconds(), play.over, banner, hint.c_str(), play.best, play.playback ? app.playbackHistory : app.history, play.drill, play.filled, &play.faults, pc, play.playback != nullptr});
         }
     }
     if (app.settings.overlay) {
@@ -332,15 +308,6 @@ int main(int, char**) {
     applyBinds(app);
     applyPresentMode(app);
 
-    // The bundled drills, and any the owner adds under the pref path.
-    const std::filesystem::path drillDirs[] = {std::filesystem::path(SDL_GetBasePath()) / "data/drills", std::filesystem::path(app.prefPath) / "drills"};
-    app.drillSet = loadDrills(drillDirs);
-    for (const std::string& error : app.drillSet.errors) SDL_Log("Drill: %s", error.c_str());
-    if (!app.drillSet.errors.empty()) {
-        app.drillError = app.drillSet.errors[0].substr(0, 100);
-        if (app.drillSet.errors.size() > 1) app.drillError += " (+" + std::to_string(app.drillSet.errors.size() - 1) + " more)";
-    }
-
     Ui ui(app.renderer, std::string(SDL_GetBasePath()) + "assets/fonts/");
     uint64_t frameStart = SDL_GetTicksNS(), worstWindowStart = frameStart;
 
@@ -353,23 +320,12 @@ int main(int, char**) {
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP:
                     if (app.screen == Screen::Menu) handleMenuKey(app, event.key);
-                    else if (app.screen == Screen::Drills) handleDrillsKey(app, event.key);
                     else if (app.screen == Screen::Settings) handleSettingsKey(app, event.key);
                     else handlePlayKey(app, event.key);
                     break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                     SDL_ConvertEventToRenderCoordinates(app.renderer, &event);
                     if (ui.toggleHit(event.button.x, event.button.y)) app.settings.dark = !app.settings.dark;
-                    if (editing(app)) {
-                        int slot = ui.queueSlotAt(event.button.x, event.button.y);
-                        if (slot >= 0) app.play.cycleQueue(slot);
-                        if (ui.holdHit(event.button.x, event.button.y)) app.play.cycleHold();
-                        paintAt(app, ui, event.button.x, event.button.y, SDL_BUTTON_MASK(event.button.button));
-                    }
-                    break;
-                case SDL_EVENT_MOUSE_MOTION:
-                    SDL_ConvertEventToRenderCoordinates(app.renderer, &event);
-                    if (editing(app)) paintAt(app, ui, event.motion.x, event.motion.y, event.motion.state);
                     break;
                 default: break;
             }

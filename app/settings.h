@@ -60,10 +60,9 @@ void saveSettings(const Settings& settings, const std::string& path);
 // Binds the key to this action only, and clears it from any other.
 void bindKey(Profile& profile, Bind bind, SDL_Scancode key);
 
-// A mode's personal best, in seconds or as a score, 0 if there is none.
+// A mode's personal best in seconds, 0 if there is none.
 double loadBest(const std::string& path);
 void saveBest(double seconds, const std::string& path);
-void saveBestScore(int score, const std::string& path);
 
 // The PC coach's attempts and successes, by bag phase.
 struct PcTally {

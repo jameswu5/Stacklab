@@ -207,6 +207,10 @@ struct Game {
     // so the rows stay clear of the spawn.
     void fillGarbage(int rows);
 
+    // The trainer's cheese race, not TETR.IO's garbage: rows still to rise from the floor,
+    // one for each garbage line a lock clears, with fillGarbage's rule for holes.
+    int cheeseLeft = 0;
+
     // Puts `piece` at the spawn after outside edits to the board, queue or hold,
     // leaving holdUsed alone. Tops out again if the spawn is still blocked.
     void respawn(Piece piece);
@@ -258,6 +262,7 @@ private:
     int cancelGarbage(int amount);
     void tankGarbage(bool hard);
     void rerollColumn();
+    void raiseCheese(int rows);
     void gainLevels(int lines);
     int roundAttack(double amount);
     void dcd();

@@ -51,9 +51,9 @@ struct Play {
     double endSeconds = 0;  // the clock once the run is over
 
     std::string bestPath;
-    double best = 0;  // the mode's personal best in seconds, or its score if it's timed; 0 if there is none
+    double best = 0;  // the mode's personal best in seconds, 0 if there is none
 
-    const Drill* drill = nullptr;  // the one being played, if the mode has drills
+    const Drill* drill = nullptr;  // the one being played, or null; no menu row starts one yet
     uint64_t filled = 0;           // a bit per drill target that's been placed
     bool missed = false;           // paused on the missed board, until retry or undo
 
@@ -89,8 +89,8 @@ struct Play {
     void begin();                                       // ends the countdown
     // Plays a replay of this mode through the same path, with keys ignored. It saves nothing.
     void startPlayback(const Replay& replay, uint64_t runStartNs);
-    // Undo, drill chains and Sandbox's edits aren't in the inputs, so those runs have none.
-    bool replayable() const { return !usedUndo && !recordingFull && !drill && !mode->editable; }
+    // Undo and drill chains aren't in the inputs, so those runs have none.
+    bool replayable() const { return !usedUndo && !recordingFull && !drill; }
     std::span<const core::InputEvent> due() const;      // the inputs for the next tick, from keys or the replay
     void nextRound(uint64_t nowNs);                     // versus: the next round of the same match, after its countdown
     void key(Bind action, bool down, uint64_t timeNs);  // action is one of the first eight
@@ -103,9 +103,4 @@ struct Play {
     // Back to where the last placement started, with the clock too. A key held
     // through this has to be pressed again.
     void undo(uint64_t timeNs);
-
-    // Sandbox edits, on the real game. Painting skips the falling piece's cells, so it can't end up inside one.
-    void paint(int x, int y, core::Piece piece);
-    void cycleQueue(int slot);
-    void cycleHold();
 };

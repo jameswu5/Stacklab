@@ -50,18 +50,10 @@ void formatTime(char (&buffer)[32], double seconds) {
     std::snprintf(buffer, sizeof buffer, "%d:%02d.%02d", hundredths / 6000, hundredths / 100 % 60, hundredths % 100);
 }
 
-// What a mode ranks runs by, in `value`: a score if it's timed, otherwise a time.
-void formatRank(char (&buffer)[32], const Mode& mode, double value) {
-    if (mode.bestIsScore()) std::snprintf(buffer, sizeof buffer, "%d", static_cast<int>(value));
-    else formatTime(buffer, value);
-}
-
-double rankOf(const RunResult& run) { return run.mode->bestIsScore() ? run.stats.score : run.seconds; }
-
 constexpr struct {
     Stat stat;
     const char* name;
-} kStatRows[] = {{StatScore, "Score"}, {StatLevel, "Level"}, {StatGarbage, "Garbage"}, {StatLines, "Lines"}, {StatPieces, "Pieces"}, {StatPPS, "PPS"}, {StatKPP, "KPP"}, {StatAPM, "APM"}, {StatAPP, "APP"}, {StatFinesse, "Finesse"}};
+} kStatRows[] = {{StatGarbage, "Garbage"}, {StatLines, "Lines"}, {StatPieces, "Pieces"}, {StatPPS, "PPS"}, {StatKPP, "KPP"}, {StatAPM, "APM"}, {StatAPP, "APP"}, {StatFinesse, "Finesse"}};
 
 void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double seconds, int goalLines, const ai::FaultStats* faults = nullptr) {
     double perPiece = stats.pieces > 0 ? 1.0 / stats.pieces : 0;
@@ -71,8 +63,6 @@ void formatStat(char (&buffer)[32], Stat stat, const core::Stats& stats, double 
             if (goalLines > 0) std::snprintf(buffer, sizeof buffer, "%d / %d", std::min(stats.lines, goalLines), goalLines);
             else std::snprintf(buffer, sizeof buffer, "%d", stats.lines);
             break;
-        case StatScore: std::snprintf(buffer, sizeof buffer, "%d", stats.score); break;
-        case StatLevel: std::snprintf(buffer, sizeof buffer, "%d", stats.level); break;
         case StatGarbage: std::snprintf(buffer, sizeof buffer, "%d / %d", std::min(stats.garbageCleared, goalLines), goalLines); break;
         case StatPieces: std::snprintf(buffer, sizeof buffer, "%d", stats.pieces); break;
         case StatPPS: std::snprintf(buffer, sizeof buffer, "%.2f", stats.pieces * perSecond); break;
@@ -341,25 +331,6 @@ bool Ui::toggleHit(float x, float y) const {
     return x >= width_ - (kBarSide + kToggleW) * scale_ && x <= width_ - kBarSide * scale_ && y >= 15 * scale_ && y <= (15 + kToggleH) * scale_;
 }
 
-bool Ui::boardCellAt(float x, float y, int& cellX, int& cellY) const {
-    float pointX = (x - originX_) / scale_ - kBoardX, pointY = (y - originY_) / scale_ - kBoardY;
-    if (pointX < 0 || pointY < 0 || pointX >= core::kBoardWidth * kCell || pointY >= core::kVisibleHeight * kCell) return false;
-    cellX = static_cast<int>(pointX / kCell);
-    cellY = core::kVisibleHeight - 1 - static_cast<int>(pointY / kCell);
-    return true;
-}
-
-int Ui::queueSlotAt(float x, float y) const {
-    float pointX = (x - originX_) / scale_ - kRightX, pointY = (y - originY_) / scale_ - (kRowY + 120 - kNextSlot / 2);
-    if (pointX < 0 || pointX >= kColumnW || pointY < 0 || pointY >= 5 * kNextSlot) return -1;
-    return static_cast<int>(pointY / kNextSlot);
-}
-
-bool Ui::holdHit(float x, float y) const {
-    float pointX = (x - originX_) / scale_ - kLeftX, pointY = (y - originY_) / scale_ - kRowY;
-    return pointX >= 0 && pointX < kColumnW && pointY >= 0 && pointY < 127;
-}
-
 void Ui::block(int x, int y, Color color, float alpha) {
     fill(boardX_ + x * cell_ + 1, boardY_ + (core::kVisibleHeight - 1 - y) * cell_ + 1, cell_ - 2, cell_ - 2, color, 7 * cell_ / kCell, alpha);
 }
@@ -433,7 +404,7 @@ void Ui::results(const PlayView& view) {
     const char* title = run.toppedOut ? "Topped out" : run.newBest ? "New best" : view.pc && view.pc->outcome ? view.pc->outcome : "Finished";
     text(FontWord, title, x + width / 2, top + 42, colors.text, Align::Center);
     char buffer[32];
-    formatRank(buffer, *run.mode, rankOf(run));
+    formatTime(buffer, run.seconds);
     text(FontTime, buffer, x + width / 2, top + 94, colors.text, Align::Center, kTimeTracking);
 
     float y = top + 114;
@@ -477,7 +448,7 @@ void Ui::results(const PlayView& view) {
             text(FontSmall, buffer, x + 24 + (phase % 2) * 126, y + 44 + (phase / 2) * 20.0f, colors.text);
         }
     } else {
-        formatRank(buffer, *view.mode, view.best);
+        formatTime(buffer, view.best);
         statRow(x + 24, y, width - 48, "Best", view.best > 0 ? buffer : "-");
     }
     text(FontSmall, view.hint, x + width / 2, top + height - 16, colors.muted, Align::Center);
@@ -494,7 +465,7 @@ void Ui::sessionCard(const PlayView& view) {
         float y = kRowY + 52 + row++ * 38.0f;
         char time[32], value[32], pps[40];
         if (run->newBest) fill(kRightX + 8, y, kColumnW - 16, 38, colors.line, 12);
-        formatRank(time, *run->mode, rankOf(*run));
+        formatTime(time, run->seconds);
         formatStat(value, StatPPS, run->stats, run->seconds, 0);
         std::snprintf(pps, sizeof pps, "%s PPS", value);
         text(FontValue, run->toppedOut ? "Topped out" : time, kRightX + 20, y + 25, run->toppedOut ? colors.muted : colors.text);
@@ -502,62 +473,58 @@ void Ui::sessionCard(const PlayView& view) {
     }
 }
 
-void Ui::drawMenu(int selected, std::span<const double> bests, int residue, const BotPreset& bot) {
+// The top menu or a sub-menu, with a row's setting or best on its right.
+void Ui::drawMenu(const MenuView& view) {
     const Palette& colors = palette();
-    topBar("Menu");
+    topBar(view.sub ? view.sub->name : "Menu");
+    const int count = view.sub ? static_cast<int>(view.sub->modes.size()) : kMenuCount;
     constexpr float width = 560, rowH = 64, x = (1440 - width) / 2;
-    float height = 12 + (kModeCount + 1) * rowH + 44;
+    float height = 12 + std::max(count, 1) * rowH + 44;
     float top = kRowY + (788 - height) / 2;
     fill(x, top, width, height, colors.card, 24);
-    for (int row = 0; row <= kModeCount; row++) {
+    if (count == 0) text(FontRow, "No setups yet", 720, top + 12 + 38, colors.muted, Align::Center);
+    bool picker = false;  // the selected row has a setting
+    for (int row = 0; row < count; row++) {
+        const MenuRow* menuRow = view.sub ? nullptr : &kMenu[row];
+        const Mode* mode = view.sub ? &view.sub->modes[row] : menuRow->mode(view.dig);
+        const char* name = menuRow && menuRow->name ? menuRow->name : mode->name;
+        const char* blurb = menuRow && menuRow->blurb ? menuRow->blurb : mode->blurb;
         float y = top + 12 + row * rowH;
-        if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
-        bool isMode = row < kModeCount;
-        text(FontWord, isMode ? kModes[row].name : "Settings", x + 32, y + 30, colors.text);
-        text(FontRow, isMode ? kModes[row].blurb : "Handling, keys and display", x + 32, y + 54, colors.muted);
-        if (isMode && bests[row] > 0) {
-            char buffer[32];
-            formatRank(buffer, kModes[row], bests[row]);
-            text(FontLabel, "BEST", x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
-            text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
+        if (row == view.selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
+        text(FontWord, name, x + 32, y + 30, colors.text);
+        text(FontRow, blurb, x + 32, y + 54, colors.muted);
+        float right = x + width - 32;
+        char buffer[64];
+        auto setting = [&](const char* label, const char* shown) {
+            text(FontLabel, label, right, y + 27, colors.muted, Align::Right, kLabelTracking);
+            text(FontValue, shown, right, y + 54, colors.text, Align::Right);
+            right -= 120;
+            picker = picker || row == view.selected;
+        };
+        if (menuRow && mode && menuRow->modes.size() > 1) {
+            std::snprintf(buffer, sizeof buffer, "< %d >", mode->goalLines);
+            setting("LINES", buffer);
         }
-        if (isMode && kModes[row].pcStyle == PcStyle::Practice) {
-            char buffer[16];
-            std::snprintf(buffer, sizeof buffer, "< %d >", residue);
-            text(FontLabel, "RESIDUE", x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
-            text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
+        if (mode && mode->pcStyle == PcStyle::Practice) {
+            std::snprintf(buffer, sizeof buffer, "< %d >", view.residue);
+            setting("RESIDUE", buffer);
         }
-        if (isMode && kModes[row].versus) {
-            char buffer[64];
-            std::snprintf(buffer, sizeof buffer, "BOT, %.1f PPS", bot.pps);
-            text(FontLabel, buffer, x + width - 32, y + 27, colors.muted, Align::Right, kLabelTracking);
-            std::snprintf(buffer, sizeof buffer, "< %s >", bot.name.c_str());
-            text(FontValue, buffer, x + width - 32, y + 54, colors.text, Align::Right);
+        if (mode && mode->versus) {
+            char label[32];
+            std::snprintf(label, sizeof label, "BOT, %.1f PPS", view.bot->pps);
+            std::snprintf(buffer, sizeof buffer, "< %s >", view.bot->name.c_str());
+            setting(label, buffer);
+        }
+        if (mode && view.bests[mode - kModes] > 0) {
+            char time[32];
+            formatTime(time, view.bests[mode - kModes]);
+            text(FontLabel, "BEST", right, y + 27, colors.muted, Align::Right, kLabelTracking);
+            text(FontValue, time, right, y + 54, colors.text, Align::Right);
         }
     }
-    const bool practice = selected < kModeCount && kModes[selected].pcStyle == PcStyle::Practice;
-    const bool versus = selected < kModeCount && kModes[selected].versus;
-    text(FontSmall, practice ? "Up and down choose, left and right set the residue, Enter opens" : versus ? "Up and down choose, left and right choose the bot, Enter opens" : "Up and down choose, Enter opens", 720, top + height - 17, colors.muted, Align::Center);
-}
-
-void Ui::drawDrills(int selected, std::span<const Drill> drills, const char* error) {
-    const Palette& colors = palette();
-    topBar("Drills");
-    constexpr float width = 560, rowH = 76, x = (1440 - width) / 2;
-    constexpr int maxRows = 9;
-    const int count = static_cast<int>(drills.size()), rows = std::clamp(count, 1, maxRows);
-    float height = 12 + rows * rowH + 44;
-    float top = kRowY + (788 - height) / 2;
-    fill(x, top, width, height, colors.card, 24);
-    if (drills.empty()) text(FontRow, "No drills found", 720, top + 12 + 44, colors.muted, Align::Center);
-    const int first = std::clamp(selected - maxRows + 1, 0, std::max(count - maxRows, 0));
-    for (int row = first; row < count && row < first + maxRows; row++) {
-        float y = top + 12 + (row - first) * rowH;
-        if (row == selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
-        text(FontWord, drills[row].name.c_str(), x + 32, y + 34, colors.text);
-        text(FontRow, drills[row].blurb.c_str(), x + 32, y + 58, colors.muted);
-    }
-    text(FontSmall, error ? error : "Up and down choose, Enter starts, Esc goes back", 720, top + height - 17, colors.muted, Align::Center);
+    const char* help = picker ? "Up and down choose, left and right set, Enter opens" : "Up and down choose, Enter opens";
+    if (view.sub) help = count == 0 ? "Esc goes back" : picker ? "Up and down choose, left and right set, Enter starts, Esc goes back" : "Up and down choose, Enter starts, Esc goes back";
+    text(FontSmall, help, 720, top + height - 17, colors.muted, Align::Center);
 }
 
 // Word-wrapped, ending in "..." if it doesn't fit in maxLines. Returns the lines drawn.
