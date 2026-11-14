@@ -54,7 +54,7 @@ struct Play {
     std::string bestPath;
     double best = 0;  // the mode's personal best in seconds, 0 if there is none
 
-    const Drill* drill = nullptr;  // the one being played, or null; no menu row starts one yet
+    const Drill* drill = nullptr;  // the one being played, or null; Setup drills starts one
     uint64_t filled = 0;           // a bit per drill target that's been placed
     bool missed = false;           // paused on the missed board, until retry or undo
 

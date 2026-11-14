@@ -41,6 +41,8 @@ struct App {
     bool hasBestReplay = false;  // the mode's best run was saved as a replay
     std::vector<BotPreset> presets;
     std::vector<PcSetup> pcSetups;  // four.lol's, for PC practice; empty without the file
+    DrillSet drills;                // four.lol's openers, for Setup drills; empty without the folder
+    int drillPick = 0;              // into drills.drills
 
     uint64_t frameNs = 0, worstFrameNs = 0;
 };
@@ -73,6 +75,7 @@ void startRun(App& app, const Mode& mode, uint64_t timeNs) {
     app.play.best = app.bests[&mode - kModes];
     app.hasBestReplay = mode.bestFile && loadReplay(bestReplayPath(app.play.bestPath), app.replay);  // one too old to play back isn't offered
     app.screen = Screen::Play;
+    app.play.drill = mode.drills ? &app.drills.drills[app.drillPick] : nullptr;
     if (mode.pcFile && !app.play.coach) app.play.coach = std::make_unique<PcCoach>();
     if (mode.pcFile) app.play.coach->setups = app.pcSetups;  // before the run starts, as its first question checks them
     restart(app, timeNs);
@@ -106,6 +109,10 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
                 app.dig = (app.dig + count + step) % count;
             }
             if (mode && mode->pcStyle == PcStyle::Practice) app.play.residue = (app.play.residue + 7 + step) % 7;
+            if (mode && mode->drills && !app.drills.drills.empty()) {
+                const int count = static_cast<int>(app.drills.drills.size());
+                app.drillPick = (app.drillPick + count + step) % count;
+            }
             if (mode && mode->versus) {
                 const int count = static_cast<int>(app.presets.size());
                 app.play.botPreset = (app.play.botPreset + count + step) % count;
@@ -114,7 +121,7 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
             break;
         case SDL_SCANCODE_RETURN:
             if (key.repeat) break;
-            if (mode) {
+            if (mode && !(mode->drills && app.drills.drills.empty())) {
                 startRun(app, *mode, key.timestamp);
             } else if (!app.sub && kMenu[row].sub) {
                 app.sub = &kMenu[row];
@@ -251,7 +258,8 @@ void drawFrame(App& app, Ui& ui) {
     ui.dark = app.settings.dark;
     ui.beginFrame();
     if (app.screen == Screen::Menu) {
-        ui.drawMenu({app.sub, app.sub ? app.subRow : app.topRow, app.dig, app.bests, app.play.residue, &app.presets[app.play.botPreset]});
+        ui.drawMenu({app.sub, app.sub ? app.subRow : app.topRow, app.dig, app.bests, app.play.residue, &app.presets[app.play.botPreset],
+                     app.drills.drills.empty() ? nullptr : &app.drills.drills[app.drillPick]});
     } else if (app.screen == Screen::Settings) {
         ui.drawSettings(app.settings, app.selected, app.capturing);
     } else {
@@ -309,6 +317,8 @@ int main(int, char**) {
     app.settings = loadSettings(app.settingsPath);
     app.presets = botPresets();
     app.pcSetups = loadPcSetups(std::string(SDL_GetBasePath()) + "data/four-lol/pc-setups.json");
+    const std::filesystem::path drillDirs[] = {std::string(SDL_GetBasePath()) + "data/four-lol/drills"};
+    app.drills = loadDrills(drillDirs);
     for (size_t i = 0; i < app.presets.size(); i++)
         if (app.presets[i].name == app.settings.botPreset) app.play.botPreset = static_cast<int>(i);
     for (int i = 0; i < kModeCount; i++)

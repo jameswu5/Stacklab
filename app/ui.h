@@ -64,6 +64,7 @@ struct MenuView {
     std::span<const double> bests;  // by kModes index
     int residue;                    // PC practice's
     const BotPreset* bot;
+    const Drill* drill;  // Setup drills' pick, or null without the drills folder
 };
 
 struct VersusView {

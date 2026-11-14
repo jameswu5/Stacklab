@@ -37,7 +37,18 @@ core::Board boardFromRows(const json& rows) {
     return board;
 }
 
+// Either a placement, or the piece's four cells as [x, y].
 DrillTarget targetFromJson(const json& value) {
+    if (value.contains("cells")) {
+        DrillTarget target{pieceFrom(value.at("piece").get<std::string>().at(0)), {}};
+        const json& cells = value["cells"];
+        if (!cells.is_array() || cells.size() != 4) fail("a target needs 4 cells");
+        for (size_t i = 0; i < 4; i++) {
+            target.cells[i] = {cells[i].at(0).get<int>(), cells[i].at(1).get<int>()};
+            if (target.cells[i].x < 0 || target.cells[i].x >= core::kBoardWidth || target.cells[i].y < 0 || target.cells[i].y >= core::kBoardHeight) fail("a target is off the board");
+        }
+        return target;
+    }
     core::Falling placed;
     placed.piece = pieceFrom(value.at("piece").get<std::string>().at(0));
     placed.x = value.at("x").get<int>();

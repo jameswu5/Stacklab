@@ -5,7 +5,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+#include <algorithm>
 #include <array>
+#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -136,7 +138,7 @@ int main(int argc, char** argv) {
         ui.beginFrame();
         const std::array<double, kModeCount> bests{60.824, 0, 41.5};
         const BotPreset bot{"3 PPS", "", 3}, trBot{"TR 20.5k", "", 2.17, 20500};
-        const MenuView menus[] = {{nullptr, 1, 1, bests, 3, &bot}, {&kMenu[3], 1, 0, bests, 3, &bot}, {&kMenu[2], 0, 0, bests, 3, &bot}, {nullptr, 4, 1, bests, 3, &trBot}};
+        const MenuView menus[] = {{nullptr, 1, 1, bests, 3, &bot, nullptr}, {&kMenu[3], 1, 0, bests, 3, &bot, nullptr}, {&kMenu[2], 0, 0, bests, 3, &bot, nullptr}, {nullptr, 4, 1, bests, 3, &trBot, nullptr}};
         const char* names[] = {"menu", "menu-pc", "menu-setups", "menu-versus"};
         for (int i = 0; i < 4; i++) {
             ui.beginFrame();
@@ -254,6 +256,39 @@ int main(int argc, char** argv) {
         shot(finished, true, "results", dark);
     }
     // The LST coach: a slot ready with the T's hint, then a placement that broke the loop, then results.
+    // Setup drills: the menu with four.lol's TKI picked, then TKI with I and L placed. Skipped
+    // without data/four-lol/drills (tools/four_lol_drills.py), as four.lol's setups aren't in the repo.
+    const std::filesystem::path drillDirs[] = {std::string(argv[2]) + "/data/four-lol/drills"};
+    const DrillSet setupDrills = loadDrills(drillDirs);
+    auto tki = std::ranges::find(setupDrills.drills, std::string("TKI"), &Drill::name);
+    if (tki != setupDrills.drills.end()) {
+        core::Game drillGame(core::Ruleset{}, core::Handling{}, 1);
+        setUpDrill(drillGame, *tki);
+        for (int i = 0; i < 2; i++)
+            for (const core::Cell& cell : tki->targets[i].cells) drillGame.board.at(cell.x, cell.y) = tki->targets[i].piece;
+        drillGame.queue.erase(drillGame.queue.begin());
+        drillGame.respawn(tki->pieces[2]);
+        drillGame.stats.pieces = 2;
+        drillGame.frame = 90;
+        const std::array<double, kModeCount> noBests{};
+        const BotPreset bot{"3 PPS", "", 3};
+        for (bool dark : {false, true}) {
+            ui.dark = dark;
+            ui.beginFrame();
+            ui.drawMenu({&kMenu[2], 1, 0, noBests, 0, &bot, &*tki});
+            SDL_FlushRenderer(renderer);
+            SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
+            SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-drills-dark.png" : "/menu-drills-light.png")).c_str());
+            SDL_DestroySurface(menuPixels);
+            ui.beginFrame();
+            ui.drawPlay({&kModes[9], &drillGame, drillGame.seconds(), false, nullptr, "", 0, {}, &*tki, 3, &faults});
+            SDL_FlushRenderer(renderer);
+            SDL_Surface* drillPixels = SDL_RenderReadPixels(renderer, nullptr);
+            SDL_SavePNG(drillPixels, (std::string(argv[1]) + (dark ? "/drill-tki-dark.png" : "/drill-tki-light.png")).c_str());
+            SDL_DestroySurface(drillPixels);
+        }
+    }
+
     const Mode& lstMode = kModes[8];
     core::Game lstGame(lstMode.rules, core::Handling{}, 1);
     {
