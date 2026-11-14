@@ -69,3 +69,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## four.lol
+
+PC practice's setup hint shows perfect-clear setups from [four.lol](https://four.lol/perfect-clears/1st)
+by davdav1233 and cosin307, with the setups' chances from knewjade's solution-finder, as
+four.lol credits them. © 2018-2022 davdav1233 and cosin307. All Rights Reserved. They're used
+privately, with credit, and aren't in this repository: `tools/four_lol_setups.py` trims a local
+copy into the gitignored `data/four-lol/`, and the app says "No setups file" without it.

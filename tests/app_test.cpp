@@ -1451,20 +1451,29 @@ void testPcSetups() {
     assert(pcSetupFits(setups[2], 2, Piece::S, empty, have({Piece::J})));
     assert(!pcSetupFits(setups[2], 2, Piece::J, empty, have({Piece::J})));  // starts with the wrong piece in hold
 
-    // At residue 0 the whole first bag is known, so both residue 0 setups fit.
+    // In PC practice, a setup of n pieces fits when they're among the attempt's first n + 1.
     CoachPlayer p;
     p.play.mode = &kModes[7];
     p.play.residue = 0;
     p.play.restart({}, 1, p.now);
-    p.coach().setups = setups;
+    const core::Game& game = p.play.game;
+    auto oneOf = [](Piece piece, const char* name) {
+        PcSetup setup;
+        setup.name = name;
+        setup.pieces[static_cast<int>(piece)] = 1;
+        for (int x = 0; x < 4; x++) setup.cells[x] = piece;
+        return setup;
+    };
+    const std::vector<PcSetup> made = {oneOf(game.falling.piece, "first"), oneOf(game.queue[1], "third"), oneOf(game.queue[0], "second")};
+    p.coach().setups = made;
     p.coach().setupKey = "G";
     assert(std::string(p.view().setupLine) == "G for a setup" && !p.view().setup);
     const size_t before = allocations;
-    p.coach().nextSetup(p.play.game);
-    assert(p.view().setup == &setups[0] && std::string(p.view().setupLine) == "90%, 1 of 2");
-    p.coach().nextSetup(p.play.game);
-    assert(p.view().setup == &setups[1] && std::string(p.view().setupLine) == "2 of 2");
-    p.coach().nextSetup(p.play.game);
+    p.coach().nextSetup(game);
+    assert(p.view().setup == &made[0] && std::string(p.view().setupLine) == "1 of 2");
+    p.coach().nextSetup(game);
+    assert(p.view().setup == &made[2] && std::string(p.view().setupLine) == "2 of 2");
+    p.coach().nextSetup(game);
     assert(!p.view().setup && std::string(p.view().setupLine) == "G for a setup");  // past the last
     assert(allocations == before);
     p.play.game.board.at(9, 0) = Piece::Garbage;

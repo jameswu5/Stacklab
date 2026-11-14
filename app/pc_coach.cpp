@@ -192,6 +192,7 @@ void PcCoach::start(const core::Game& game, std::span<const core::Piece> dealtBe
     killedBy_ = nullptr;
     hintWanted_ = false;
     startHold_ = game.hold;
+    attemptStart_ = dealtBefore.size();
     setupAsked_ = false;
     setupShown_ = -1;
     ask(game);
@@ -253,32 +254,27 @@ void PcCoach::afterTick(std::span<const core::LockResult> locks, const core::Gam
     if (game.stats.pieces != askedPieces_ || game.falling.piece != askedCurrent_ || game.hold != askedHold_ || game.holdUsed != askedHoldUsed_) ask(game);
 }
 
-// The pieces this PC can use that are known now: those placed in the attempt (practice
-// starts on an empty board), hold, the falling piece, the previews and the rest of the bag,
-// up to the 10 placed and 1 held.
+// A setup of n pieces is buildable with one hold slot when its pieces are among the first
+// n + 1 of the attempt: hold at its start, then the pieces as dealt. Only what's known now
+// counts: those dealt, the previews and the rest of the bag, up to the 10 placed and 1 held.
 void PcCoach::nextSetup(const core::Game& game) {
     setupAsked_ = true;
-    std::array<int, 8> have{};
-    for (core::Piece piece : game.board.cells)
-        if (piece != core::Piece::None && piece != core::Piece::Garbage) have[static_cast<int>(piece)]++;
-    int total = 0;
-    for (int& n : have) total += n = (n + 3) / 4;
-    auto add = [&](core::Piece piece) {
-        if (piece == core::Piece::None || total >= 11) return;  // 10 placed and 1 held
-        have[static_cast<int>(piece)]++;
-        total++;
-    };
-    add(game.hold);
-    add(game.falling.piece);
-    for (size_t i = 0; i < std::min<size_t>(game.rules.previews, game.queue.size()); i++) add(game.queue[i]);
-    const uint8_t left = ai::pcBagLeft(seen);
-    for (int piece = 1; piece < 8; piece++)
-        if (left >> piece & 1) add(static_cast<core::Piece>(piece));
+    std::array<core::Piece, 11> order{};
+    int known = 0;
+    if (startHold_ != core::Piece::None) order[known++] = startHold_;
+    for (size_t i = attemptStart_; i < seen.size() && known < 11; i++) order[known++] = seen[i];
+    const uint8_t left = ai::pcBagLeft(seen);  // ponytail: unordered, so with 2 or more unseen any of them counts as next
+    for (int piece = 1; piece < 8 && known < 11; piece++)
+        if (left >> piece & 1) order[known++] = static_cast<core::Piece>(piece);
 
     const int shown = setupShown_;
     setupShown_ = -1;
     setupCount_ = setupNumber_ = 0;
     for (int i = 0; i < static_cast<int>(setups.size()); i++) {
+        int pieces = 0;
+        for (int n : setups[i].pieces) pieces += n;
+        std::array<int, 8> have{};
+        for (int k = 0; k < std::min(pieces + 1, known); k++) have[static_cast<int>(order[k])]++;
         if (!pcSetupFits(setups[i], progress.phase, startHold_, game.board, have)) continue;
         setupCount_++;
         if (i <= shown || setupShown_ >= 0) continue;

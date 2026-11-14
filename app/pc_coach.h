@@ -49,7 +49,7 @@ struct PcSetup {
 std::vector<PcSetup> loadPcSetups(const std::string& path);  // empty if the file is missing or damaged
 
 // The setup is for this residue and start hold, has no empty cell where the board has a
-// block, and `have` (by core::Piece, the pieces placed in the attempt included) covers it.
+// block, and `have` (counts by core::Piece) covers its pieces.
 bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const core::Board& board, const std::array<int, 8>& have);
 
 // What the stats card shows. A plain value, so drawing can't touch the worker's data.
@@ -139,6 +139,7 @@ private:
     bool nullified_ = false;  // undo was used in this run
     int placedBefore_ = 0;    // pieces the run starts as having placed
     core::Piece startHold_ = core::Piece::None;
+    size_t attemptStart_ = 0;  // into seen: the attempt's first piece dealt
     bool setupAsked_ = false;
     int setupShown_ = -1;  // into setups, or none
     int setupNumber_ = 0, setupCount_ = 0;  // "1 of 3"
