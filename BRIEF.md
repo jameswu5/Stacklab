@@ -403,6 +403,8 @@ Fully our own C++ implementation, using ideas from [Cold Clear 2](https://github
 
 **Presets** run from new player (well under 1 PPS) through to X rank, with an uncapped mode above that. Each is calibrated against measured stats, not named by feel.
 
+**Players by TR** follow the presets in versus' picker, from TR 1k to 25k, defaulting to 20.5k (the owner's). Each round draws a player at that TR from the League ladder's stats (`data/bot/tr-field.json`: per TR band, the log-space mean and covariance of PPS, APP and VS/APM, interpolated between bands, plus one game's noise) and sets the bot to match: the player's PPS as the cap, width 48 and full depth, the base weights jittered ±20% for a style, and `mistakes` read from the bot's mirror APP table (the style's cost measured as nil) (`app/tr_field.*`). Known limits: the bot's APP tops out near 0.95, so the field ends around X/X+; and its VS/APM runs about 2.3 against humans' 2.0-2.15, so its VS reads about 15% high for the same PPS and APP.
+
 ### X-rank target
 
 Speed alone can beat almost anyone, so it doesn't count. **The X-rank preset must win through decision quality at human speed.** It is capped to a PPS typical of X-rank players and must meet all of these:

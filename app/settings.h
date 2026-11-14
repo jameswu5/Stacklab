@@ -48,7 +48,7 @@ struct Settings {
     bool overlay = false;
     bool dark = false;
     VersusOptions versus;
-    std::string botPreset = "3 PPS";  // the versus bot, by name
+    std::string botPreset = "TR 20.5k";  // the versus bot, by name
 
     Profile& profile() { return profiles[active]; }
     const Profile& profile() const { return profiles[active]; }

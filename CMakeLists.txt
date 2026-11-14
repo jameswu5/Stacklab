@@ -17,7 +17,7 @@ target_link_libraries(ai PUBLIC core)
 
 find_package(SDL3 REQUIRED)
 find_package(SDL3_ttf REQUIRED)
-add_executable(stacklab app/main.cpp app/play.cpp app/pc_coach.cpp app/versus.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
+add_executable(stacklab app/main.cpp app/play.cpp app/pc_coach.cpp app/versus.cpp app/tr_field.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(stacklab PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json objc)
 add_custom_command(TARGET stacklab POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:stacklab>/assets
@@ -56,15 +56,15 @@ add_test(NAME lst_test COMMAND lst_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  
 add_executable(bot_match tools/bot_match.cpp)
 target_link_libraries(bot_match PRIVATE ai)
 
-add_executable(app_test tests/app_test.cpp app/play.cpp app/pc_coach.cpp app/versus.cpp app/settings.cpp modes/drill.cpp)
+add_executable(app_test tests/app_test.cpp app/play.cpp app/pc_coach.cpp app/versus.cpp app/tr_field.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(app_test PRIVATE ai SDL3::SDL3 nlohmann_json::nlohmann_json)
 add_test(NAME app_test COMMAND app_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads tests/fixtures/drills
 
-add_executable(ui_shot tests/ui_shot.cpp app/ui.cpp app/versus.cpp app/settings.cpp)
+add_executable(ui_shot tests/ui_shot.cpp app/ui.cpp app/versus.cpp app/tr_field.cpp app/settings.cpp)
 target_link_libraries(ui_shot PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)
 
 # Not a test: prints frame times in the PC coach with the solver busy.
-add_executable(frame_bench tests/frame_bench.cpp app/play.cpp app/pc_coach.cpp app/versus.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
+add_executable(frame_bench tests/frame_bench.cpp app/play.cpp app/pc_coach.cpp app/versus.cpp app/tr_field.cpp app/ui.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(frame_bench PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)
 
 add_executable(replay_parity tests/replay_parity.cpp)

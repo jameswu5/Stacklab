@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "app/settings.h"
+#include "app/tr_field.h"
 #include "core/game.h"
 #include "modes/modes.h"
 
@@ -38,11 +39,13 @@ struct Match {
     std::array<SideTotals, 2> totals{};
 };
 
-// A bot to play, from data/bot/presets in file-name order.
+// A bot to play: data/bot/presets in file-name order, then players by TR (app/tr_field.h).
 struct BotPreset {
     std::string name, path;
-    double pps;  // its cap
+    double pps;   // its cap; for a TR, the median player's
+    int tr = 0;   // not 0: each round draws a player at this TR, on kTrBase's search
 };
+inline constexpr const char* kTrBase = "6-pps-3.0.txt";  // in data/bot/presets
 std::vector<BotPreset> botPresets();  // at least one
 
 // The bot's choice as plain arrays, so passing it back allocates nothing.
@@ -63,6 +66,8 @@ public:
 
     core::Game bot{kVersusRules, core::Handling{}, 1};
     int preset = 0;  // into botPresets()
+    TrPlayer player;      // the round's player, for a TR preset
+    char label[64] = "";  // the bot's name, with the round's player for a TR preset
     VersusOptions options;
     bool waitForBot = false;  // tests: wait for each plan, so a round plays out the same at any load
     // The bot's inputs are recorded into this replay's bot fields, while there's room reserved,
@@ -89,6 +94,10 @@ private:
     void send(int from, std::span<const core::LockResult> locks);
     void note(int side, std::span<const core::LockResult> locks, uint64_t frame);
 
+    std::vector<BotPreset> presets_;
+    TrField field_;
+    ai::BotWeights baseWeights_;  // kTrBase's
+    TrBot trBot_;                 // the round's settings, for a TR preset
     std::unique_ptr<BotWorker> worker_;
     uint64_t askId_ = 0;
     bool asking_ = false, hasNext_ = false;
