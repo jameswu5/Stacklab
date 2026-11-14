@@ -1,8 +1,8 @@
 name Novice
-# Weights tuned at 3 PPS. Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
-#   40L: mean 108.49 s, best 102.08 s, 16 of 16 finished, PPS 1.00
-#   versus against 3 PPS: won 0 of 24, PPS 1.05, APP 0.272, APM 17.2
-#   survival, mean time alive of 600 s: 84.7 s at 40 APM incoming, 13.9 s at 120 APM
+# Weights tuned at 3 PPS; the full search, weakened by mistakes. Measured with tools/bot_match from fixed seeds, with core::Handling defaults:
+#   40L: mean 111.43 s, best 103.40 s, 16 of 16 finished, PPS 1.00
+#   versus against 3 PPS: won 0 of 24, PPS 1.05, APP 0.538, APM 33.7
+#   survival, mean time alive of 600 s: 386.0 s at 40 APM incoming (5 of 12 lived), 19.7 s at 120 APM
 holes -4.596
 height -0.2213
 danger -1.578
@@ -13,6 +13,6 @@ attack 1.789
 b2b 2.548
 wasted -2.169
 pps 1.0
-width 8
-depth 2
-mistakes 0.06
+width 48
+depth 0
+mistakes 0.1
