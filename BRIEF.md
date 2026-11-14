@@ -125,11 +125,8 @@ struct Mode {
     int goalLines = 0;               // reaching this many lines ends the run; 0 is no goal
     const char* bestFile = nullptr;  // holds the personal best, under the pref path; null keeps none
     int stats = StatLines | StatPieces | StatPPS | StatKPP | StatFinesse;  // the stats card's rows
-    int timeLimitSeconds = 0;        // reaching this ends the run, and the best is then the highest score
-    int garbageRows = 0;             // on the starting board, with a new hole every row; only lines that held garbage then count toward the goal
-    bool editable = false;           // the mouse edits the board, hold and queue, and topping out clears the board
+    int garbageRows = 0;             // a cheese race: on the board at once, refilled until goalLines are placed; only garbage lines count
     bool undo = false;               // the undo key takes back the last piece, clock included
-    bool drills = false;             // the menu opens the list of drills, and a run plays the chosen one
     const char* pcFile = nullptr;    // turns on the PC coach, and holds its record under the pref path
     PcStyle pcStyle = PcStyle::Coach;  // Coach, Practice from a chosen bag residue, or Count with no solver
 };
@@ -142,9 +139,7 @@ struct Mode {
 | Mode | Notes |
 |---|---|
 | 40L | Sprint with personal bests |
-| Blitz | 2-minute score attack |
-| Dig | Clear N garbage lines. Each row's hole is random among the 9 columns other than the row below's |
-| Sandbox | Editable board and queue, no end condition |
+| Dig | A cheese race of 10, 18 or 100 garbage lines, at most 10 rows on the board, each cleared one rising from the floor until all are placed. Each row's hole is random among the 9 columns other than its neighbour's |
 | Versus | Against the bot (section 8) |
 
 ### Trainers
@@ -168,7 +163,7 @@ struct Mode {
 
 ### Drill format
 
-A drill is a JSON file in `data/drills/`, or under the pref path in `drills/` for the owner's own. Its name, without `.json`, is its id. The menu's Drills row lists them in id order. Files load when the app starts.
+A drill is a JSON file in `data/drills/`, or under the pref path in `drills/` for the owner's own. Its name, without `.json`, is its id. No menu row starts a drill yet: the Setups sub-menu will, and until then the runner is kept and covered by `tests/app_test.cpp`, with samples in `tests/fixtures/drills/`.
 
 **Adding a fumen drill:** create `~/Library/Application Support/Stacklab/Stacklab/drills/` if it isn't there, and put a `.json` file in it containing `{"name": "...", "board": "v115@..."}`. The fumen's locked pieces become the queue and targets, in order.
 

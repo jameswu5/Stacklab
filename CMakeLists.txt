@@ -58,7 +58,7 @@ target_link_libraries(bot_match PRIVATE ai)
 
 add_executable(app_test tests/app_test.cpp app/play.cpp app/pc_coach.cpp app/versus.cpp app/settings.cpp modes/drill.cpp)
 target_link_libraries(app_test PRIVATE ai SDL3::SDL3 nlohmann_json::nlohmann_json)
-add_test(NAME app_test COMMAND app_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads data/drills
+add_test(NAME app_test COMMAND app_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})  # it reads tests/fixtures/drills
 
 add_executable(ui_shot tests/ui_shot.cpp app/ui.cpp app/versus.cpp app/settings.cpp)
 target_link_libraries(ui_shot PRIVATE ai SDL3::SDL3 SDL3_ttf::SDL3_ttf nlohmann_json::nlohmann_json)
@@ -98,7 +98,3 @@ target_compile_options(bot_test PRIVATE -UNDEBUG)
 target_compile_options(lst_test PRIVATE -UNDEBUG)
 target_compile_options(app_test PRIVATE -UNDEBUG)
 target_compile_options(replay_parity PRIVATE -UNDEBUG)
-
-# Measures PC1 setups. Run by hand; it takes minutes.
-add_executable(pc_setups tools/pc_setups.cpp)
-target_link_libraries(pc_setups PRIVATE ai)

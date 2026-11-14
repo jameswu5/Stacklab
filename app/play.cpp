@@ -40,7 +40,10 @@ void Play::restart(const core::Handling& handling, uint32_t seed, uint64_t runSt
     core::Ruleset rules = mode->rules;
     if (mode->versus) rules.garbageMultiplier = versusOptions.multiplier;
     game = core::Game(rules, handling, seed);
-    if (mode->garbageRows > 0) game.fillGarbage(mode->garbageRows);
+    if (mode->garbageRows > 0) {
+        game.fillGarbage(mode->garbageRows);
+        game.cheeseLeft = mode->goalLines - mode->garbageRows;
+    }
     if (drill) setUpDrill(game, *drill);
     std::vector<core::Piece> dealt;
     if (mode->pcStyle == PcStyle::Practice) dealt = dealResidue(game, residue, seed);
@@ -195,9 +198,7 @@ void Play::stepTo(uint64_t nowNs) {
             else inputs.consume(due.size());
         };
         int progressBefore = mode->goalProgress(game.stats);
-        // ponytail: finesse is off with levels, since the move search doesn't let time pass and
-        // late levels fall fast enough for that to invent faults. Search from the floor to turn it on.
-        const auto& locks = mode->versus ? game.tick(due, versus->toYou) : mode->rules.levels ? game.tick(due) : finesse.tick(game, due);
+        const auto& locks = mode->versus ? game.tick(due, versus->toYou) : finesse.tick(game, due);
         if (mode->versus) {
             versus->afterYourTick(locks, game.frame);
             consume();
@@ -210,11 +211,7 @@ void Play::stepTo(uint64_t nowNs) {
         }
         if (!locks.empty()) faults.note(finesse.judged);
 
-        if (game.toppedOut && mode->editable) {
-            game.board = core::Board{};
-            game.respawn(game.falling.piece);
-            finesse.restart(game);
-        } else if (game.toppedOut && !drill) {
+        if (game.toppedOut && !drill) {
             over = true;
             endSeconds = game.seconds();
         }
@@ -225,15 +222,6 @@ void Play::stepTo(uint64_t nowNs) {
             if (mode->bestFile && !playback && (best == 0 || endSeconds < best)) {
                 best = endSeconds;
                 saveBest(best, bestPath);
-                if (replayable() && !bestPath.empty()) saveReplay(recording, bestReplayPath(bestPath));
-            }
-        }
-        if (mode->bestIsScore() && !game.toppedOut && game.frame >= static_cast<uint64_t>(mode->timeLimitSeconds) * core::kTicksPerSecond) {
-            over = true;
-            endSeconds = game.seconds();
-            if (game.stats.score > best && !playback) {
-                best = game.stats.score;
-                saveBestScore(game.stats.score, bestPath);
                 if (replayable() && !bestPath.empty()) saveReplay(recording, bestReplayPath(bestPath));
             }
         }
@@ -292,23 +280,6 @@ bool Play::judgeDrill(std::span<const core::LockResult> locks, uint64_t nowNs) {
     if (!wrong && !game.toppedOut) return false;
     missed = true;
     return true;
-}
-
-void Play::paint(int x, int y, core::Piece piece) {
-    for (const core::Cell& cell : game.falling.cells())
-        if (cell.x == x && cell.y == y) return;
-    game.board.at(x, y) = piece;
-    finesse.restart(game);
-}
-
-void Play::cycleQueue(int slot) {
-    core::Piece& piece = game.queue[slot];
-    piece = static_cast<core::Piece>(static_cast<int>(piece) % 7 + 1);
-}
-
-// Goes through no piece as well.
-void Play::cycleHold() {
-    game.hold = static_cast<core::Piece>((static_cast<int>(game.hold) + 1) % 8);
 }
 
 // The tick in progress is run on a copy with the inputs received so far, so

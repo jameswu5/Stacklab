@@ -55,6 +55,15 @@ struct PlayView {
     bool replay = false;                     // a replay is playing, which the top bar says
 };
 
+struct MenuView {
+    const MenuRow* sub;  // the sub-menu open, or null for the top menu
+    int selected;
+    int dig;                        // Dig's line count, into its row's modes
+    std::span<const double> bests;  // by kModes index
+    int residue;                    // PC practice's
+    const BotPreset* bot;
+};
+
 struct VersusView {
     const Mode* mode;
     const core::Game* you;  // as shown
@@ -75,8 +84,7 @@ public:
 
     // Every draw starts with beginFrame, which follows the output size.
     void beginFrame();
-    void drawMenu(int selected, std::span<const double> bests, int residue, const BotPreset& bot);  // one row per mode, then Settings
-    void drawDrills(int selected, std::span<const Drill> drills, const char* error);  // error is null or a file that couldn't be used
+    void drawMenu(const MenuView& view);
     void drawPlay(const PlayView& view);
     void drawVersus(const VersusView& view);
     void drawSettings(const Settings& settings, int selected, bool capturing);
@@ -84,9 +92,6 @@ public:
 
     // In output pixels.
     bool toggleHit(float x, float y) const;
-    bool boardCellAt(float x, float y, int& cellX, int& cellY) const;  // false outside the board
-    int queueSlotAt(float x, float y) const;                           // -1 outside the queue
-    bool holdHit(float x, float y) const;
 
 private:
     enum FontId { FontWord, FontPill, FontLabel, FontTime, FontRow, FontValue, FontSmall, FontLinesLeft, kFontCount };

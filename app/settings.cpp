@@ -123,15 +123,11 @@ double loadBest(const std::string& path) {
     json file = readJson(path);
     // Files from before splits were dropped hold the time per line, ending with the finish.
     std::vector<double> splits = get(file, "splits", std::vector<double>{});
-    return get(file, "score", get(file, "seconds", splits.empty() ? 0.0 : splits.back()));
+    return get(file, "seconds", splits.empty() ? 0.0 : splits.back());
 }
 
 void saveBest(double seconds, const std::string& path) {
     writeJson({{"seconds", seconds}}, path);
-}
-
-void saveBestScore(int score, const std::string& path) {
-    writeJson({{"score", score}}, path);
 }
 
 PcRecord loadPcRecord(const std::string& path) {
@@ -251,7 +247,7 @@ void inputsFromJson(const json& inputs, std::vector<uint64_t>& ticks, std::vecto
 json replayJson(const Replay& replay) {
     const core::Handling& h = replay.handling;
     json file = {
-        {"version", 1},
+        {"version", 2},  // Dig 18 has refilled from 10 rows since 2
         {"mode", replay.mode},
         {"residue", replay.residue},
         {"seed", replay.seed},
@@ -304,7 +300,8 @@ bool loadReplay(const std::string& path, Replay& replay) {
     } catch (const json::exception&) {
         return false;
     }
-    return true;
+    // Dig 18 used to start with all 18 rows on the board, so its old runs no longer play back.
+    return !(replay.mode == "Dig 18" && get(file, "version", 1) < 2);
 }
 
 void saveReplay(const Replay& replay, const std::string& path) { writeReplayFile(replayJson(replay), path); }
