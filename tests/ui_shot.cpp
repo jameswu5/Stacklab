@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "app/pc_coach.h"
 #include "app/ui.h"
 #include "app/versus.h"
 #include "core/game.h"
@@ -138,7 +139,7 @@ int main(int argc, char** argv) {
         ui.beginFrame();
         const std::array<double, kModeCount> bests{60.824, 0, 41.5};
         const BotPreset bot{"3 PPS", "", 3}, trBot{"TR 20.5k", "", 2.17, 20500};
-        const MenuView menus[] = {{nullptr, 1, 1, bests, 3, &bot, nullptr}, {&kMenu[3], 1, 0, bests, 3, &bot, nullptr}, {&kMenu[2], 0, 0, bests, 3, &bot, nullptr}, {nullptr, 4, 1, bests, 3, &trBot, nullptr}};
+        const MenuView menus[] = {{nullptr, 1, 1, bests, 3, &bot, nullptr, nullptr}, {&kMenu[3], 1, 0, bests, 3, &bot, nullptr, nullptr}, {&kMenu[2], 0, 0, bests, 3, &bot, nullptr, nullptr}, {nullptr, 4, 1, bests, 3, &trBot, nullptr, nullptr}};
         const char* names[] = {"menu", "menu-pc", "menu-setups", "menu-versus"};
         for (int i = 0; i < 4; i++) {
             ui.beginFrame();
@@ -275,7 +276,7 @@ int main(int argc, char** argv) {
         for (bool dark : {false, true}) {
             ui.dark = dark;
             ui.beginFrame();
-            ui.drawMenu({&kMenu[2], 1, 0, noBests, 0, &bot, &*tki});
+            ui.drawMenu({&kMenu[2], 1, 0, noBests, 0, &bot, &*tki, nullptr});
             SDL_FlushRenderer(renderer);
             SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
             SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-drills-dark.png" : "/menu-drills-light.png")).c_str());
@@ -369,6 +370,7 @@ int main(int argc, char** argv) {
     setupShown.goal = 1;
     setupShown.residue[0] = '0';
     setupShown.setup = &setup;
+    setupShown.setupGhost = true;
     std::snprintf(setupShown.setupLine, sizeof setupShown.setupLine, "84.64%%, 1 of 3");
     PcView setupAsk = setupShown;
     setupAsk.setup = nullptr;
@@ -392,6 +394,44 @@ int main(int argc, char** argv) {
         practiceShot(setupShown, "practice-setup", dark);
         practiceShot(setupAsk, "practice-setup-ask", dark);
         practiceShot(setupBroken, "practice-setup-broken", dark);
+    }
+
+    // Opener practice: the menu, and Black Tea Cannon's second stage after its first TSD, three
+    // pieces in, if four.lol's openers are in <base>/data/four-lol/openers (they aren't in the repo).
+    const std::vector<PcSetup> btc = loadPcSetups(std::string(argv[2]) + "/data/four-lol/openers/Black Tea Cannon.json");
+    if (btc.size() > 1) {
+        core::Game openerGame(core::Ruleset{}, core::Handling{}, 1);
+        openerGame.falling.piece = core::Piece::None;
+        for (int i = 0; i < 20; i++)  // the first TSD's leftovers, and the second stage's I, S and Z
+            if (btc[1].cells[i] == core::Piece::Garbage) openerGame.board.cells[i] = i < 10 ? (i < 3 ? core::Piece::O : core::Piece::S) : i < 12 ? core::Piece::J : core::Piece::S;
+        for (int i = 0; i < 60; i++)
+            if (btc[1].cells[i] == core::Piece::I || btc[1].cells[i] == core::Piece::S || btc[1].cells[i] == core::Piece::Z) openerGame.board.cells[i] = btc[1].cells[i];
+        openerGame.queue = {core::Piece::J, core::Piece::L, core::Piece::T, core::Piece::O, core::Piece::I};
+        openerGame.hold = core::Piece::Z;
+        PcView opener;
+        opener.status = "Building";
+        std::snprintf(opener.detail, sizeof opener.detail, "stage 2 of 2, then the PC");
+        opener.goal = 1;
+        opener.setup = &btc[1];
+        opener.setupGhost = true;
+        std::snprintf(opener.setupLine, sizeof opener.setupLine, "%s, 1 of 2", btc[1].chance.c_str());
+        const std::array<double, kModeCount> noBests{};
+        const BotPreset bot{"3 PPS", "", 3};
+        for (bool dark : {false, true}) {
+            ui.dark = dark;
+            ui.beginFrame();
+            ui.drawMenu({&kMenu[2], 2, 0, noBests, 0, &bot, nullptr, "Black Tea Cannon"});
+            SDL_FlushRenderer(renderer);
+            SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
+            SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-openers-dark.png" : "/menu-openers-light.png")).c_str());
+            SDL_DestroySurface(menuPixels);
+            ui.beginFrame();
+            ui.drawPlay({&kModes[10], &openerGame, 4.2, false, nullptr, "", 0, {}, nullptr, 0, &faults, &opener});
+            SDL_FlushRenderer(renderer);
+            SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
+            SDL_SavePNG(pixels, (std::string(argv[1]) + (dark ? "/opener-btc-dark.png" : "/opener-btc-light.png")).c_str());
+            SDL_DestroySurface(pixels);
+        }
     }
     for (bool dark : {false, true}) {
         shot(practice, false, "practice", dark);

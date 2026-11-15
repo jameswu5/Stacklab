@@ -387,7 +387,8 @@ void testMenu() {
         assert(std::string(kMenu[row].name ? kMenu[row].name : mode->name) == names[row]);
     }
     assert(kMenu[1].modes.size() == 3 && kMenu[1].mode(2) == &kModes[3] && kModes[3].goalLines == 100);
-    assert(kMenu[2].sub && kMenu[2].modes.size() == 2 && &kMenu[2].modes[0] == &kModes[8] && kModes[8].lst && kModes[8].undo && kModes[8].goalLines == 0);
+    assert(kMenu[2].sub && kMenu[2].modes.size() == 3 && &kMenu[2].modes[0] == &kModes[8] && kModes[8].lst && kModes[8].undo && kModes[8].goalLines == 0);
+    assert(kMenu[2].modes[2].pcStyle == PcStyle::Opener && kMenu[2].modes[2].undo);
     assert(kMenu[3].sub && kMenu[3].modes.size() == 3 && &kMenu[3].modes[0] == &kModes[4] && kMenu[3].modes[1].pcStyle == PcStyle::Practice && kMenu[3].modes[2].pcStyle == PcStyle::Count);
     assert(kMenu[4].mode(0)->versus && !kMenu[5].sub && !kMenu[5].mode(0));
 }
@@ -897,7 +898,7 @@ void testFumenDrill() {
 // targets as cells. Made up here, since four.lol's setups aren't in the repo.
 void testSetupDrills() {
     const Mode& mode = kModes[9];
-    assert(mode.drills && mode.undo && kMenu[2].modes.size() == 2 && &kMenu[2].modes[1] == &mode);
+    assert(mode.drills && mode.undo && kMenu[2].modes.size() == 3 && &kMenu[2].modes[1] == &mode);
 
     auto cells = [](core::Piece piece, int x) {
         core::Falling placed;
@@ -1623,6 +1624,46 @@ void testPcSetups() {
     assert(std::string(p.view().setupLine) == "No setups file");
 }
 
+// Opener practice: a stage's setup shows until a lock clears lines, then the next stage's, which
+// stands on what's left; the solver's PC status waits until the last stage is built.
+void testOpenerStages() {
+    using core::Piece;
+    const std::string path = (std::filesystem::temp_directory_path() / "stacklab_opener.json").string();
+    std::ofstream(path) << R"json([
+ {"residue": 0, "name": "Two I, then O clears", "chance": "", "condition": "", "need": "", "hold": "", "board": ["........OO", "IIIIIIIIOO"]},
+ {"residue": 1, "name": "I beside the O", "chance": "100% PC", "condition": "", "need": "", "hold": "", "board": ["IIII....XX"]}
+])json";
+    const std::vector<PcSetup> stages = loadPcSetups(path);
+    std::filesystem::remove(path);
+    assert(stages.size() == 2);
+    CoachPlayer p;
+    p.play.mode = &kModes[10];
+    p.play.restart({}, 1, p.now);
+    p.coach().setups = stages;
+    core::Game& game = p.play.game;
+    game.board = {};
+    game.queue = {Piece::I, Piece::O, Piece::I, Piece::T, Piece::T, Piece::T};
+    game.respawn(Piece::I);
+    p.coach().start(game);
+    p.waitForAnswer();
+    p.coach().nextSetup();
+    assert(p.view().setup == &stages[0] && std::string(p.view().status) == "Building");
+    p.now = p.play.startNs;
+    p.move(ai::Move::DasLeft);
+    p.tap(BindHardDrop);
+    p.move(ai::Move::Right);
+    p.tap(BindHardDrop);
+    p.move(ai::Move::DasRight);
+    p.tap(BindHardDrop);  // clears the bottom row
+    p.waitForAnswer();
+    assert(p.coach().progress.stage == 1 && p.view().setup == &stages[1] && p.view().setupGhost);
+    assert(std::string(p.view().detail) == "stage 2 of 2, then the PC");
+    p.move(ai::Move::DasLeft);
+    p.tap(BindHardDrop);  // builds the last stage: the PC is next
+    p.waitForAnswer();
+    assert(p.view().setup == &stages[1] && !p.view().setupGhost && std::string(p.view().status) != "Building");
+}
+
 // Bag count has no solver and hides the residue until asked, and the badge ends a run early.
 void testBagCount() {
     const Mode& count = kModes[6];
@@ -2076,6 +2117,7 @@ int main() {
     testPcCoachRun();
     testPcPractice();
     testPcSetups();
+    testOpenerStages();
     testBagCount();
     testTrField();
     testBotPresets();  // first of the versus tests, which index the presets

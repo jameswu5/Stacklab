@@ -137,13 +137,11 @@ std::vector<PcSetup> loadPcSetups(const std::string& path) {
             setup.chance = entry.at("chance").get<std::string>();
             setup.condition = entry.at("condition").get<std::string>();
             const auto board = entry.at("board").get<std::vector<std::string>>();
-            if (board.size() != 4) return {};
-            for (int row = 0; row < 4; row++) {
+            const int rows = static_cast<int>(board.size());
+            if (rows < 1 || rows > kSetupRows) return {};
+            for (int row = 0; row < rows; row++) {
                 if (board[row].size() != 10) return {};
-                for (int x = 0; x < 10; x++) {
-                    const core::Piece piece = pieceFromLetter(board[row][x]);
-                    setup.cells[(3 - row) * 10 + x] = piece;
-                }
+                for (int x = 0; x < 10; x++) setup.cells[(rows - 1 - row) * 10 + x] = pieceFromLetter(board[row][x]);
             }
             for (char letter : entry.at("need").get<std::string>()) setup.need[static_cast<int>(pieceFromLetter(letter))]++;
             for (char letter : entry.at("hold").get<std::string>()) setup.holds |= 1 << static_cast<int>(pieceFromLetter(letter));
@@ -160,10 +158,10 @@ bool pcSetupFits(const PcSetup& setup, int residue, core::Piece startHold, const
     if (setup.holds && !(setup.holds >> static_cast<int>(startHold) & 1)) return false;
     for (int y = 0; y < core::kBoardHeight; y++)
         for (int x = 0; x < core::kBoardWidth; x++)
-            if (board.at(x, y) != core::Piece::None && (y >= 4 || (setup.cells[y * 10 + x] != board.at(x, y) && setup.cells[y * 10 + x] != core::Piece::Garbage)))
+            if (board.at(x, y) != core::Piece::None && (y >= kSetupRows || (setup.cells[y * 10 + x] != board.at(x, y) && setup.cells[y * 10 + x] != core::Piece::Garbage)))
                 return false;
     // ponytail: gray must be on the board already, so setups drawn on carried-over blocks never show from practice's empty start
-    for (int i = 0; i < 40; i++)
+    for (size_t i = 0; i < setup.cells.size(); i++)
         if (setup.cells[i] == core::Piece::Garbage && board.cells[i] == core::Piece::None) return false;
     return true;
 }
@@ -186,7 +184,7 @@ struct SetupBuild {
     // `next` indexes order: the piece after `current`. A current of None is past what's known.
     bool from(core::Piece current, int next, core::Piece hold, bool canHold) {
         std::array<int, 8> cells{};
-        for (int i = 0; i < 40; i++)
+        for (size_t i = 0; i < setup.cells.size(); i++)
             if (setup.cells[i] != core::Piece::Garbage && board.cells[i] == core::Piece::None) cells[static_cast<int>(setup.cells[i])]++;
         cells[0] = 0;
         if (current == core::Piece::None || std::all_of(cells.begin(), cells.end(), [](int n) { return n == 0; })) {
@@ -208,16 +206,16 @@ struct SetupBuild {
                 bool own = true;
                 for (const core::Cell& cell : search.cells(placement)) {
                     const int i = cell.y * 10 + cell.x;
-                    own = own && cell.y < 4 && setup.cells[i] == current && board.cells[i] == core::Piece::None;
+                    own = own && cell.y < kSetupRows && setup.cells[i] == current && board.cells[i] == core::Piece::None;
                     if (own) mask |= uint64_t{1} << i;
                 }
                 if (own && count < 8 && std::find(masks.begin(), masks.begin() + count, mask) == masks.begin() + count) masks[count++] = mask;
             }
             for (int k = 0; k < count; k++) {
-                for (int i = 0; i < 40; i++)
+                for (size_t i = 0; i < setup.cells.size(); i++)
                     if (masks[k] >> i & 1) board.cells[i] = current;
                 if (from(at(next), next + 1, hold, true)) return true;
-                for (int i = 0; i < 40; i++)
+                for (size_t i = 0; i < setup.cells.size(); i++)
                     if (masks[k] >> i & 1) board.cells[i] = core::Piece::None;
             }
         }
@@ -243,6 +241,7 @@ void PcProgress::note(const core::LockResult& lock, int placed) {
     if (!attempted) tally.attempts[phase]++;
     attempted = true;
     linesInAttempt += lock.lines;
+    stage += lock.lines > 0;
     const bool withinLimit = linesInAttempt <= kPcMaxLines;
     if (!withinLimit) streak = 0;
     if (!lock.perfectClear) return;
@@ -292,6 +291,8 @@ void PcCoach::start(const core::Game& game, std::span<const core::Piece> dealtBe
     setupShown_ = -1;
     setupFits_.reset();
     setupBroken_ = setupDone_ = false;
+    stages_ = 0;
+    for (const PcSetup& setup : setups) stages_ = std::max(stages_, setup.residue + 1);
     ask(game);
 }
 
@@ -338,8 +339,8 @@ void PcCoach::ask(const core::Game& game) {
     PcRequest& request = worker_->next();
     request.id = askId_;
     fillQuery(game, request.query);
-    request.setups = style == PcStyle::Practice ? setups : std::span<const PcSetup>{};
-    request.residue = progress.phase;
+    request.setups = style == PcStyle::Practice || style == PcStyle::Opener ? setups : std::span<const PcSetup>{};
+    request.residue = style == PcStyle::Opener ? progress.stage : progress.phase;
     request.startHold = startHold_;
     worker_->ask();
 }
@@ -351,6 +352,13 @@ void PcCoach::afterTick(std::span<const core::LockResult> locks, const core::Gam
     if (!locks.empty()) {
         killedBy_ = nullptr;
         hintWanted_ = false;
+        // An opener's TSD clears the rows its setup stood on: on to the next stage's, or the PC after the last.
+        // ponytail: any clear counts, even one that isn't the setup's; the next stage's setups then won't fit
+        const bool cleared = std::any_of(locks.begin(), locks.end(), [](const core::LockResult& lock) { return lock.lines > 0; });
+        if (style == PcStyle::Opener && cleared && setupShown_ >= 0 && !setupDone_) {
+            if (progress.stage < stages_) setupShown_ = -1;
+            else setupDone_ = true;
+        }
         if (setupShown_ >= 0 && setupBuilt(game.board)) setupDone_ = true;
     }
     if (game.stats.pieces != askedPieces_ || game.falling.piece != askedCurrent_ || game.hold != askedHold_ || game.holdUsed != askedHoldUsed_) ask(game);
@@ -358,7 +366,7 @@ void PcCoach::afterTick(std::span<const core::LockResult> locks, const core::Gam
 
 bool PcCoach::setupBuilt(const core::Board& board) const {
     const PcSetup& setup = setups[setupShown_];
-    for (int i = 0; i < 40; i++)
+    for (size_t i = 0; i < setup.cells.size(); i++)
         if (setup.cells[i] != core::Piece::None && setup.cells[i] != core::Piece::Garbage && board.cells[i] != setup.cells[i]) return false;
     return true;
 }
@@ -415,6 +423,7 @@ void PcCoach::take(const PcAnswer& answer) {
 
 bool PcCoach::runDone() const {
     if (progress.pcs >= kPcGoal) return true;
+    if (style == PcStyle::Opener) return progress.pcs > 0 || progress.linesInAttempt > kOpenerMaxLines;
     return style == PcStyle::Practice && (progress.pcs > 0 || progress.linesInAttempt > kPcMaxLines);
 }
 
@@ -426,7 +435,7 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
     out.nullified = nullified_;
     out.outOfReach = goalLines > 0 && pcGoalOutOfReach(progress.pcs, std::max(goalLines - game.stats.lines, 0));
     out.tally = record.tally;
-    if (style == PcStyle::Practice) {
+    if (style == PcStyle::Practice || style == PcStyle::Opener) {
         out.goal = 1;
         if (setupShown_ >= 0) {
             out.setup = &setups[setupShown_];
@@ -439,8 +448,8 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
         } else {
             std::snprintf(out.setupLine, sizeof out.setupLine, setups.empty() ? "No setups file" : "No setup fits");
         }
-        std::snprintf(out.residue, sizeof out.residue, "%d", placedBefore_ % 7);  // the one chosen, even after its PC
-        if (!game.toppedOut) out.outcome = progress.pcs > 0 ? "Perfect clear" : "Over 4 lines";
+        if (style == PcStyle::Practice) std::snprintf(out.residue, sizeof out.residue, "%d", placedBefore_ % 7);  // the one chosen, even after its PC
+        if (!game.toppedOut) out.outcome = progress.pcs > 0 ? "Perfect clear" : style == PcStyle::Opener ? "No perfect clear" : "Over 4 lines";
     } else if (progress.pcs >= kPcGoal) {
         out.outcome = "10 perfect clears";
     }
@@ -452,6 +461,12 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
     if (style == PcStyle::Count) {
         out.status = "Keep count";
         std::snprintf(out.detail, sizeof out.detail, "%s shows the bag residue", bagKey.c_str());
+        return out;
+    }
+    // The solver judges the PC only, so it waits until the opener's setups are built.
+    if (!pcPhase()) {
+        out.status = "Building";
+        std::snprintf(out.detail, sizeof out.detail, "stage %d of %d, then the PC", progress.stage + 1, stages_);
         return out;
     }
 

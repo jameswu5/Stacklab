@@ -15,6 +15,7 @@ enum class PcStyle {
     Coach,     // a whole run with the solver beside you
     Practice,  // one PC from a chosen bag residue
     Count,     // a whole run with no solver: the player keeps count of the bag
+    Opener,    // an opener from a random bag: its setups stage by stage, then the PC
 };
 
 struct Mode {
@@ -119,6 +120,12 @@ inline const Mode kModes[] = {
      .stats = StatPieces | StatPPS | StatKPP | StatFinesse,
      .undo = true,
      .drills = true},
+    {.name = "Opener practice",
+     .blurb = "Random bags, with setups to match",
+     .stats = StatPieces | StatPPS | StatKPP | StatFinesse,
+     .undo = true,
+     .pcFile = "pc-openers.json",
+     .pcStyle = PcStyle::Opener},
 };
 inline constexpr int kModeCount = static_cast<int>(std::size(kModes));
 
@@ -138,7 +145,7 @@ struct MenuRow {
 inline const MenuRow kMenu[] = {
     {nullptr, nullptr, {kModes, 1}},
     {"Dig", nullptr, {kModes + 1, 3}},
-    {"Setups", "Openers and stacking setups to learn", {kModes + 8, 2}, true},
+    {"Setups", "Openers and stacking setups to learn", {kModes + 8, 3}, true},
     {"Perfect Clear", "A coach, practice from a bag residue, and bag counting", {kModes + 4, 3}, true},
     {nullptr, nullptr, {kModes + 7, 1}},
     {"Settings", "Handling, keys and display", {}},

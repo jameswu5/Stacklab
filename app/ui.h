@@ -65,6 +65,7 @@ struct MenuView {
     int residue;                    // PC practice's
     const BotPreset* bot;
     const Drill* drill;  // Setup drills' pick, or null without the drills folder
+    const char* opener;  // Opener practice's pick, or null without the openers folder
 };
 
 struct VersusView {
