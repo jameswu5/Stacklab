@@ -73,6 +73,7 @@ struct PcView {
     std::array<core::Cell, 4> hintCells{};
     char setupLine[48] = "";  // practice: how to ask for a setup, why there's none, or the shown one's chance
     const PcSetup* setup = nullptr;  // drawn on the board, with its name and condition on the card
+    bool setupGhost = false;  // until it's built: line clears after that would leave the ghost behind
     int pcs = 0, streak = 0, bestPcs = 0;
     int goal = kPcGoal;
     char residue[2] = "";  // takes the streak's row: the bag residue, or ? until asked for

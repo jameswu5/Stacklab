@@ -668,8 +668,11 @@ void Ui::drawPlay(const PlayView& view) {
     checker();
     // Lines left, under everything that's played, so it can never hide a block.
     if (view.mode->goalLines > 0 && view.mode->garbageRows == 0 && !view.over) {
-        std::snprintf(buffer, sizeof buffer, "%d", std::max(view.mode->goalLines - game.stats.lines, 0));
+        const int left = std::max(view.mode->goalLines - game.stats.lines, 0);
+        std::snprintf(buffer, sizeof buffer, "%d", left);
         text(FontLinesLeft, buffer, kBoardX + 190, kBoardY + 138, colors.muted, Align::Center, 0, colors.linesLeftAlpha);
+        // The finish line: the top of the last line to clear, once it's on the board.
+        if (left > 0 && left < core::kVisibleHeight) fill(boardX_, boardY_ + (core::kVisibleHeight - left) * cell_ - 1, 10 * cell_, 2, colors.muted, 0, 0.5f);
     }
     stack(game);
     if (view.drill && !view.over) {
@@ -680,7 +683,7 @@ void Ui::drawPlay(const PlayView& view) {
             for (const core::Cell& c : target.cells) block(c.x, c.y, colors.pieces[static_cast<int>(target.piece)], colors.ghostAlpha * 0.5f);
         }
     }
-    if (view.pc && view.pc->setup && !view.over) {
+    if (view.pc && view.pc->setup && view.pc->setupGhost && !view.over) {
         for (int y = 0; y < 4; y++)
             for (int x = 0; x < 10; x++) {
                 const core::Piece piece = view.pc->setup->cells[y * 10 + x];

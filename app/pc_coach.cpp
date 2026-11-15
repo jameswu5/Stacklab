@@ -430,6 +430,7 @@ PcView PcCoach::view(const core::Game& game, int goalLines, bool over) const {
         out.goal = 1;
         if (setupShown_ >= 0) {
             out.setup = &setups[setupShown_];
+            out.setupGhost = !setupDone_;
             std::snprintf(out.setupLine, sizeof out.setupLine, "%s%s%d of %d", out.setup->chance.c_str(), out.setup->chance.empty() ? "" : ", ", setupNumber_, setupCount_);
         } else if (!setupAsked_) {
             std::snprintf(out.setupLine, sizeof out.setupLine, "%s for a setup", setupKey.c_str());
