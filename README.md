@@ -2,6 +2,16 @@
 
 A native macOS block-stacking trainer in C++, built so practice transfers to TETR.IO: sprints, cheese races, perfect-clear and setup coaching, and versus against a bot.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/versus-dark.png">
+  <img alt="Versus against a bot drawn at TR 20.5k, mid-round" src="docs/screenshots/versus-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/40-lines-dark.png">
+  <img alt="40 Lines, mid-run" src="docs/screenshots/40-lines-light.png">
+</picture>
+
 ## Setup
 
 ```sh

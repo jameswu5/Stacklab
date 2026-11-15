@@ -494,7 +494,7 @@ void Ui::drawMenu(const MenuView& view) {
         const char* blurb = menuRow && menuRow->blurb ? menuRow->blurb : mode->blurb;
         if (mode && mode->versus && view.bot->tr) blurb = "A new League player at this TR each round";
         if (mode && mode->drills) blurb = view.drill ? view.drill->blurb.c_str() : "No drills folder: see tools/four_lol_drills.py";
-        if (mode && mode->pcStyle == PcStyle::Opener && !view.opener) blurb = "No openers folder: see tools/four_lol_openers.py";
+        if (mode && mode->pcStyle == PcStyle::Opener && !view.opener) blurb = "No openers folder: see tools/four_lol_drills.py --openers";
         float y = top + 12 + row * rowH;
         if (row == view.selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
         text(FontWord, name, x + 32, y + 30, colors.text);
