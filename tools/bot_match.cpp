@@ -29,6 +29,7 @@ struct Player {
     size_t at = 0;
     int misplaced = 0;  // locks that didn't land where the bot chose
     int sends = 0;      // this player's sends so far, numbered as core numbers them
+    int surges = 0, surgeLines = 0;
 
     Player(const core::Ruleset& rules, uint32_t seed, const ai::Bot& bot) : game(rules, core::Handling{}, seed), bot(bot) {
         this->bot.rng = core::Rng(seed);
@@ -43,6 +44,9 @@ struct Player {
         const auto& locks = game.tick(plan[at++], garbage);
         if (!locks.empty()) {
             if (locks[0].cells != choice.cells) misplaced++;
+            const int surge = locks[0].sends[0] + locks[0].sends[1] + locks[0].sends[2];
+            surges += surge > 0;
+            surgeLines += surge;
             at = plan.size();
         }
         return locks;
@@ -52,7 +56,7 @@ struct Player {
 struct Result {
     bool won = false, draw = false;
     double seconds = 0;
-    int pieces = 0, attack = 0, garbageCleared = 0, misplaced = 0;
+    int pieces = 0, attack = 0, garbageCleared = 0, misplaced = 0, surges = 0, surgeLines = 0;
 };
 
 // Bot A's result. With `swapped`, A plays the second side's queue.
@@ -90,6 +94,8 @@ Result versus(uint32_t seed, const ai::Bot& a, const ai::Bot& b, bool swapped) {
     r.attack = g.stats.attack;
     r.garbageCleared = g.stats.garbageCleared;
     r.misplaced = players[0].misplaced + players[1].misplaced;
+    r.surges = players[swapped].surges;
+    r.surgeLines = players[swapped].surgeLines;
     return r;
 }
 
@@ -153,7 +159,7 @@ int main(int argc, char** argv) {
     for (auto& t : threads) t.join();
 
     double seconds = 0, best = 1e9;
-    int pieces = 0, attack = 0, garbageCleared = 0, wins = 0, draws = 0, misplaced = 0;
+    int pieces = 0, attack = 0, garbageCleared = 0, wins = 0, draws = 0, misplaced = 0, surges = 0, surgeLines = 0;
     for (const Result& r : results) {
         seconds += r.seconds;
         pieces += r.pieces;
@@ -162,6 +168,8 @@ int main(int argc, char** argv) {
         wins += r.won;
         draws += r.draw;
         misplaced += r.misplaced;
+        surges += r.surges;
+        surgeLines += r.surgeLines;
         if (r.won) best = std::min(best, r.seconds);
     }
     // In versus these are bot A's; misplaced counts both bots.
@@ -170,6 +178,7 @@ int main(int argc, char** argv) {
                 attack / seconds * 60, pieces, misplaced);
     // VS as TETR.IO defines it, as Versus::vsScore does
     if (mode == "versus") std::printf("VS %.1f  garbage cleared %d\n", 100 * (attack + garbageCleared) / seconds, garbageCleared);
+    if (mode == "versus") std::printf("surges %d, %.1f lines each\n", surges, surges ? static_cast<double>(surgeLines) / surges : 0.0);
     if (mode == "versus") std::printf("A won %d, lost %d, drew %d (win rate %.1f%%)\n", wins, games - wins - draws, draws, 100.0 * wins / games);
     if (mode == "sprint") std::printf("finished %d of %d, mean %.2f s, best %.2f s\n", wins, games, seconds / games, best);
     if (mode == "survival") std::printf("%d APM incoming: survived %d of %d to %.0f s, mean %.1f s\n", apm, wins, games, kMaxFrames / 60.0, seconds / games);
