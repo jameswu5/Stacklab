@@ -12,6 +12,15 @@ namespace {
 // 0.89 ± 0.01, flat across mistakes.
 constexpr double kPairVs = 0.89;
 
+// A bot at a human's VS beats that human: it clears more of the garbage it gets (VS/APM about
+// 2.4 against the owner's 2.2) and rarely tops out. The owner (TR 20,495) lost 0-7 to bots
+// drawn at 20.5k and won 7-5 at 17k, so they break even near 17.3k. Raising the bot's mistakes
+// while it digs doesn't close the gap: VS/APM barely falls until VS has about halved. So its VS
+// is scaled: at 0.63, bots drawn at 20.5k win 44% (± 9%) against main's former 17.3k bots,
+// the ones the owner breaks even with (16 draws x 12 games).
+// ponytail: one owner, two sets, applied at every TR; refit from their win rate if it drifts.
+constexpr double kHumanVs = 0.63;
+
 }  // namespace
 
 static void interpolate(const TrField& field, double tr, std::array<double, 3>& mean, std::array<std::array<double, 3>, 3>& cov) {
@@ -45,7 +54,7 @@ TrPlayer TrField::sample(double tr, std::mt19937& rng) const {
         z[i] = mean[i];
         for (int k = 0; k <= i; k++) z[i] += l[i][k] * n[k];
     }
-    return {std::exp(z[0]) * (1 + 0.03 * normal(rng)), std::exp(z[1]) * (1 + 0.09 * normal(rng)), std::exp(z[2]) * (1 + 0.04 * normal(rng))};
+    return {std::exp(z[0]), std::exp(z[1]), std::exp(z[2])};
 }
 
 double TrField::medianPps(double tr) const {
@@ -55,12 +64,12 @@ double TrField::medianPps(double tr) const {
     return std::exp(mean[0]);
 }
 
-TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base, std::mt19937& rng) const {
+TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base) const {
     TrBot bot;
     bot.pps = player.pps;
     // VS per PPS falls as mistakes rise: read the table backwards, clamped at both ends. The
     // player's is 60 × APP × VS/APM.
-    const double vs = 60 * player.app * player.vsApm / kPairVs;
+    const double vs = kHumanVs * 60 * player.app * player.vsApm / kPairVs;
     bot.mistakes = mistakesVs.back()[0];
     if (vs >= mistakesVs.front()[1]) bot.mistakes = 0;
     for (size_t i = 0; i + 1 < mistakesVs.size(); i++) {
@@ -70,11 +79,7 @@ TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base, std::mt19
             break;
         }
     }
-    std::uniform_real_distribution<double> jitter(0.8, 1.2);
     bot.weights = base;
-    for (double* w : {&bot.weights.holes, &bot.weights.height, &bot.weights.danger, &bot.weights.bumpiness, &bot.weights.well,
-                      &bot.weights.tSlot, &bot.weights.attack, &bot.weights.b2b, &bot.weights.wasted})
-        *w *= jitter(rng);
     return bot;
 }
 

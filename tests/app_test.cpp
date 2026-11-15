@@ -2040,12 +2040,12 @@ void testTrField() {
     // read off the table between its rows.
     assert(std::abs(field.medianPps(0) - field.medianPps(403)) < 1e-9 && field.medianPps(30000) > 3.5);
     const ai::BotWeights base;
-    const double mid = field.bot({2, 0.6, 2}, base, rng).mistakes;
-    assert(std::abs(field.bot({3, 0.5, 2.4}, base, rng).mistakes - mid) < 1e-9 && field.bot({2, 0.62, 2}, base, rng).mistakes < mid);
+    const double mid = field.bot({2, 0.6, 2}, base).mistakes;
+    assert(std::abs(field.bot({3, 0.5, 2.4}, base).mistakes - mid) < 1e-9 && field.bot({2, 0.62, 2}, base).mistakes < mid);
     assert(mid > 0 && mid < field.mistakesVs.back()[0]);
-    assert(field.bot({2, 0.99, 2.3}, base, rng).mistakes == 0 && field.bot({1, 0.05, 2}, base, rng).mistakes == field.mistakesVs.back()[0]);
-    const TrBot bot = field.bot({2.5, 0.7, 2}, base, rng);
-    assert(bot.pps == 2.5 && bot.weights.holes != base.holes && std::abs(bot.weights.holes / base.holes - 1) <= 0.2);
+    assert(field.bot({2, 1.2, 2.8}, base).mistakes == 0 && field.bot({1, 0.05, 2}, base).mistakes == field.mistakesVs.back()[0]);
+    const TrBot bot = field.bot({2.5, 0.7, 2}, base);
+    assert(bot.pps == 2.5 && bot.weights.holes == base.holes);
 }
 
 void testReplayRoundTrip() {
