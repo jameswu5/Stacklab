@@ -7,11 +7,10 @@
 
 namespace {
 
-// The bot's mirror APP over the table's, once its weights are jittered: the calibration knob.
-// Two ±20% draws cost 4% and 11% at mistakes 0.02, but over 24 drawn players at 15k-23k (12
-// mirror games each) aiming 7% high overshot by 2-6%, and 4% high by 7% at 20.5k, so in
-// practice the style costs nothing measurable here and the bot aims at the player's APP.
-constexpr double kStyleApp = 1.0;
+// The bot's VS against an independently drawn player at the same TR over its mirror VS, the
+// table's: the calibration knob. 96 bots drawn at 15k, 20.5k and 23k (12 games each) gave
+// 0.89 ± 0.01, flat across mistakes.
+constexpr double kPairVs = 0.89;
 
 }  // namespace
 
@@ -59,14 +58,15 @@ double TrField::medianPps(double tr) const {
 TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base, std::mt19937& rng) const {
     TrBot bot;
     bot.pps = player.pps;
-    // APP falls as mistakes rise: read the table backwards, clamped at both ends.
-    const double app = player.app / kStyleApp;
-    bot.mistakes = mistakesApp.back()[0];
-    if (app >= mistakesApp.front()[1]) bot.mistakes = 0;
-    for (size_t i = 0; i + 1 < mistakesApp.size(); i++) {
-        const auto &a = mistakesApp[i], &b = mistakesApp[i + 1];
-        if (app <= a[1] && app >= b[1]) {
-            bot.mistakes = a[0] + (a[1] - app) / (a[1] - b[1]) * (b[0] - a[0]);
+    // VS per PPS falls as mistakes rise: read the table backwards, clamped at both ends. The
+    // player's is 60 × APP × VS/APM.
+    const double vs = 60 * player.app * player.vsApm / kPairVs;
+    bot.mistakes = mistakesVs.back()[0];
+    if (vs >= mistakesVs.front()[1]) bot.mistakes = 0;
+    for (size_t i = 0; i + 1 < mistakesVs.size(); i++) {
+        const auto &a = mistakesVs[i], &b = mistakesVs[i + 1];
+        if (vs <= a[1] && vs >= b[1]) {
+            bot.mistakes = a[0] + (a[1] - vs) / (a[1] - b[1]) * (b[0] - a[0]);
             break;
         }
     }
@@ -85,9 +85,9 @@ bool loadTrField(const std::string& path, TrField& field) {
     try {
         field = {};
         for (const auto& b : file.at("bands")) field.bands.push_back({b.at("tr_median").get<double>(), b.at("logmean"), b.at("logcov")});
-        for (const auto& row : file.at("mistakes_app")) field.mistakesApp.push_back(row);
+        for (const auto& row : file.at("mistakes_vs")) field.mistakesVs.push_back(row);
     } catch (const nlohmann::json::exception&) {
         return false;
     }
-    return !field.bands.empty() && field.mistakesApp.size() > 1;
+    return !field.bands.empty() && field.mistakesVs.size() > 1;
 }
