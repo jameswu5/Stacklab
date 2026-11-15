@@ -45,7 +45,7 @@ TrPlayer TrField::sample(double tr, std::mt19937& rng) const {
         z[i] = mean[i];
         for (int k = 0; k <= i; k++) z[i] += l[i][k] * n[k];
     }
-    return {std::exp(z[0]) * (1 + 0.03 * normal(rng)), std::exp(z[1]) * (1 + 0.09 * normal(rng)), std::exp(z[2]) * (1 + 0.04 * normal(rng))};
+    return {std::exp(z[0]), std::exp(z[1]), std::exp(z[2])};
 }
 
 double TrField::medianPps(double tr) const {
@@ -55,7 +55,7 @@ double TrField::medianPps(double tr) const {
     return std::exp(mean[0]);
 }
 
-TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base, std::mt19937& rng) const {
+TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base) const {
     TrBot bot;
     bot.pps = player.pps;
     // VS per PPS falls as mistakes rise: read the table backwards, clamped at both ends. The
@@ -70,11 +70,7 @@ TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base, std::mt19
             break;
         }
     }
-    std::uniform_real_distribution<double> jitter(0.8, 1.2);
     bot.weights = base;
-    for (double* w : {&bot.weights.holes, &bot.weights.height, &bot.weights.danger, &bot.weights.bumpiness, &bot.weights.well,
-                      &bot.weights.tSlot, &bot.weights.attack, &bot.weights.b2b, &bot.weights.wasted})
-        *w *= jitter(rng);
     return bot;
 }
 

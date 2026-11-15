@@ -149,7 +149,7 @@ void Versus::startRound(uint32_t seed) {
     if (p.tr > 0) {
         std::mt19937 rng(seed);
         player = field_.sample(p.tr, rng);
-        trBot_ = field_.bot(player, baseWeights_, rng);
+        trBot_ = field_.bot(player, baseWeights_);
         std::snprintf(label, sizeof label, "%s: %.2f PPS, APP %.2f", p.name.c_str(), player.pps, player.app);
     } else {
         std::snprintf(label, sizeof label, "%s", p.name.c_str());

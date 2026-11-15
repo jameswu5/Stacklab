@@ -29,19 +29,19 @@ struct TrField {
     struct Band {
         double tr;                                   // the band's median TR
         std::array<double, 3> mean;                  // of ln PPS, ln APP, ln VS/APM
-        std::array<std::array<double, 3>, 3> cov;
+        std::array<std::array<double, 3>, 3> cov;     // about a line in TR fitted within the band: the spread at one TR
     };
     std::vector<Band> bands;                          // TR rising
     std::vector<std::array<double, 2>> mistakesVs;    // (mistakes, the bot's mirror VS per PPS), mistakes rising
 
-    // A player at `tr`: log-normal, interpolated between the bands either side, then one game's
-    // noise (3% PPS, 9% APP, 4% VS/APM, the owner's match-to-match spread). Doesn't allocate.
+    // A player at `tr`: log-normal, interpolated between the bands either side, with the pool's
+    // spread at one TR. Doesn't allocate.
     TrPlayer sample(double tr, std::mt19937& rng) const;
     // The median player's PPS at `tr`, for the menu.
     double medianPps(double tr) const;
-    // Settings that play like `player`: its PPS as the cap, the base weights each scaled by
-    // 0.8-1.2 for a style of its own, and the mistakes that give its VS against a same-TR player (kPairVs).
-    TrBot bot(const TrPlayer& player, const ai::BotWeights& base, std::mt19937& rng) const;
+    // Settings that play like `player`: its PPS as the cap, the base weights, and the mistakes
+    // that give its VS against a same-TR player (kPairVs).
+    TrBot bot(const TrPlayer& player, const ai::BotWeights& base) const;
 };
 
 // False if the file can't be read.
