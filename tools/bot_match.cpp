@@ -7,6 +7,7 @@
 // A bot is a settings file for ai::loadBot, such as data/bot/presets/6-pps-3.0.txt. In versus,
 // games come in pairs on the same seeds with the sides swapped, so queue luck cancels.
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -55,8 +56,8 @@ struct Result {
     int pieces = 0, attack = 0, garbageCleared = 0, misplaced = 0;
 };
 
-// Bot A's result. With `swapped`, A plays the second side's queue.
-Result versus(uint32_t seed, const ai::Bot& a, const ai::Bot& b, bool swapped) {
+// Bot A's result, then B's. With `swapped`, A plays the second side's queue.
+std::array<Result, 2> versus(uint32_t seed, const ai::Bot& a, const ai::Bot& b, bool swapped) {
     const core::Ruleset rules = kVersusRules;
     // ponytail: different seeds per side, since two equal bots on one queue mirror each other
     Player players[2] = {{rules, seed * 2 + 1, swapped ? b : a}, {rules, seed * 2 + 2, swapped ? a : b}};
@@ -80,16 +81,18 @@ Result versus(uint32_t seed, const ai::Bot& a, const ai::Bot& b, bool swapped) {
             mail.clear();
         }
     }
-    const core::Game& g = players[swapped].game;
-    const core::Game& other = players[!swapped].game;
-    Result r;
-    r.draw = g.toppedOut == other.toppedOut;
-    r.won = !g.toppedOut && other.toppedOut;
-    r.seconds = g.seconds();
-    r.pieces = g.stats.pieces;
-    r.attack = g.stats.attack;
-    r.garbageCleared = g.stats.garbageCleared;
-    r.misplaced = players[0].misplaced + players[1].misplaced;
+    std::array<Result, 2> r;
+    for (int i = 0; i < 2; i++) {
+        const core::Game& g = players[i != swapped].game;
+        const core::Game& other = players[i == swapped].game;
+        r[i].draw = g.toppedOut == other.toppedOut;
+        r[i].won = !g.toppedOut && other.toppedOut;
+        r[i].seconds = g.seconds();
+        r[i].pieces = g.stats.pieces;
+        r[i].attack = g.stats.attack;
+        r[i].garbageCleared = g.stats.garbageCleared;
+        r[i].misplaced = players[0].misplaced + players[1].misplaced;
+    }
     return r;
 }
 
@@ -140,14 +143,21 @@ int main(int argc, char** argv) {
     const int apm = mode == "survival" ? (argc > 5 ? std::atoi(argv[5]) : 60) : 0;
     if (mode != "versus" && mode != "sprint" && mode != "survival") return 1;
 
-    std::vector<Result> results(games);
+    std::vector<Result> results(games), resultsB(games);
     std::atomic<int> nextGame = 0;
     std::vector<std::thread> threads;
     // Threads from BOT_THREADS, 3 by default to share the machine.
     const int threadCount = std::getenv("BOT_THREADS") ? std::max(1, std::atoi(std::getenv("BOT_THREADS"))) : 3;
     for (int t = 0; t < threadCount; t++) {
         threads.emplace_back([&] {
-            for (int i; (i = nextGame++) < games;) results[i] = mode == "versus" ? versus(seed + i / 2, a, b, i % 2) : solo(seed + i, a, apm);
+            for (int i; (i = nextGame++) < games;) {
+                if (mode != "versus") results[i] = solo(seed + i, a, apm);
+                else {
+                    const auto r = versus(seed + i / 2, a, b, i % 2);
+                    results[i] = r[0];
+                    resultsB[i] = r[1];
+                }
+            }
         });
     }
     for (auto& t : threads) t.join();
@@ -170,6 +180,13 @@ int main(int argc, char** argv) {
                 attack / seconds * 60, pieces, misplaced);
     // VS as TETR.IO defines it, as Versus::vsScore does
     if (mode == "versus") std::printf("VS %.1f  garbage cleared %d\n", 100 * (attack + garbageCleared) / seconds, garbageCleared);
+    if (mode == "versus") {
+        double secondsB = 0;
+        int piecesB = 0, attackB = 0, clearedB = 0;
+        for (const Result& r : resultsB) secondsB += r.seconds, piecesB += r.pieces, attackB += r.attack, clearedB += r.garbageCleared;
+        std::printf("B: PPS %.2f  APP %.3f  APM %.1f  VS %.1f  garbage cleared %d\n", piecesB / secondsB, static_cast<double>(attackB) / piecesB,
+                    attackB / secondsB * 60, 100 * (attackB + clearedB) / secondsB, clearedB);
+    }
     if (mode == "versus") std::printf("A won %d, lost %d, drew %d (win rate %.1f%%)\n", wins, games - wins - draws, draws, 100.0 * wins / games);
     if (mode == "sprint") std::printf("finished %d of %d, mean %.2f s, best %.2f s\n", wins, games, seconds / games, best);
     if (mode == "survival") std::printf("%d APM incoming: survived %d of %d to %.0f s, mean %.1f s\n", apm, wins, games, kMaxFrames / 60.0, seconds / games);

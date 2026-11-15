@@ -1947,7 +1947,7 @@ void testBotPresets() {
 }
 
 // Players drawn at a TR match the ladder there, PPS and APP pulling against each other, and
-// map to the bot's mistakes through its APP table.
+// map to the bot's mistakes through its VS-per-PPS table.
 void testTrField() {
     TrField field;
     assert(loadTrField("data/bot/tr-field.json", field) && field.bands.size() == 30);
@@ -1964,11 +1964,14 @@ void testTrField() {
     const double r = (cross / n - mean[0] * mean[1]) / std::sqrt((sq[0] / n - mean[0] * mean[0]) * (sq[1] / n - mean[1] * mean[1]));
     std::printf("TR 20,213: median PPS %.3f, APP %.3f, r %.2f\n", std::exp(mean[0]), std::exp(mean[1]), r);
     assert(std::abs(std::exp(mean[0]) - 2.114) < 0.03 && std::abs(std::exp(mean[1]) - 0.653) < 0.015 && r < -0.4);
-    // Clamped past both ends, and the APP table read backwards, after the style's cost.
+    // Clamped past both ends. Mistakes follow VS per PPS (APP × VS/APM) alone, fewer for more,
+    // read off the table between its rows.
     assert(std::abs(field.medianPps(0) - field.medianPps(403)) < 1e-9 && field.medianPps(30000) > 3.5);
     const ai::BotWeights base;
-    assert(std::abs(field.bot({2, 0.65, 2}, base, rng).mistakes - 0.1) < 1e-9);
-    assert(field.bot({2, 0.99, 2}, base, rng).mistakes == 0 && field.bot({1, 0.1, 2}, base, rng).mistakes == 0.35);
+    const double mid = field.bot({2, 0.6, 2}, base, rng).mistakes;
+    assert(std::abs(field.bot({3, 0.5, 2.4}, base, rng).mistakes - mid) < 1e-9 && field.bot({2, 0.62, 2}, base, rng).mistakes < mid);
+    assert(mid > 0 && mid < field.mistakesVs.back()[0]);
+    assert(field.bot({2, 0.99, 2.3}, base, rng).mistakes == 0 && field.bot({1, 0.05, 2}, base, rng).mistakes == field.mistakesVs.back()[0]);
     const TrBot bot = field.bot({2.5, 0.7, 2}, base, rng);
     assert(bot.pps == 2.5 && bot.weights.holes != base.holes && std::abs(bot.weights.holes / base.holes - 1) <= 0.2);
 }
