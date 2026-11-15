@@ -290,7 +290,7 @@ void PcCoach::start(const core::Game& game, std::span<const core::Piece> dealtBe
     setupAsked_ = false;
     setupShown_ = -1;
     setupFits_.reset();
-    setupBroken_ = setupDone_ = false;
+    setupBroken_ = setupDone_ = stageCleared_ = false;
     stages_ = 0;
     for (const PcSetup& setup : setups) stages_ = std::max(stages_, setup.residue + 1);
     ask(game);
@@ -299,6 +299,7 @@ void PcCoach::start(const core::Game& game, std::span<const core::Piece> dealtBe
 void PcCoach::rollback(const PcProgress& saved, const core::Game& game) {
     progress = saved;
     nullified_ = true;
+    setupBroken_ = false;  // so the setups are looked at again where the undo left the board
     killedBy_ = nullptr;
     hintWanted_ = false;
     lastPieces_ = -1;  // the next answer is a new starting point, so it blames nothing
@@ -353,10 +354,10 @@ void PcCoach::afterTick(std::span<const core::LockResult> locks, const core::Gam
         killedBy_ = nullptr;
         hintWanted_ = false;
         // An opener's TSD clears the rows its setup stood on: on to the next stage's, or the PC after the last.
-        // ponytail: any clear counts, even one that isn't the setup's; the next stage's setups then won't fit
+        // A clear that isn't the setup's leaves none of the next stage fitting: "Setup broken".
         const bool cleared = std::any_of(locks.begin(), locks.end(), [](const core::LockResult& lock) { return lock.lines > 0; });
         if (style == PcStyle::Opener && cleared && setupShown_ >= 0 && !setupDone_) {
-            if (progress.stage < stages_) setupShown_ = -1;
+            if (progress.stage < stages_) setupShown_ = -1, stageCleared_ = true;
             else setupDone_ = true;
         }
         if (setupShown_ >= 0 && setupBuilt(game.board)) setupDone_ = true;
@@ -382,8 +383,9 @@ void PcCoach::takeSetups(const std::bitset<kMaxPcSetups>& fits) {
         setupShown_ = -1;
         for (int k = 1; k <= count && setupShown_ < 0; k++)
             if (fits[(from + k + count) % count]) setupShown_ = (from + k + count) % count;
-        setupBroken_ = from >= 0 && setupShown_ < 0;
+        setupBroken_ = (from >= 0 || stageCleared_) && setupShown_ < 0;
     }
+    stageCleared_ = false;
     setupCount_ = setupNumber_ = 0;
     for (int i = 0; i < count; i++) {
         setupCount_ += fits[i];

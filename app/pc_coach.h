@@ -171,4 +171,5 @@ private:
     bool setupBroken_ = false;  // a placement broke the shown setup, and none other fits
     bool setupDone_ = false;    // the shown setup is built, so pieces past it can't break it
     int stages_ = 0;  // Opener: how many stages of setups there are; the PC follows
+    bool stageCleared_ = false;  // Opener: a clear moved on a stage, so if none of the next fits, that broke it
 };

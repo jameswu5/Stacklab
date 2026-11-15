@@ -396,43 +396,52 @@ int main(int argc, char** argv) {
         practiceShot(setupBroken, "practice-setup-broken", dark);
     }
 
-    // Opener practice: the menu, and Black Tea Cannon's second stage after its first TSD, three
-    // pieces in, if four.lol's openers are in <base>/data/four-lol/openers (they aren't in the repo).
-    const std::vector<PcSetup> btc = loadPcSetups(std::string(argv[2]) + "/data/four-lol/openers/Black Tea Cannon.json");
-    if (btc.size() > 1) {
+    // Opener practice: the menu, and a second stage after the first TSD (the first stage's setup with
+    // its full rows cleared) with some of its pieces in, if four.lol's openers are in
+    // <base>/data/four-lol/openers (they aren't in the repo).
+    auto openerShot = [&](const char* opener, int first, int second, std::string_view placed, const char* name) {
+        const std::vector<PcSetup> setups = loadPcSetups(std::string(argv[2]) + "/data/four-lol/openers/" + opener + ".json");
+        if (static_cast<int>(setups.size()) <= second) return;
         core::Game openerGame(core::Ruleset{}, core::Handling{}, 1);
         openerGame.falling.piece = core::Piece::None;
-        for (int i = 0; i < 20; i++)  // the first TSD's leftovers, and the second stage's I, S and Z
-            if (btc[1].cells[i] == core::Piece::Garbage) openerGame.board.cells[i] = i < 10 ? (i < 3 ? core::Piece::O : core::Piece::S) : i < 12 ? core::Piece::J : core::Piece::S;
-        for (int i = 0; i < 60; i++)
-            if (btc[1].cells[i] == core::Piece::I || btc[1].cells[i] == core::Piece::S || btc[1].cells[i] == core::Piece::Z) openerGame.board.cells[i] = btc[1].cells[i];
+        int y = 0;
+        for (int row = 0; row < kSetupRows; row++) {
+            const auto cells = std::span(setups[first].cells).subspan(row * 10, 10);
+            if (std::ranges::all_of(cells, [](core::Piece p) { return p != core::Piece::None; })) continue;
+            for (int x = 0; x < 10; x++) openerGame.board.at(x, y) = cells[x];
+            y++;
+        }
+        for (int i = 0; i < kSetupRows * 10; i++)
+            if (placed.find(" IJLOSTZ"[static_cast<int>(setups[second].cells[i])]) != std::string_view::npos) openerGame.board.cells[i] = setups[second].cells[i];
         openerGame.queue = {core::Piece::J, core::Piece::L, core::Piece::T, core::Piece::O, core::Piece::I};
         openerGame.hold = core::Piece::Z;
-        PcView opener;
-        opener.status = "Building";
-        std::snprintf(opener.detail, sizeof opener.detail, "stage 2 of 2, then the PC");
-        opener.goal = 1;
-        opener.setup = &btc[1];
-        opener.setupGhost = true;
-        std::snprintf(opener.setupLine, sizeof opener.setupLine, "%s, 1 of 2", btc[1].chance.c_str());
+        PcView view;
+        view.status = "Building";
+        std::snprintf(view.detail, sizeof view.detail, "stage 2 of 2, then the PC");
+        view.goal = 1;
+        view.setup = &setups[second];
+        view.setupGhost = true;
+        std::snprintf(view.setupLine, sizeof view.setupLine, "%s%s1 of 2", setups[second].chance.c_str(), setups[second].chance.empty() ? "" : ", ");
         const std::array<double, kModeCount> noBests{};
         const BotPreset bot{"3 PPS", "", 3};
         for (bool dark : {false, true}) {
             ui.dark = dark;
             ui.beginFrame();
-            ui.drawMenu({&kMenu[2], 2, 0, noBests, 0, &bot, nullptr, "Black Tea Cannon"});
+            ui.drawMenu({&kMenu[2], 2, 0, noBests, 0, &bot, nullptr, opener});
             SDL_FlushRenderer(renderer);
             SDL_Surface* menuPixels = SDL_RenderReadPixels(renderer, nullptr);
-            SDL_SavePNG(menuPixels, (std::string(argv[1]) + (dark ? "/menu-openers-dark.png" : "/menu-openers-light.png")).c_str());
+            SDL_SavePNG(menuPixels, (std::string(argv[1]) + "/menu-" + name + (dark ? "-dark.png" : "-light.png")).c_str());
             SDL_DestroySurface(menuPixels);
             ui.beginFrame();
-            ui.drawPlay({&kModes[10], &openerGame, 4.2, false, nullptr, "", 0, {}, nullptr, 0, &faults, &opener});
+            ui.drawPlay({&kModes[10], &openerGame, 4.2, false, nullptr, "", 0, {}, nullptr, 0, &faults, &view});
             SDL_FlushRenderer(renderer);
             SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
-            SDL_SavePNG(pixels, (std::string(argv[1]) + (dark ? "/opener-btc-dark.png" : "/opener-btc-light.png")).c_str());
+            SDL_SavePNG(pixels, (std::string(argv[1]) + "/" + name + (dark ? "-dark.png" : "-light.png")).c_str());
             SDL_DestroySurface(pixels);
         }
-    }
+    };
+    openerShot("Black Tea Cannon", 0, 1, "ISZ", "opener-btc");
+    openerShot("TKI", 1, 6, "SZO", "opener-tki");
     for (bool dark : {false, true}) {
         shot(practice, false, "practice", dark);
         shot(practice, true, "practice-results", dark);
