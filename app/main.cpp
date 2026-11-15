@@ -43,6 +43,8 @@ struct App {
     std::vector<PcSetup> pcSetups;  // four.lol's, for PC practice; empty without the file
     DrillSet drills;                // four.lol's openers, for Setup drills; empty without the folder
     int drillPick = 0;              // into drills.drills
+    std::vector<PcOpener> openers;  // four.lol's, for Opener practice; empty without the folder
+    int openerPick = 0;             // into openers
 
     uint64_t frameNs = 0, worstFrameNs = 0;
 };
@@ -77,7 +79,8 @@ void startRun(App& app, const Mode& mode, uint64_t timeNs) {
     app.screen = Screen::Play;
     app.play.drill = mode.drills ? &app.drills.drills[app.drillPick] : nullptr;
     if (mode.pcFile && !app.play.coach) app.play.coach = std::make_unique<PcCoach>();
-    if (mode.pcFile) app.play.coach->setups = app.pcSetups;  // before the run starts, as its first question checks them
+    // Before the run starts, as its first question checks them.
+    if (mode.pcFile) app.play.coach->setups = mode.pcStyle == PcStyle::Opener ? std::span<const PcSetup>(app.openers[app.openerPick].setups) : app.pcSetups;
     restart(app, timeNs);
     if (mode.pcFile) {
         app.play.coach->path = app.prefPath + mode.pcFile;
@@ -109,6 +112,10 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
                 app.dig = (app.dig + count + step) % count;
             }
             if (mode && mode->pcStyle == PcStyle::Practice) app.play.residue = (app.play.residue + 7 + step) % 7;
+            if (mode && mode->pcStyle == PcStyle::Opener && !app.openers.empty()) {
+                const int count = static_cast<int>(app.openers.size());
+                app.openerPick = (app.openerPick + count + step) % count;
+            }
             if (mode && mode->drills && !app.drills.drills.empty()) {
                 const int count = static_cast<int>(app.drills.drills.size());
                 app.drillPick = (app.drillPick + count + step) % count;
@@ -121,7 +128,7 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
             break;
         case SDL_SCANCODE_RETURN:
             if (key.repeat) break;
-            if (mode && !(mode->drills && app.drills.drills.empty())) {
+            if (mode && !(mode->drills && app.drills.drills.empty()) && !(mode->pcStyle == PcStyle::Opener && app.openers.empty())) {
                 startRun(app, *mode, key.timestamp);
             } else if (!app.sub && kMenu[row].sub) {
                 app.sub = &kMenu[row];
@@ -167,7 +174,7 @@ void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
         if (key.down && app.play.mode->pcFile) app.play.coach->toggleHint();
         if (key.down && app.play.mode->lst) app.play.lst->toggleHint();
     } else if (bind == BindSetup) {
-        if (key.down && app.play.mode->pcStyle == PcStyle::Practice && !app.play.over) app.play.coach->nextSetup();
+        if (key.down && (app.play.mode->pcStyle == PcStyle::Practice || app.play.mode->pcStyle == PcStyle::Opener) && !app.play.over) app.play.coach->nextSetup();
     } else if (bind == BindBag) {
         if (key.down && app.play.mode->pcFile) app.play.coach->progress.residueShown = true;
     } else {
@@ -259,7 +266,7 @@ void drawFrame(App& app, Ui& ui) {
     ui.beginFrame();
     if (app.screen == Screen::Menu) {
         ui.drawMenu({app.sub, app.sub ? app.subRow : app.topRow, app.dig, app.bests, app.play.residue, &app.presets[app.play.botPreset],
-                     app.drills.drills.empty() ? nullptr : &app.drills.drills[app.drillPick]});
+                     app.drills.drills.empty() ? nullptr : &app.drills.drills[app.drillPick], app.openers.empty() ? nullptr : app.openers[app.openerPick].name.c_str()});
     } else if (app.screen == Screen::Settings) {
         ui.drawSettings(app.settings, app.selected, app.capturing);
     } else {
@@ -319,6 +326,11 @@ int main(int, char**) {
     app.pcSetups = loadPcSetups(std::string(SDL_GetBasePath()) + "data/four-lol/pc-setups.json");
     const std::filesystem::path drillDirs[] = {std::string(SDL_GetBasePath()) + "data/four-lol/drills"};
     app.drills = loadDrills(drillDirs);
+    std::error_code ignored;
+    for (const auto& entry : std::filesystem::directory_iterator(std::string(SDL_GetBasePath()) + "data/four-lol/openers", ignored))
+        if (entry.path().extension() == ".json") app.openers.push_back({entry.path().stem().string(), loadPcSetups(entry.path().string())});
+    std::erase_if(app.openers, [](const PcOpener& opener) { return opener.setups.empty(); });
+    std::ranges::sort(app.openers, {}, &PcOpener::name);
     for (size_t i = 0; i < app.presets.size(); i++)
         if (app.presets[i].name == app.settings.botPreset) app.play.botPreset = static_cast<int>(i);
     for (int i = 0; i < kModeCount; i++)

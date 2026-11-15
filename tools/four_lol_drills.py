@@ -2,12 +2,17 @@
 """Turns scraped four.lol opener and DPC setups into drills for the Setups menu.
 
     python3 -I tools/four_lol_drills.py <scraped openers.json> data/four-lol/drills
+    python3 -I tools/four_lol_drills.py --openers <scraped opener-stages.json> data/four-lol/openers
 
 Each entry's `boards` are its fumen pages, 20 rows top first. The drill is the last page
 before anything clears (the setup, plus its T-spin if the next page shows one), cut to
 the block of rows on the floor. Gray cells (X) are the starting board, and each letter's
 cells are split into pieces, the targets. The queue is an order a player can build in
-(see build_order), with the T-spin last. data/four-lol/ is gitignored: four.lol's content is for personal use only.
+(see build_order), with the T-spin last. With --openers, each opener's stages become one file of setups for Opener practice, in
+PC practice's format (tools/four_lol_setups.py) with the stage as the residue: the stage's
+setup page cut to its floor block (up to 6 rows, T-spin included, the last stage's gray
+cells as X), followed by every stage mirrored.
+data/four-lol/ is gitignored: four.lol's content is for personal use only.
 """
 import json
 import os
@@ -126,8 +131,33 @@ def main(source, target):
     print(f"{len(entries)} drills written to {target}")
 
 
+SWAP = str.maketrans("LJSZ", "JLZS")
+
+
+def opener_setup(entry):
+    rows = list(reversed(floor_block(setup_page(entry["boards"]))))
+    assert 1 <= len(rows) <= 6, entry["name"]
+    return {"residue": entry["stage"], "name": entry["name"], "chance": entry["chance"], "condition": entry["condition"],
+            "board": rows, "need": "", "hold": ""}
+
+
+def openers(source, target):
+    os.makedirs(target, exist_ok=True)
+    by_opener = {}
+    for entry in json.load(open(source)):
+        by_opener.setdefault(entry["opener"], []).append(opener_setup(entry))
+    for name, setups in by_opener.items():
+        mirrored = [dict(s, name=s["name"] + " (mirrored)", board=[row[::-1].translate(SWAP) for row in s["board"]]) for s in setups]
+        with open(os.path.join(target, f"{name}.json"), "w") as file:
+            json.dump(setups + mirrored, file, indent=1, ensure_ascii=False)
+    print(f"{len(by_opener)} openers written to {target}")
+
+
 if __name__ == "__main__":
     # A self-check: an S and a Z beside each other split back into their own pieces.
     assert tile("S", {(0, 0), (1, 0), (1, 1), (2, 1)}) == [[(0, 0), (1, 0), (1, 1), (2, 1)]]
     assert len(tile("O", {(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2), (0, 3), (1, 3)})) == 2
-    main(*sys.argv[1:])
+    if sys.argv[1] == "--openers":
+        openers(*sys.argv[2:])
+    else:
+        main(*sys.argv[1:])

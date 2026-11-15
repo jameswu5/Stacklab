@@ -494,6 +494,7 @@ void Ui::drawMenu(const MenuView& view) {
         const char* blurb = menuRow && menuRow->blurb ? menuRow->blurb : mode->blurb;
         if (mode && mode->versus && view.bot->tr) blurb = "A new League player at this TR each round";
         if (mode && mode->drills) blurb = view.drill ? view.drill->blurb.c_str() : "No drills folder: see tools/four_lol_drills.py";
+        if (mode && mode->pcStyle == PcStyle::Opener && !view.opener) blurb = "No openers folder: see tools/four_lol_openers.py";
         float y = top + 12 + row * rowH;
         if (row == view.selected) fill(x + 12, y, width - 24, rowH, colors.line, 16);
         text(FontWord, name, x + 32, y + 30, colors.text);
@@ -517,6 +518,10 @@ void Ui::drawMenu(const MenuView& view) {
         if (mode && mode->drills && view.drill) {
             std::snprintf(buffer, sizeof buffer, "< %s >", view.drill->name.c_str());
             setting("SETUP", buffer);
+        }
+        if (mode && mode->pcStyle == PcStyle::Opener && view.opener) {
+            std::snprintf(buffer, sizeof buffer, "< %s >", view.opener);
+            setting("OPENER", buffer);
         }
         if (mode && mode->versus) {
             char label[32];
@@ -684,7 +689,7 @@ void Ui::drawPlay(const PlayView& view) {
         }
     }
     if (view.pc && view.pc->setup && view.pc->setupGhost && !view.over) {
-        for (int y = 0; y < 4; y++)
+        for (int y = 0; y < kSetupRows; y++)
             for (int x = 0; x < 10; x++) {
                 const core::Piece piece = view.pc->setup->cells[y * 10 + x];
                 if (piece != core::Piece::None && game.board.at(x, y) == core::Piece::None) block(x, y, colors.pieces[static_cast<int>(piece)], colors.ghostAlpha);

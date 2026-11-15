@@ -20,6 +20,8 @@
 constexpr int kPcGoal = 10;  // in one run of 40 lines
 // The owner trains 4-line PCs, with 2-line ones allowed, so a 6-line PC reads as "No PC" and ends the streak.
 constexpr int kPcMaxLines = 4;
+// An opener's TSDs and its PC: Black Tea Cannon's 8-height PC takes 8.
+constexpr int kOpenerMaxLines = 10;
 
 // The shortest PC is 2 lines, so 10 PCs can take fewer than 40.
 inline bool pcGoalOutOfReach(int pcs, int linesLeft) { return pcs + linesLeft / 2 < kPcGoal; }
@@ -30,6 +32,7 @@ struct PcProgress {
     int streak = 0;           // ends when an attempt spends more than kPcMaxLines lines
     int phase = 0;            // the bag residue: pieces placed before this attempt, modulo 7
     int linesInAttempt = 0;
+    int stage = 0;            // locks that cleared lines: an opener's stage
     bool attempted = false;   // a piece has been placed in this attempt
     bool residueShown = false;  // Bag count: the player asked to see this attempt's phase
     PcTally tally;
@@ -40,15 +43,22 @@ struct PcProgress {
 
 // A four.lol perfect-clear setup, from data/four-lol/pc-setups.json, which
 // tools/four_lol_setups.py makes. The data is for personal use, so it isn't in git.
+constexpr int kSetupRows = 6;  // an opener's second TSD stands 6 high; PC setups use 4
 struct PcSetup {
-    int residue = 0;
+    int residue = 0;  // an opener's: its stage, the TSDs or other line clears before it
     std::string name, chance, condition;  // condition is four.lol's text, shown as it is
-    std::array<core::Piece, 40> cells{};  // 4 rows of 10, y up from the floor; Garbage where four.lol draws gray
+    std::array<core::Piece, kSetupRows * 10> cells{};  // y up from the floor; Garbage where four.lol draws gray
     std::array<int, 8> need{};    // by core::Piece: pieces the condition says to keep on hand besides the board's
     uint8_t holds = 0;            // a bit per piece the attempt may start with in hold; 0 is any
 };
 
 std::vector<PcSetup> loadPcSetups(const std::string& path);  // empty if the file is missing or damaged
+
+// An opener's setups, stage by stage, from data/four-lol/openers/<name>.json (tools/four_lol_openers.py).
+struct PcOpener {
+    std::string name;
+    std::vector<PcSetup> setups;
+};
 
 constexpr size_t kMaxPcSetups = 512;  // ponytail: more in the file are ignored; the mirrored file has 361
 
@@ -119,7 +129,7 @@ public:
     void poll();  // takes the worker's latest answer, if any
     void take(const PcAnswer& answer);  // an answer that isn't about the latest question is dropped
     void toggleHint() { hintWanted_ = !hintWanted_; }
-    // Practice: shows the next setup that fits, and none after the last. Allocates nothing.
+    // Practice and Opener: shows the next setup that fits, and none after the last. Allocates nothing.
     void nextSetup();
     void save();  // adds this run to the record, once
     void discard() { saved_ = true; }  // a replay of a run already counted: saves nothing
@@ -136,6 +146,7 @@ private:
     void ask(const core::Game& game);
     void takeSetups(const std::bitset<kMaxPcSetups>& fits);
     bool setupBuilt(const core::Board& board) const;
+    bool pcPhase() const { return style != PcStyle::Opener || progress.stage >= stages_ || setupDone_; }
 
     std::unique_ptr<PcWorker> worker_;
     uint64_t askId_ = 0;
@@ -159,4 +170,5 @@ private:
     std::bitset<kMaxPcSetups> setupFits_;  // the worker's latest answer
     bool setupBroken_ = false;  // a placement broke the shown setup, and none other fits
     bool setupDone_ = false;    // the shown setup is built, so pieces past it can't break it
+    int stages_ = 0;  // Opener: how many stages of setups there are; the PC follows
 };
