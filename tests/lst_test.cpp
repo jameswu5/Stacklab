@@ -70,9 +70,14 @@ int main() {
     assert(!alive(board({"##........", "#...######", "#...######", "##.#######"})));  // a slot two deep under the overhang
     assert(!alive(board({"##..######", "##..######", "##..######", "##..######"})));  // column 3 left behind: a two-wide well
 
+    // The next TSD's readiness: none on an empty board, all there on `ready`, half without the overhang.
+    assert(ai::lstSlot(ai::rowsOf(core::Board{})) == 0);
+    assert(ai::lstSlot(ai::rowsOf(ready)) == 1);
+    assert(ai::lstSlot(ai::rowsOf(board({"#...######", "##.#######"}))) == 0.5);
+
     // The normal bot's files leave the LST terms off.
     ai::Bot preset;
-    assert(ai::loadBot("data/bot/presets/6-pps-3.0.txt", preset) && preset.weights.lst == 0 && preset.weights.notTsd == 0);
+    assert(ai::loadBot("data/bot/presets/6-pps-3.0.txt", preset) && preset.weights.lst == 0 && preset.weights.notTsd == 0 && preset.weights.tWasted == 0 && preset.weights.lstSlot == 0 && preset.weights.lstWalls == 0);
 
     ai::Bot bot;
     assert(ai::loadBot("data/bot/lst.txt", bot) && bot.weights.lst < 0);

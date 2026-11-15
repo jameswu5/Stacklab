@@ -1,5 +1,7 @@
 #include "ai/lst.h"
 
+#include <bit>
+
 namespace ai {
 
 Rows rowsOf(const core::Board& board) {
@@ -34,6 +36,17 @@ bool lstAlive(const Rows& rows) {
     }
     // The slot's walls keep up with the overhang side and the stack, or the next slot can't form.
     return tops[1] >= tops[0] - 2 && tops[3] >= tops[4] - 2;
+}
+
+double lstSlot(const Rows& rows) {
+    constexpr uint16_t kSlot = 0b1110;  // columns 1-3
+    for (int y = 0; y + 2 < core::kBoardHeight; y++) {
+        if ((rows[y] & 0b1010) != 0b1010 || rows[y + 1] & kSlot) continue;
+        const int filled = std::popcount(static_cast<uint16_t>(rows[y] & ~0b1010)) + std::popcount(static_cast<uint16_t>(rows[y + 1]));
+        const bool overhang = rows[y + 2] & 0b1010;
+        return (overhang ? 1.0 : 0.5) * filled / 14;
+    }
+    return 0;
 }
 
 }  // namespace ai

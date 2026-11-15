@@ -29,6 +29,9 @@ struct BotWeights {
     double combo = 0;     // per level of the combo
     double lst = 0;       // per board on the way that the LST loop can't go on from (ai/lst.h); only data/bot/lst.txt sets it
     double notTsd = 0;    // per line of a clear that's neither a T-spin double nor a quad; likewise
+    double lstSlot = 0;   // times ai::lstSlot, how ready the next TSD over the well is; likewise
+    double lstWalls = 0;  // per row between the tops of columns 1 and 3, the slot's walls; likewise
+    double tWasted = 0;   // per T placed other than as a T-spin double; likewise
 };
 
 
