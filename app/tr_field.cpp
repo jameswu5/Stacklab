@@ -12,6 +12,15 @@ namespace {
 // 0.89 ± 0.01, flat across mistakes.
 constexpr double kPairVs = 0.89;
 
+// A bot at a human's VS beats that human: it clears more of the garbage it gets (VS/APM about
+// 2.4 against the owner's 2.2) and rarely tops out. The owner (TR 20,495) lost 0-7 to bots
+// drawn at 20.5k and won 7-5 at 17k, so they break even near 17.3k. Raising the bot's mistakes
+// while it digs doesn't close the gap: VS/APM barely falls until VS has about halved. So its VS
+// is scaled: at 0.63, bots drawn at 20.5k win 44% (± 9%) against main's former 17.3k bots,
+// the ones the owner breaks even with (16 draws x 12 games).
+// ponytail: one owner, two sets, applied at every TR; refit from their win rate if it drifts.
+constexpr double kHumanVs = 0.63;
+
 }  // namespace
 
 static void interpolate(const TrField& field, double tr, std::array<double, 3>& mean, std::array<std::array<double, 3>, 3>& cov) {
@@ -60,7 +69,7 @@ TrBot TrField::bot(const TrPlayer& player, const ai::BotWeights& base) const {
     bot.pps = player.pps;
     // VS per PPS falls as mistakes rise: read the table backwards, clamped at both ends. The
     // player's is 60 × APP × VS/APM.
-    const double vs = 60 * player.app * player.vsApm / kPairVs;
+    const double vs = kHumanVs * 60 * player.app * player.vsApm / kPairVs;
     bot.mistakes = mistakesVs.back()[0];
     if (vs >= mistakesVs.front()[1]) bot.mistakes = 0;
     for (size_t i = 0; i + 1 < mistakesVs.size(); i++) {

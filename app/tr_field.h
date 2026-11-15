@@ -1,6 +1,7 @@
 // Versus opponents that play like a TETRA LEAGUE player at a chosen TR. data/bot/tr-field.json
 // holds the ladder's stats by TR band and the bot's VS per PPS by mistakes; each round draws a
-// player from them and sets the bot to match its PPS and VS. Known limits: the bot's VS per PPS
+// player from them and sets the bot to its PPS and a VS that plays like it against a human
+// (kHumanVs). Known limits: the bot's VS per PPS
 // tops out near 114 against a same-TR opponent, just above the ladder's top band (107); its
 // VS/APM runs about 2.3 against humans' 2.0-2.15, so at a matched VS its APP reads about 10%
 // low; and below 1 PPS its real PPS runs over the cap (0.82 at 0.75), so its VS there reads up
@@ -39,8 +40,9 @@ struct TrField {
     TrPlayer sample(double tr, std::mt19937& rng) const;
     // The median player's PPS at `tr`, for the menu.
     double medianPps(double tr) const;
-    // Settings that play like `player`: its PPS as the cap, the base weights, and the mistakes
-    // that give its VS against a same-TR player (kPairVs).
+    // Settings that play like `player` against a human: its PPS as the cap, the base weights,
+    // and the mistakes that give its VS against a same-TR player (kPairVs), scaled down by
+    // kHumanVs for the bot's edge over humans.
     TrBot bot(const TrPlayer& player, const ai::BotWeights& base) const;
 };
 
