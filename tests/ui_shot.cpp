@@ -517,19 +517,19 @@ int main(int argc, char** argv) {
         ui.dark = dark;
         versus.roundOver = false;
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "TR 20.5k: 2.08 PPS, APP 0.64"});
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "TR 20.5k: 2.08 PPS"});
         save("versus");
         versus.roundOver = true;
         versus.lastWinner = 0;
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "TR 20.5k: 2.08 PPS, APP 0.64"});
+        ui.drawVersus({&versusMode, &you, &versus, false, nullptr, "", matches, "TR 20.5k: 2.08 PPS"});
         save("versus-round");
         versus.match.wins = {7, 4};
         versus.match.rounds = 11;
         versus.match.totals[0] = {402, 260, 31, 255.4};
         versus.match.totals[1] = {380, 199, 22, 255.4};
         ui.beginFrame();
-        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches, "TR 20.5k: 2.08 PPS, APP 0.64"});
+        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches, "TR 20.5k: 2.08 PPS"});
         save("versus-results");
         versus.match.wins = {3, 2};
     }
