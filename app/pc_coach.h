@@ -54,7 +54,7 @@ struct PcSetup {
 
 std::vector<PcSetup> loadPcSetups(const std::string& path);  // empty if the file is missing or damaged
 
-// An opener's setups, stage by stage, from data/four-lol/openers/<name>.json (tools/four_lol_openers.py).
+// An opener's setups, stage by stage, from data/four-lol/openers/<name>.json (tools/four_lol_drills.py --openers).
 struct PcOpener {
     std::string name;
     std::vector<PcSetup> setups;
