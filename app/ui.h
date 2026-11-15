@@ -78,6 +78,7 @@ struct VersusView {
     std::span<const RunResult> history;  // when over, the last is this match
     const char* botName = "Bot";         // its preset
     bool replay = false;                 // a replay is playing, which the top bar says
+    bool rounds = false;                 // the results list the rounds in place of the match's totals
 };
 
 class Ui {

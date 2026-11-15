@@ -1878,7 +1878,11 @@ void testVersusRound() {
         const SideTotals& t = match.totals[side];
         assert(std::accumulate(t.attackFrom.begin(), t.attackFrom.end(), 0) == t.attack);
         assert(t.garbageReceived == (side == 0 ? play.game : bot).stats.garbageReceived);
+        // The round's own line matches the totals after one round.
+        const RoundStats& r = match.byRound[0];
+        assert(r.pieces[side] == t.pieces && r.attack[side] == t.attack && r.garbageCleared[side] == t.garbageCleared && r.seconds[side] == t.seconds);
     }
+    assert(match.byRound[0].winner == (play.game.toppedOut ? 1 : 0));
 
     // The round card, then a new round on a new seed that keeps the score.
     play.stepTo(now + kRoundCardNs / 2);

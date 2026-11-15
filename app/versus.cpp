@@ -266,7 +266,15 @@ bool Versus::endRound(const core::Game& you, uint64_t nowNs) {
     if (lastWinner >= 0) match.wins[lastWinner]++;
     match.rounds++;
     const core::Game* sides[2] = {&you, &bot};
+    RoundStats* round = match.rounds <= kMaxRoundStats ? &match.byRound[match.rounds - 1] : nullptr;
+    if (round) round->winner = lastWinner;
     for (int i = 0; i < 2; i++) {
+        if (round) {
+            round->pieces[i] = sides[i]->stats.pieces;
+            round->attack[i] = sides[i]->stats.attack;
+            round->garbageCleared[i] = sides[i]->stats.garbageCleared;
+            round->seconds[i] = sides[i]->seconds();
+        }
         SideTotals& t = match.totals[i];
         t.pieces += sides[i]->stats.pieces;
         t.attack += sides[i]->stats.attack;

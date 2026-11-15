@@ -37,6 +37,9 @@ struct App {
     int selected = 0;
     bool capturing = false;
     Replay replay;  // the one being played back
+    std::vector<Replay> matchRounds;  // versus: the last match's rounds, to play back
+    int replayRound = 0;              // into matchRounds
+    bool versusRounds = false;        // the results show round by round
     std::vector<RunResult> playbackHistory;  // the session with the replay's run last, for its results
     bool hasBestReplay = false;  // the mode's best run was saved as a replay
     std::vector<BotPreset> presets;
@@ -148,6 +151,25 @@ void handleMenuKey(App& app, const SDL_KeyboardEvent& key) {
 void handlePlayKey(App& app, const SDL_KeyboardEvent& key) {
     if (key.repeat) return;
     Play& play = app.play;
+    if (key.down && play.over && play.mode->versus && key.scancode == SDL_SCANCODE_TAB) {
+        app.versusRounds = !app.versusRounds;
+        return;
+    }
+    // A versus replay steps through the match's rounds with the arrow keys.
+    if (key.down && play.playback && play.mode->versus && (key.scancode == SDL_SCANCODE_LEFT || key.scancode == SDL_SCANCODE_RIGHT)) {
+        const int round = std::clamp(app.replayRound + (key.scancode == SDL_SCANCODE_LEFT ? -1 : 1), 0, static_cast<int>(app.matchRounds.size()) - 1);
+        if (round != app.replayRound) {
+            app.replayRound = round;
+            play.startPlayback(app.matchRounds[round], key.timestamp + kCountdownNs);
+        }
+        return;
+    }
+    if (key.down && play.over && play.mode->versus && key.scancode == SDL_SCANCODE_P) {
+        if (!play.playback && !play.replayable()) return;
+        if (!play.playback) app.replayRound = static_cast<int>(app.matchRounds.size()) - 1;
+        play.startPlayback(app.matchRounds[app.replayRound], key.timestamp + kCountdownNs);
+        return;
+    }
     if (key.down && play.over && (key.scancode == SDL_SCANCODE_P || key.scancode == SDL_SCANCODE_O)) {
         if (key.scancode == SDL_SCANCODE_P && !play.playback) {
             if (!play.replayable()) return;
@@ -254,10 +276,10 @@ void recordRun(App& app) {
     for (char& c : name) c = c == ' ' ? '-' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     const std::string path = app.prefPath + "replays/" + stamp + name + ".json";
     if (!play.mode->versus) return saveReplay(play.recording, path);
-    std::vector<Replay> rounds = play.rounds;
-    rounds.push_back(play.recording);
-    for (Replay& round : rounds) round.botPreset = app.presets[play.botPreset].name;
-    saveMatch(rounds, path);
+    app.matchRounds = play.rounds;
+    app.matchRounds.push_back(play.recording);
+    for (Replay& round : app.matchRounds) round.botPreset = app.presets[play.botPreset].name;
+    saveMatch(app.matchRounds, path);
 }
 
 void drawFrame(App& app, Ui& ui) {
@@ -274,6 +296,7 @@ void drawFrame(App& app, Ui& ui) {
         std::string hint;
         auto keyName = [&](Bind bind) { return rowValue(app.settings, static_cast<int>(RowBindFirst) + bind); };
         if (play.over && (play.playback || play.replayable())) hint = keyName(BindRetry) + " retry, " + keyName(BindMenu) + " menu, P replay" + (app.hasBestReplay ? ", O best" : "");
+        if (play.over && play.mode->versus) hint += play.playback ? ", Left/Right round" : ", Tab rounds";
         else if (play.over) hint = keyName(BindRetry) + " to retry, " + keyName(BindMenu) + " for the menu";
         else if (play.missed) {
             banner = "Missed";
@@ -281,7 +304,10 @@ void drawFrame(App& app, Ui& ui) {
         }
         else if (!play.started) banner = SDL_GetTicksNS() < play.startNs - kCountdownNs / 2 ? "Ready" : "Set";
         if (play.mode->versus) {
-            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), play.playback ? app.playbackHistory : app.history, play.playback ? app.presets[play.botPreset].name.c_str() : play.versus->label, play.playback != nullptr});
+            char replayLabel[96];
+            std::snprintf(replayLabel, sizeof replayLabel, "%s, round %d of %zu", app.presets[play.botPreset].name.c_str(), app.replayRound + 1, app.matchRounds.size());
+            ui.drawVersus({play.mode, &play.shown, play.versus.get(), play.over, banner, hint.c_str(), play.playback ? app.playbackHistory : app.history, play.playback ? replayLabel : play.versus->label, play.playback != nullptr,
+                           app.versusRounds && !play.playback});
         } else {
             PcView pcView;
             const PcView* pc = nullptr;

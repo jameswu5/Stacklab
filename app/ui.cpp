@@ -833,7 +833,41 @@ void Ui::drawVersus(const VersusView& view) {
     versusSide(*view.you, versus.callouts[0], "You", kVsSideX[0], live, live ? view.banner : nullptr);
     versusSide(versus.bot, versus.callouts[1], buffer, kVsSideX[1], live, live ? view.banner : nullptr);
 
-    if (view.over) {
+    if (view.over && view.rounds) {
+        // Round by round: who took it, how long, and each side's PPS, APP and VS.
+        constexpr float width = 860, height = 760, x = 720 - width / 2, top = 100;
+        fill(x, top, width, height, colors.card, 24);
+        text(FontWord, "Round by round", 720, top + 44, colors.text, Align::Center);
+        const float columns[] = {x + 380, x + 470, x + 560, x + 690, x + 770, x + 836};
+        text(FontLabel, "YOU", (columns[0] + columns[2]) / 2 - 20, top + 86, colors.muted, Align::Center, kLabelTracking);
+        text(FontLabel, "BOT", (columns[3] + columns[5]) / 2 - 20, top + 86, colors.muted, Align::Center, kLabelTracking);
+        const char* heads[] = {"PPS", "APP", "VS", "PPS", "APP", "VS"};
+        text(FontLabel, "ROUND", x + 32, top + 112, colors.muted, Align::Left, kLabelTracking);
+        text(FontLabel, "TIME", x + 270, top + 112, colors.muted, Align::Right, kLabelTracking);
+        for (int c = 0; c < 6; c++) text(FontLabel, heads[c], columns[c], top + 112, colors.muted, Align::Right, kLabelTracking);
+        const int count = std::min(match.rounds, kMaxRoundStats);
+        for (int r = 0; r < count; r++) {
+            const RoundStats& round = match.byRound[r];
+            const float y = top + 124 + r * 36.0f;
+            fill(x + 24, y, width - 48, 1, colors.line);
+            std::snprintf(buffer, sizeof buffer, "%d", r + 1);
+            text(FontRow, buffer, x + 32, y + 25, colors.muted);
+            text(FontValue, round.winner == 0 ? "You" : round.winner == 1 ? "Bot" : "Draw", x + 80, y + 25, round.winner == 0 ? colors.text : colors.muted);
+            const double seconds = std::max(round.seconds[0], round.seconds[1]);
+            std::snprintf(buffer, sizeof buffer, "%d:%02d", static_cast<int>(seconds) / 60, static_cast<int>(seconds) % 60);
+            text(FontValue, buffer, x + 270, y + 25, colors.text, Align::Right);
+            for (int side = 0; side < 2; side++) {
+                const double s = round.seconds[side];
+                const double values[] = {s > 0 ? round.pieces[side] / s : 0, round.pieces[side] > 0 ? static_cast<double>(round.attack[side]) / round.pieces[side] : 0,
+                                         Versus::vsScore(round.attack[side], round.garbageCleared[side], s)};
+                for (int c = 0; c < 3; c++) {
+                    std::snprintf(buffer, sizeof buffer, c == 2 ? "%.0f" : "%.2f", values[c]);
+                    text(FontValue, buffer, columns[side * 3 + c], y + 25, colors.text, Align::Right);
+                }
+            }
+        }
+        text(FontSmall, view.hint, 720, top + height - 18, colors.muted, Align::Center);
+    } else if (view.over) {
         constexpr float width = 420, height = 760, x = 720 - width / 2, top = 100;
         fill(x, top, width, height, colors.card, 24);
         text(FontWord, match.wins[0] > match.wins[1] ? "You win the match" : "The bot wins the match", 720, top + 44, colors.text, Align::Center);

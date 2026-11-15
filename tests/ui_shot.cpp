@@ -531,6 +531,13 @@ int main(int argc, char** argv) {
         ui.beginFrame();
         ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches, "TR 20.5k: 2.08 PPS"});
         save("versus-results");
+        versus.match.rounds = 13;
+        for (int r = 0; r < 13; r++)
+            versus.match.byRound[r] = {r % 3 == 1 ? 1 : 0, {40 + r * 3, 38 + r * 2}, {25 + r, 18 + r % 4}, {4, 6}, {18.5 + r * 1.7, 18.5 + r * 1.7}};
+        versus.match.byRound[5].winner = -1;
+        ui.beginFrame();
+        ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R retry, Esc menu, P replay, Tab rounds", matches, "TR 20.5k: 2.08 PPS", false, true});
+        save("versus-results-rounds");
         versus.match.wins = {3, 2};
     }
     versus.roundOver = false;

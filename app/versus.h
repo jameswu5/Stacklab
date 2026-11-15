@@ -38,10 +38,19 @@ struct SideTotals {
     double seconds = 0;
 };
 
+// One round, for the results' round by round view.
+struct RoundStats {
+    int winner = -1;  // 0 you, 1 the bot, -1 a draw
+    std::array<int, 2> pieces{}, attack{}, garbageCleared{};
+    std::array<double, 2> seconds{};
+};
+constexpr int kMaxRoundStats = 2 * kVersusRounds + 2;  // the longest match, with a few draws; later rounds aren't listed
+
 struct Match {
     std::array<int, 2> wins{};  // rounds won: you, then the bot
     int rounds = 0;             // rounds played, draws included
     std::array<SideTotals, 2> totals{};
+    std::array<RoundStats, kMaxRoundStats> byRound{};  // the first min(rounds, kMaxRoundStats)
 };
 
 // A bot to play: data/bot/presets in file-name order, then players by TR (app/tr_field.h).
