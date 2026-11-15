@@ -1662,6 +1662,37 @@ void testOpenerStages() {
     p.tap(BindHardDrop);  // builds the last stage: the PC is next
     p.waitForAnswer();
     assert(p.view().setup == &stages[1] && !p.view().setupGhost && std::string(p.view().status) != "Building");
+
+    // A wrong placement that clears lines leaves none of the next stage fitting, and says so;
+    // undo goes back to the stage. Here the well wants an L, and a vertical I clears instead.
+    std::ofstream(path) << R"json([
+ {"residue": 0, "name": "L in the well", "chance": "", "condition": "", "need": "", "hold": "", "board": ["X.......LL", "XXXXXXXXXL", "XXXXXXXXXL"]},
+ {"residue": 1, "name": "O on the L", "chance": "", "condition": "", "need": "", "hold": "", "board": [".OO.......", "XOO.....XX"]}
+])json";
+    const std::vector<PcSetup> well = loadPcSetups(path);
+    std::filesystem::remove(path);
+    p.play.restart({}, 1, p.now);
+    p.coach().setups = well;
+    game.board = {};
+    for (int x = 0; x < 9; x++) game.board.at(x, 0) = game.board.at(x, 1) = Piece::Garbage;
+    game.board.at(0, 2) = Piece::Garbage;
+    game.hold = Piece::None;
+    game.queue = {Piece::L, Piece::O, Piece::T, Piece::T, Piece::T, Piece::T};
+    game.respawn(Piece::I);
+    p.coach().start(game);
+    p.play.saveUndo();
+    p.waitForAnswer();
+    p.coach().nextSetup();
+    assert(p.view().setup == &well[0]);
+    p.now = p.play.startNs;
+    p.tap(BindCW);
+    p.move(ai::Move::DasRight);
+    p.tap(BindHardDrop);  // clears both rows
+    p.waitForAnswer();
+    assert(p.coach().progress.stage == 1 && !p.view().setup && std::string(p.view().setupLine) == "Setup broken");
+    p.play.undo(p.now);
+    p.waitForAnswer();
+    assert(p.coach().progress.stage == 0 && p.view().setup == &well[0]);
 }
 
 // Bag count has no solver and hides the residue until asked, and the badge ends a run early.
