@@ -34,7 +34,7 @@ constexpr float kToggleW = 76, kToggleH = 38, kBarSide = 32;
 constexpr float kLabelTracking = 1.1f;
 constexpr float kTimeTracking = -1.32f;
 constexpr float kSetupRowsH = 108;  // PC practice's setup lines on the coach card
-constexpr float kHoldCell = 24, kNextSlot = 144;
+constexpr float kHoldCell = 24, kNextSlot = 80;
 
 constexpr const char* kFontFiles[] = {"PlusJakartaSans-Regular.ttf", "PlusJakartaSans-SemiBold.ttf", "PlusJakartaSans-Bold.ttf"};
 struct FontSpec {
@@ -709,9 +709,9 @@ void Ui::drawPlay(const PlayView& view) {
         return;
     }
 
-    card(kRightX, kRowY, kColumnW, 788, "NEXT");
+    card(kRightX, kRowY, kColumnW, 77 + 4 * kNextSlot + 50, "NEXT");  // about 57% of the board's height
     // Fixed slots, so the queue doesn't jump as flat I pieces pass through it.
-    for (int i = 0; i < 5 && i < static_cast<int>(game.queue.size()); i++) preview(game.queue[i], kRightX + kColumnW / 2, kRowY + 120 + kNextSlot * i, kHoldCell);  // as big as hold's
+    for (int i = 0; i < 5 && i < static_cast<int>(game.queue.size()); i++) preview(game.queue[i], kRightX + kColumnW / 2, kRowY + 77 + kNextSlot * i, kHoldCell);  // as big as hold's
 
     if (view.banner) text(FontTime, view.banner, kBoardX + 190, kBoardY + 396, colors.text, Align::Center);
     if (view.banner) text(FontRow, view.hint, kBoardX + 190, kBoardY + 428, colors.muted, Align::Center);
