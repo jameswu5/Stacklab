@@ -834,7 +834,7 @@ void Ui::drawVersus(const VersusView& view) {
     versusSide(versus.bot, versus.callouts[1], buffer, kVsSideX[1], live, live ? view.banner : nullptr);
 
     if (view.over) {
-        constexpr float width = 420, height = 480, x = 720 - width / 2, top = 200;
+        constexpr float width = 420, height = 760, x = 720 - width / 2, top = 100;
         fill(x, top, width, height, colors.card, 24);
         text(FontWord, match.wins[0] > match.wins[1] ? "You win the match" : "The bot wins the match", 720, top + 44, colors.text, Align::Center);
         std::snprintf(buffer, sizeof buffer, "%d - %d", match.wins[0], match.wins[1]);
@@ -854,8 +854,22 @@ void Ui::drawVersus(const VersusView& view) {
                 text(FontValue, buffer, columns[side], y + 26, colors.text, Align::Right);
             }
         }
-        // This session's matches, newest first.
+        // Where the attack came from, and the garbage each side took and dug.
         float y = top + 150 + 4 * 38.0f + 20;
+        text(FontLabel, "ATTACK FROM", x + 24, y + 20, colors.muted, Align::Left, kLabelTracking);
+        const char* sources[] = {"Spins", "Quads", "Other clears", "Surge", "Perfect clears", "Clears sending 0", "Garbage received", "Garbage cleared"};
+        for (int row = 0; row < 8; row++) {
+            const float rowY = y + 30 + row * 30.0f;
+            text(FontRow, sources[row], x + 24, rowY + 22, colors.muted);
+            for (int side = 0; side < 2; side++) {
+                const SideTotals& t = match.totals[side];
+                const int value = row < kAttackSources ? t.attackFrom[row] : row == 5 ? t.emptyClears : row == 6 ? t.garbageReceived : t.garbageCleared;
+                std::snprintf(buffer, sizeof buffer, "%d", value);
+                text(FontValue, buffer, columns[side], rowY + 22, colors.text, Align::Right);
+            }
+        }
+        // This session's matches, newest first.
+        y += 30 + 8 * 30.0f + 16;
         fill(x + 24, y, width - 48, 1, colors.line);
         text(FontLabel, "SESSION", x + 24, y + 28, colors.muted, Align::Left, kLabelTracking);
         int shown = 0;

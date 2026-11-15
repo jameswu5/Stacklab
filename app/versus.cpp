@@ -182,8 +182,14 @@ void Versus::send(int from, std::span<const core::LockResult> locks) {
 
 // A clear, a spin or a perfect clear gets named.
 void Versus::note(int side, std::span<const core::LockResult> locks, uint64_t frame) {
-    for (const core::LockResult& lock : locks)
+    SideTotals& t = match.totals[side];
+    for (const core::LockResult& lock : locks) {
         if (lock.lines > 0 || lock.spin != core::Spin::None || lock.perfectClear) callouts[side] = {lock, frame, true};
+        t.attackFrom[FromSurge] += lock.sends[0] + lock.sends[1] + lock.sends[2];
+        t.attackFrom[lock.spin != core::Spin::None ? FromSpins : lock.lines == 4 ? FromQuads : FromOther] += lock.sends[3];
+        t.attackFrom[FromPcs] += lock.sends[4];
+        if (lock.lines > 0 && lock.sends[0] + lock.sends[1] + lock.sends[2] + lock.sends[3] + lock.sends[4] == 0) t.emptyClears++;
+    }
 }
 
 void Versus::afterYourTick(std::span<const core::LockResult> locks, uint64_t frame) {
@@ -265,6 +271,7 @@ bool Versus::endRound(const core::Game& you, uint64_t nowNs) {
         t.pieces += sides[i]->stats.pieces;
         t.attack += sides[i]->stats.attack;
         t.garbageCleared += sides[i]->stats.garbageCleared;
+        t.garbageReceived += sides[i]->stats.garbageReceived;
         t.seconds += sides[i]->seconds();
     }
     return std::max(match.wins[0], match.wins[1]) >= kVersusRounds;

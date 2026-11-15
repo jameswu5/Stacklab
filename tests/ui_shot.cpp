@@ -474,7 +474,7 @@ int main(int argc, char** argv) {
     }
 
     // Versus mid-round with clears named and garbage on its way, then a round's card and the match's results.
-    const Mode& versusMode = kModes[kModeCount - 1];
+    const Mode& versusMode = *std::find_if(std::begin(kModes), std::end(kModes), [](const Mode& m) { return m.versus; });
     Versus versus;
     core::Game you = sampleGame();
     you.stats.attack = 9;
@@ -526,8 +526,8 @@ int main(int argc, char** argv) {
         save("versus-round");
         versus.match.wins = {7, 4};
         versus.match.rounds = 11;
-        versus.match.totals[0] = {402, 260, 31, 255.4};
-        versus.match.totals[1] = {380, 199, 22, 255.4};
+        versus.match.totals[0] = {.pieces = 402, .attack = 260, .garbageCleared = 31, .garbageReceived = 180, .attackFrom = {90, 64, 70, 20, 16}, .emptyClears = 41, .seconds = 255.4};
+        versus.match.totals[1] = {.pieces = 380, .attack = 199, .garbageCleared = 22, .garbageReceived = 240, .attackFrom = {70, 60, 49, 12, 8}, .emptyClears = 18, .seconds = 255.4};
         ui.beginFrame();
         ui.drawVersus({&versusMode, &you, &versus, true, nullptr, "R to retry, Escape for the menu", matches, "TR 20.5k: 2.08 PPS"});
         save("versus-results");

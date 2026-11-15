@@ -4,6 +4,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstdio>
+#include <numeric>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1872,6 +1873,12 @@ void testVersusRound() {
     assert(playAllocations == 0);
     const Match match = play.versus->match;
     assert(match.rounds == 1 && match.wins[0] + match.wins[1] <= 1 && !play.over);
+    // The results' breakdown accounts for every line of attack, and the garbage each side took.
+    for (int side = 0; side < 2; side++) {
+        const SideTotals& t = match.totals[side];
+        assert(std::accumulate(t.attackFrom.begin(), t.attackFrom.end(), 0) == t.attack);
+        assert(t.garbageReceived == (side == 0 ? play.game : bot).stats.garbageReceived);
+    }
 
     // The round card, then a new round on a new seed that keeps the score.
     play.stepTo(now + kRoundCardNs / 2);

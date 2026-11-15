@@ -27,9 +27,14 @@ struct Callout {
     bool any = false;
 };
 
+// Where a side's attack came from, for the results.
+enum AttackSource { FromSpins, FromQuads, FromOther, FromSurge, FromPcs, kAttackSources };
+
 // One side's totals over the match's rounds so far, for the results.
 struct SideTotals {
-    int pieces = 0, attack = 0, garbageCleared = 0;
+    int pieces = 0, attack = 0, garbageCleared = 0, garbageReceived = 0;
+    std::array<int, kAttackSources> attackFrom{};  // before cancelling, as attack is
+    int emptyClears = 0;  // clears that sent nothing
     double seconds = 0;
 };
 
