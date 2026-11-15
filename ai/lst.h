@@ -22,4 +22,9 @@ Rows rowsOf(const core::Board& board);
 // that TSD, column 3 is a one-wide gap nothing but an I can fill).
 bool lstAlive(const Rows& rows);
 
+// How ready the next T-spin double over the well is, 0 to 1: at the lowest row y with
+// columns 1 and 3 filled and columns 1-3 open in row y + 1, the share of the 14 other cells
+// the TSD clears that are filled, halved without an overhang over column 1 or 3. 0 without one.
+double lstSlot(const Rows& rows);
+
 }  // namespace ai

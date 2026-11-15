@@ -13,9 +13,10 @@
 #include "core/game.h"
 
 // A placement is fine when the bot's best line from it is this close to its best line
-// from any placement. ponytail: hand-picked from self-play, where same-depth roots split
-// into near-ties (under about 3) and real differences (8 and up); tune by feel.
-constexpr float kLstFineMargin = 3;
+// from any placement. ponytail: hand-picked from self-play, where about 75% of runner-ups
+// fall within it (as 3 did before the slot terms, when gaps split into near-ties under 4 and
+// real differences 10 and up; now they spread evenly); tune by feel.
+constexpr float kLstFineMargin = 6;
 
 enum class LstVerdict { None, Fine, Worse, Fatal };
 
