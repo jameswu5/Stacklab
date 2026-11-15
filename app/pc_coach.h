@@ -20,8 +20,9 @@
 constexpr int kPcGoal = 10;  // in one run of 40 lines
 // The owner trains 4-line PCs, with 2-line ones allowed, so a 6-line PC reads as "No PC" and ends the streak.
 constexpr int kPcMaxLines = 4;
-// An opener's TSDs and its PC: Black Tea Cannon's 8-height PC takes 8.
-constexpr int kOpenerMaxLines = 10;
+// An opener's spins and its PC: BT Cannon's TSD, TST, C-spin triple, then a TSD and PC take 14.
+constexpr int kOpenerMaxLines = 14;
+constexpr int kOpenerPcLines = 6;  // the PC solver's limit in Opener practice: BT Cannon's last stage is a 6-line TSD and PC
 
 // The shortest PC is 2 lines, so 10 PCs can take fewer than 40.
 inline bool pcGoalOutOfReach(int pcs, int linesLeft) { return pcs + linesLeft / 2 < kPcGoal; }
@@ -43,7 +44,7 @@ struct PcProgress {
 
 // A four.lol perfect-clear setup, from data/four-lol/pc-setups.json, which
 // tools/four_lol_setups.py makes. The data is for personal use, so it isn't in git.
-constexpr int kSetupRows = 6;  // an opener's second TSD stands 6 high; PC setups use 4
+constexpr int kSetupRows = 10;  // BT Cannon's C-spin stands 9 high; PC setups use 4
 struct PcSetup {
     int residue = 0;  // an opener's: its stage, the TSDs or other line clears before it
     std::string name, chance, condition;  // condition is four.lol's text, shown as it is

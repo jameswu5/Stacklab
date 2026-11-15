@@ -193,30 +193,34 @@ struct SetupBuild {
             hand[static_cast<int>(hold)]++;
             hand[static_cast<int>(current)]++;
             for (int k = next; k < known; k++) hand[static_cast<int>(order[k])]++;
+            // Past the pool, whole bags: as many as the pieces still to come need.
+            int unknown = 0;
+            for (int piece = 1; piece < 8; piece++) unknown += std::max((cells[piece] + 3) / 4 + setup.need[piece] - hand[piece], 0);
+            const int bags = std::max(unknown - std::popcount(pool), 0) / 7 + (std::max(unknown - std::popcount(pool), 0) % 7 != 0);
             for (int piece = 1; piece < 8; piece++)
-                if ((cells[piece] + 3) / 4 + setup.need[piece] > hand[piece] + (pool >> piece & 1)) return false;
+                if ((cells[piece] + 3) / 4 + setup.need[piece] > hand[piece] + (pool >> piece & 1) + bags) return false;
             return true;
         }
         if (cells[static_cast<int>(current)] > 0) {
             search.run(board, core::spawnFalling(current), query.rules);
-            std::array<uint64_t, 8> masks{};  // distinct cell sets, as symmetric rotations repeat them
+            std::array<std::bitset<kSetupRows * 10>, 8> masks{};  // distinct cell sets, as symmetric rotations repeat them
             int count = 0;
             for (const ai::Placement& placement : search.placements) {
-                uint64_t mask = 0;
+                std::bitset<kSetupRows * 10> mask;
                 bool own = true;
                 for (const core::Cell& cell : search.cells(placement)) {
                     const int i = cell.y * 10 + cell.x;
                     own = own && cell.y < kSetupRows && setup.cells[i] == current && board.cells[i] == core::Piece::None;
-                    if (own) mask |= uint64_t{1} << i;
+                    if (own) mask[i] = true;
                 }
                 if (own && count < 8 && std::find(masks.begin(), masks.begin() + count, mask) == masks.begin() + count) masks[count++] = mask;
             }
             for (int k = 0; k < count; k++) {
                 for (size_t i = 0; i < setup.cells.size(); i++)
-                    if (masks[k] >> i & 1) board.cells[i] = current;
+                    if (masks[k][i]) board.cells[i] = current;
                 if (from(at(next), next + 1, hold, true)) return true;
                 for (size_t i = 0; i < setup.cells.size(); i++)
-                    if (masks[k] >> i & 1) board.cells[i] = core::Piece::None;
+                    if (masks[k][i]) board.cells[i] = core::Piece::None;
             }
         }
         if (!canHold) return false;
@@ -325,7 +329,7 @@ void PcCoach::fillQuery(const core::Game& game, ai::PcQuery& query) const {
     query.queue.assign(game.queue.begin(), game.queue.begin() + previews);
     query.bagLeft = ai::pcBagLeft(seen);
     query.rules = game.rules;
-    query.maxLines = kPcMaxLines;
+    query.maxLines = style == PcStyle::Opener ? kOpenerPcLines : kPcMaxLines;
 }
 
 void PcCoach::ask(const core::Game& game) {

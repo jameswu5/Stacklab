@@ -10,7 +10,7 @@ the block of rows on the floor. Gray cells (X) are the starting board, and each 
 cells are split into pieces, the targets. The queue is an order a player can build in
 (see build_order), with the T-spin last. With --openers, each opener's stages become one file of setups for Opener practice, in
 PC practice's format (tools/four_lol_setups.py) with the stage as the residue: the stage's
-setup page cut to its floor block (up to 6 rows, T-spin included, the last stage's gray
+setup page cut to its floor block (up to 10 rows, T-spin included, the last stage's gray
 cells as X), followed by every stage mirrored.
 data/four-lol/ is gitignored: four.lol's content is for personal use only.
 """
@@ -136,7 +136,7 @@ SWAP = str.maketrans("LJSZ", "JLZS")
 
 def opener_setup(entry):
     rows = list(reversed(floor_block(setup_page(entry["boards"]))))
-    assert 1 <= len(rows) <= 6, entry["name"]
+    assert 1 <= len(rows) <= 10, entry["name"]
     return {"residue": entry["stage"], "name": entry["name"], "chance": entry["chance"], "condition": entry["condition"],
             "board": rows, "need": "", "hold": ""}
 

@@ -442,6 +442,7 @@ int main(int argc, char** argv) {
     };
     openerShot("Black Tea Cannon", 0, 1, "ISZ", "opener-btc");
     openerShot("TKI", 1, 6, "SZO", "opener-tki");
+    openerShot("BT Cannon", 0, 6, "SO", "opener-bt");
     for (bool dark : {false, true}) {
         shot(practice, false, "practice", dark);
         shot(practice, true, "practice-results", dark);

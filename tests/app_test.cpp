@@ -1558,6 +1558,28 @@ void testPcSetups() {
     query.bagLeft = 1 << static_cast<int>(Piece::I) | 1 << static_cast<int>(Piece::S);
     assert(pcSetupBuildable(setups[0], query, search));  // the I may come after the previews
 
+    // A setup 10 rows high: an I, an O on it, and the next bag's I on top.
+    {
+        std::ofstream(path) << R"json([
+ {"residue": 0, "name": "Tower", "chance": "", "condition": "", "need": "", "hold": "",
+  "board": ["I.........", "I.........", "I.........", "I.........", "OO........", "OO........", "I.........", "I.........", "I.........", "I........."]}
+])json";
+    }
+    const std::vector<PcSetup> tower = loadPcSetups(path);
+    assert(tower.size() == 1);
+    ai::PcQuery tall;
+    tall.current = Piece::I;
+    tall.queue = {Piece::O};
+    tall.bagLeft = 0;
+    assert(pcSetupBuildable(tower[0], tall, search));
+    tall.board.at(1, 9) = Piece::I;  // beside the top I, whose cells reach past 64
+    assert(!pcSetupFits(tower[0], 0, Piece::None, tall.board));
+    tall.board = {};
+    tall.current = Piece::O;
+    tall.queue = {};
+    tall.bagLeft = 1 << static_cast<int>(Piece::I) | 1 << static_cast<int>(Piece::J);
+    assert(!pcSetupBuildable(tower[0], tall, search));  // two Is, but one is left in the bag and J has nowhere to go
+
     // The owner's case: residue 0, hold empty, queue L I J T O Z S. The drawn PCO puts L on top
     // of J and O, and I must wait in hold, so it can't be built; the mirrored one can.
     {
